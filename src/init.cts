@@ -1464,6 +1464,7 @@ function cmdInitQuick(
 
   const result: Record<string, unknown> = {
     planner_model: resolveModelInternal(cwd, 'gsd-planner'),
+    researcher_model: resolveModelInternal(cwd, 'gsd-phase-researcher'),
     executor_model: resolveModelInternal(cwd, 'gsd-executor'),
     checker_model: resolveModelInternal(cwd, 'gsd-plan-checker'),
     verifier_model: resolveModelInternal(cwd, 'gsd-verifier'),
