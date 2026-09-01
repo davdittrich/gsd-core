@@ -2017,6 +2017,22 @@ describe('cmdInitQuick', () => {
     assert.ok(output.slug.length <= 40, `Slug should be <= 40 chars, got ${output.slug.length}: "${output.slug}"`);
   });
 
+  test('returns the researcher model override', () => {
+    const researcherOverride = 'test-researcher-model';
+    fs.writeFileSync(
+      path.join(tmpDir, '.planning', 'config.json'),
+      JSON.stringify({
+        model_overrides: { 'gsd-phase-researcher': researcherOverride },
+      })
+    );
+
+    const result = runGsdTools('init quick', tmpDir);
+    assert.ok(result.success, `Command failed: ${result.error}`);
+
+    const output = JSON.parse(result.output);
+    assert.strictEqual(output.researcher_model, researcherOverride);
+  });
+
   test('returns quick branch name when quick_branch_template is configured', () => {
     fs.writeFileSync(
       path.join(tmpDir, '.planning', 'config.json'),

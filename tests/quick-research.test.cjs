@@ -117,6 +117,47 @@ describe('quick workflow: research step', () => {
     );
   });
 
+  test('research Agent uses researcher role bindings end to end', () => {
+    content = expandWorkflowSections(workflowPath);
+    const researchStart = content.indexOf('Step 4.75');
+    const plannerStart = content.indexOf('Step 5:', researchStart);
+    assert.ok(researchStart !== -1, 'Step 4.75 anchor should exist');
+    assert.ok(plannerStart > researchStart, 'Step 5 should follow Step 4.75');
+
+    const researchSection = content.slice(researchStart, plannerStart);
+    assert.ok(researchSection.length > 0, 'research section should be non-empty');
+    const agentStart = researchSection.indexOf('Agent(');
+    const agentEnd = researchSection.indexOf('\n)', agentStart);
+    assert.ok(agentStart !== -1, 'research Agent call should exist');
+    assert.ok(agentEnd > agentStart, 'research Agent payload should be non-empty');
+    const researchAgent = researchSection.slice(agentStart, agentEnd);
+
+    assert.deepStrictEqual(
+      {
+        hostSkillBinding: content.includes(
+          'AGENT_SKILLS_RESEARCHER=$(gsd_run query agent-skills gsd-phase-researcher)'
+        ),
+        modelParsed: content
+          .slice(content.indexOf('Parse JSON for:'), content.indexOf('\n', content.indexOf('Parse JSON for:')))
+          .includes('researcher_model'),
+        researcherPersona: researchAgent.includes('${AGENT_SKILLS_RESEARCHER}'),
+        researcherSubagent: researchAgent.includes('subagent_type="gsd-phase-researcher"'),
+        researcherModel: researchAgent.includes('model="{researcher_model}"'),
+        plannerPersona: researchAgent.includes('${AGENT_SKILLS_PLANNER}'),
+        plannerModel: researchAgent.includes('model="{planner_model}"'),
+      },
+      {
+        hostSkillBinding: true,
+        modelParsed: true,
+        researcherPersona: true,
+        researcherSubagent: true,
+        researcherModel: true,
+        plannerPersona: false,
+        plannerModel: false,
+      }
+    );
+  });
+
   test('research step spawns gsd-phase-researcher', () => {
     content = expandWorkflowSections(workflowPath);
     const researchSection = content.substring(
