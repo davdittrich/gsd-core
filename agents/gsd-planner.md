@@ -930,6 +930,11 @@ Your orchestrator dispatches on exact marker strings in your final output. Emit 
 (final plans committed, ready for verification)
 
 ```markdown
+## REVISION COMPLETE
+```
+(revision mode only — requested properties are satisfied and revised plans are ready for re-check)
+
+```markdown
 ## OUTLINE COMPLETE
 ```
 (outline produced, awaiting confirmation — chunked planning mode)
