@@ -1555,6 +1555,43 @@ describe('issue-69: applySurface preserves nested skill layout (no re-flatten)',
       'After applySurface: gsd-plan-phase/SKILL.md must remain at top level (#924)',
     );
   });
+
+  test('Kimi surface materialization preserves recursive artifacts and project grants (#4211)', (t) => {
+    process.env.GSD_TEST_MODE = '1';
+    const home = tmpDir('gsd-4211-home-');
+    const projectDir = tmpDir('gsd-4211-project-');
+    t.after(() => {
+      cleanup(home);
+      cleanup(projectDir);
+    });
+    fs.mkdirSync(path.join(projectDir, '.planning'), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, '.planning', 'config.json'), JSON.stringify({
+      agent_tools: { 'gsd-executor': ['WebSearch'] },
+    }));
+
+    const configDir = path.join(home, '.config', 'agents');
+    const subagentsDir = path.join(configDir, 'agents', 'subagents');
+    fs.mkdirSync(subagentsDir, { recursive: true });
+    fs.writeFileSync(path.join(subagentsDir, 'user-owned.yaml'), 'name: user-owned\n');
+
+    const manifest = loadSkillsManifest(REAL_COMMANDS_DIR);
+    const layout = resolveRuntimeArtifactLayout('kimi', configDir, 'global');
+    applySurface(configDir, layout, manifest, CLUSTERS, undefined, {
+      homedir: () => home,
+      projectDir,
+    });
+
+    assert.ok(fs.existsSync(path.join(configDir, 'agents', 'gsd.yaml')));
+    assert.ok(fs.existsSync(path.join(configDir, 'agents', 'gsd.md')));
+    assert.ok(fs.existsSync(path.join(subagentsDir, 'gsd-executor.yaml')));
+    assert.ok(fs.existsSync(path.join(subagentsDir, 'gsd-executor.md')));
+    assert.ok(!fs.existsSync(path.join(configDir, 'agents', 'gsdgsd.md')));
+    assert.ok(fs.existsSync(path.join(subagentsDir, 'user-owned.yaml')));
+    assert.match(
+      fs.readFileSync(path.join(subagentsDir, 'gsd-executor.yaml'), 'utf8'),
+      /kimi_cli\.tools\.web:SearchWeb/,
+    );
+  });
 });
   });
 }
