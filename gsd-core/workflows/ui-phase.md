@@ -262,19 +262,9 @@ Do NOT re-ask the user questions that are already answered.
 </revision>
 ```
 
-- **If the researcher returns `## REVISION_CONFLICT`:** do NOT increment `revision_count` and do
-  NOT re-spawn the checker — a conflict is not resolvable by re-running the same loop. Present the
-  conflict and its alternatives to the user and ask which to take: adopt a named alternative /
-  override the named constraint and apply the hint / amend the constraint itself. Every option
-  resolves the conflict — accepting the spec with the BLOCK still open is NOT offered here, because
-  the blocking `required_property` still fails; that choice belongs to the cap escalation below.
-  Re-spawn the researcher with the chosen resolution and return to this step.
-
-  **Bounded:** a conflict naming the SAME `required_property` twice in a row is a stall, and so is
-  the THIRD conflict return of this loop whatever property it names — alternating property names
-  would otherwise never trip the repeat rule. Stop re-spawning and escalate as a stall, so
-  declining to spend an iteration cannot make this path unbounded.
-- **On any other return:** increment `revision_count`, then re-spawn checker (step 7)
+- **On `## REVISION_CONFLICT`:** do NOT increment `revision_count` or check. Present alternatives to the user; ask them to adopt a named alternative, override the named constraint and apply the hint, or amend the constraint; accepting the BLOCK is NOT offered here. Derive sorted unique `(issue_identity, required_property)` keys. Any canonical conflict key repeated in consecutive returns, or the THIRD conflict return, escalates as a stall. Re-spawn with sanitized identity/choice pairs and return to this step.
+- **Only on `## UI-SPEC COMPLETE`:** increment `revision_count`, then re-spawn checker (step 7).
+- **Otherwise (unknown, empty, or both markers):** offer Retry or Stop. Do not check or increment.
 
 **If `revision_count` >= 2:**
 ```

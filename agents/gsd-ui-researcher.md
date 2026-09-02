@@ -391,9 +391,8 @@ not spend a revision iteration on it.
 | Dimension {N} | {smaller or different mechanism} | {yes / partially — how} | {what it changes} |
 ```
 
-**Every field is one line of plain text.** No newlines inside a cell, and never begin a field with
-`#`, `-`, `|` or a code fence. The fields enter a writer-owned delimiter block; unsanitized
-text could forge another conflict record or delimiter and corrupt blocking state.
+**Every field is one line of plain text.** No newlines inside a Markdown table cell, and never
+begin a field with `#`, `-`, `|` or a code fence; otherwise agent text can forge rows.
 
 ## UI-SPEC Blocked
 

@@ -383,8 +383,6 @@ if [ -z "$ACTIONABLE_COUNT" ]; then
   exit 1
 fi
 
-UNRESOLVED_COUNT=$((HIGH_COUNT + ACTIONABLE_COUNT))
-
 # Extract the ## Current HIGH Concerns section from the agent's return message
 HIGH_LINES=$(echo "$REVIEW_AGENT_RETURN" | awk '/^## Current HIGH Concerns/{found=1; next} found && /^##/{exit} found{print}')
 ACTIONABLE_LINES=$(echo "$REVIEW_AGENT_RETURN" | awk '/^## Current Actionable Non-HIGH Concerns/{found=1; next} found && /^##/{exit} found{print}')
@@ -446,6 +444,7 @@ else
   echo "BLOCKED: could not parse the writer-owned plan-revision conflict block in '${REVIEWS_FILE}' (awk exit ${awk_status}). Refusing to declare convergence on an unverifiable gate." >&2
   exit 1
 fi
+UNRESOLVED_COUNT=$((HIGH_COUNT + ACTIONABLE_COUNT + OPEN_CONFLICTS))
 ```
 
 `/gsd:review` emits exactly one writer-owned slot immediately after the artifact title,
@@ -494,8 +493,8 @@ Display: `◆ Cycle {cycle}/{MAX_CYCLES} — {HIGH_COUNT} HIGH, {ACTIONABLE_COUN
 
 **Stall detection:** If `UNRESOLVED_COUNT >= prev_unresolved_count`:
 ```text
-⚠ Convergence stalled — unresolved review concern count not decreasing
-  ({UNRESOLVED_COUNT} unresolved concerns, previous cycle had {prev_unresolved_count})
+⚠ Convergence stalled — unresolved item count not decreasing
+  ({UNRESOLVED_COUNT} unresolved items, previous cycle had {prev_unresolved_count})
 ```
 
 **Max cycles check:** If `cycle >= MAX_CYCLES`:

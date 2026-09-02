@@ -119,6 +119,14 @@ gsd_run query commit "fix($PHASE): revise plans based on checker feedback" --fil
 | 16-01 | Added <verify> to Task 2 | task_completeness |
 | 16-02 | Added logout task | requirement_coverage (AUTH-02) |
 
+### Applied Conflict Resolutions
+
+| Issue | Chosen resolution |
+|-------|-------------------|
+| {issue_identity} | {exact chosen_resolution from prompt} |
+
+Omit this section when the prompt has no conflict resolutions.
+
 ### Files Updated
 
 - .planning/phases/16-xxx/16-01-PLAN.md

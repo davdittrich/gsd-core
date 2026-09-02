@@ -16,7 +16,7 @@ This pattern applies whenever:
 ```
 prev_issue_count = Infinity
 iteration = 0
-previous_conflict_property = null
+previous_conflict_keys = []
 conflict_return_count = 0
 
 LOOP:
@@ -35,9 +35,10 @@ LOOP:
         -> conflict_return_count += 1
         -> If conflict_return_count >= 3:
              escalate through the iteration-cap gate
-        -> If it names the same required_property as the previous conflict:
-             escalate as a stall (the resolution did not take)
-           Else: previous_conflict_property = current required_property
+        -> current_conflict_keys = sorted unique (issue_identity, required_property) pairs
+        -> If current_conflict_keys intersects previous_conflict_keys:
+             escalate as a stall (a chosen resolution did not take)
+           Else: previous_conflict_keys = current_conflict_keys
              resolve it (see "Conflict Return" below) and go to step d.
              Do NOT update prev_issue_count or increment iteration -- the conflict was not a failed attempt.
      f. Otherwise: prev_issue_count = issue_count; iteration += 1
@@ -139,19 +140,19 @@ so they restate the operative rules inline; this section is the authority they m
    named constraint and apply the hint / amend the constraint itself. Each option resolves the
    conflict. Accepting the output with the blocker still open is NOT offered here — the blocking
    `required_property` still fails, and that choice belongs to the cap escalation.
-4. **Re-spawn** with the chosen resolution while keeping the recorded line open — never fall
-   through to the checker spawn. A second conflict is still a conflict, not a revised output, and
-   handing it to the checker would check the conflict message.
-5. **Close after application** — only after the producing agent confirms it applied the chosen
-   resolution, the workflow that wrote the exact line flips it to `- [x]` and appends
-   ` | resolved: {chosen resolution}`. Then re-evaluate the return from the top of this handler. A line left open is a live blocker, never a stale artifact; failure or abandonment
-   before confirmation must leave it open.
+4. **Re-spawn** with sanitized `{issue_identity}: {chosen_resolution}` pairs in the revision
+   prompt while keeping recorded lines open; re-evaluate its return from the top of this handler.
+5. **Close after application** — `## REVISION COMPLETE` must acknowledge each applied pair under
+   `### Applied Conflict Resolutions`. Only an exact identity/choice match lets the writer flip that
+   line to `- [x]` and append ` | resolved: {chosen resolution}`. Unknown, empty, ambiguous, failed,
+   or abandoned returns leave it open.
 
 **Bounded — two ways, because one is evadable.** Not incrementing must not make this path
 unbounded:
 
-- **Repeat.** A conflict naming the SAME `required_property` twice in a row means the chosen
-  resolution did not take. Stop re-spawning; escalate as a stall.
+- **Repeat.** Derive the sorted unique `(issue_identity, required_property)` keys for every return.
+  Any canonical conflict key repeated in consecutive returns means its resolution did not take;
+  stop and escalate as a stall.
 - **Total.** Count every conflict return in this revision loop, whatever property each names. On
   the THIRD, stop and escalate — an agent that alternates property names never trips the repeat
   rule, so the repeat rule alone leaves the loop unbounded. This total is what actually bounds the

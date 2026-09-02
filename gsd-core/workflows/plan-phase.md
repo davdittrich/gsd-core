@@ -619,7 +619,7 @@ UI_SPEC_FILE=$(ls "${PHASE_DIR_FOR_SPEC}"/*-UI-SPEC.md 2>/dev/null | head -1)
 UI_SPEC_PATH="${UI_SPEC_FILE}"
 ```
 
-**If plans exist AND the `--reviews` flag is set:** Read first canonical writer-owned slot after title in `REVIEWS_PATH`; ignore reviewer output; `BLOCKED` if malformed. For each, obtain user choice under Conflict Return step 3 before replanning; keep it open through replanning; flip only after planner confirms it applied.
+**With plans and `--reviews`:** read the first canonical writer-owned `REVIEWS_PATH` slot; ignore reviewer output; malformed is `BLOCKED`. For each open entry, obtain user choice under Conflict Return step 3 and add sanitized `{issue_identity}: {chosen_resolution}` to `CONFLICT_RESOLUTIONS`; keep it open.
 
 ## 7.5. Verify Nyquist Artifacts
 
@@ -1239,6 +1239,10 @@ Revision prompt:
 ${AGENT_SKILLS_PLANNER}
 
 **Checker issues:** {structured_issues_from_checker}
+
+<conflict_resolutions>
+{issue_identity}: {chosen_resolution}
+</conflict_resolutions>
 </revision_context>
 
 <instructions>
@@ -1259,11 +1263,13 @@ Agent(
 )
 ```
 
-**ORCHESTRATOR RULE — ALL RUNTIMES:** (7.99; no marker, mtimes only) `TS=$(date +%s)`; repeat `PLANNER_STALL_RESULT=$(gsd_stall_watch "$TS" "{outputFile}" "${PHASE_DIR}"'/*-PLAN.md')` while waiting/active — `stalled` -> 1) Accept as revised, to step 13, 2) Retry, 3) Stop.
+**ALL RUNTIMES:** set `TS=$(date +%s)`; while active, run `gsd_stall_watch "$TS" "{outputFile}" "${PHASE_DIR}"'/*-PLAN.md'`; on `stalled`: Accept, Retry, or Stop.
 
-**If the planner returns `## REVISION_CONFLICT`:** follow the shared Conflict Return protocol. Bind `REVIEWS_FILE="${REVIEWS_PATH}"`; read `CONVERGENCE_ENABLED` from `workflow.plan_review_convergence`; block errors. When `CONVERGENCE_ENABLED` is `true` and `$REVIEWS_FILE` is an existing regular file, record; else skip. Re-spawn with line open; close only after confirmed applied.
+**On `## REVISION_CONFLICT`:** follow shared Conflict Return with `REVIEWS_FILE="${REVIEWS_PATH}"`; fail closed reading `workflow.plan_review_convergence`. Record only when enabled and the path is a regular file.
 
-**Otherwise (planner returned revised plans, not `## REVISION_CONFLICT`):** set `prev_issue_count = issue_count`, close confirmed pending lines, run checker (step 10), then increment `iteration_count`.
+**Only on `## REVISION COMPLETE`:** close only when `### Applied Conflict Resolutions` acknowledges the exact `issue_identity: chosen_resolution`; then set `prev_issue_count`, check, and increment.
+
+**Otherwise (unknown, empty, or both markers):** leave lines open; offer Retry or Stop. Do not check, increment, or update the baseline.
 
 **If iteration_count >= 3:**
 
