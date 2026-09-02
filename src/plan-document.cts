@@ -76,6 +76,8 @@ interface PlanTask {
    * normalises to null, same as every other optional attribute here).
    */
   trackerId: string | null;
+  /** Verbatim task block bounded by the next task opening, for task-scoped consumers. */
+  taskSource: string;
 }
 
 interface PlanDocument {
@@ -184,18 +186,13 @@ function parseXmlTasks(content: string): PlanTask[] {
     const nextStart = i + 1 < openings.length ? (openings[i + 1].index ?? content.length) : content.length;
     const window = content.slice(start, nextStart);
     const closeIdx = window.search(/<\/task\s*>/i);
-    const block = closeIdx === -1 ? window : window.slice(0, closeIdx);
+    const taskSource = closeIdx === -1 ? window : window.slice(0, closeIdx);
 
     const type = tagAttribute(openTag, 'type');
     const kind: TaskKind = type !== null && type.toLowerCase().startsWith('checkpoint')
       ? TASK_KIND.CHECKPOINT
       : TASK_KIND.AUTO;
 
-    // A checkpoint block has no <name>/<files>/<acceptance_criteria>/<done> in
-    // the shipped grammar. Reading them anyway would be harmless but dishonest:
-    // the caller must be able to tell "this element is absent because this kind
-    // of task has no such element" from "this element is missing and should not
-    // be".
     if (kind === TASK_KIND.CHECKPOINT) {
       return {
         index: i + 1,
@@ -206,6 +203,7 @@ function parseXmlTasks(content: string): PlanTask[] {
         acceptanceCriteria: [],
         done: null,
         trackerId: null,
+        taskSource,
       };
     }
 
@@ -213,11 +211,12 @@ function parseXmlTasks(content: string): PlanTask[] {
       index: i + 1,
       kind,
       type,
-      name: collapseWhitespace(elementBody(block, 'name')),
-      plannedFiles: splitFileList(elementBody(block, 'files')),
-      acceptanceCriteria: splitCriteria(elementBody(block, 'acceptance_criteria')),
-      done: collapseWhitespace(elementBody(block, 'done')),
+      name: collapseWhitespace(elementBody(taskSource, 'name')),
+      plannedFiles: splitFileList(elementBody(taskSource, 'files')),
+      acceptanceCriteria: splitCriteria(elementBody(taskSource, 'acceptance_criteria')),
+      done: collapseWhitespace(elementBody(taskSource, 'done')),
       trackerId: tagAttribute(openTag, 'tracker-id'),
+      taskSource,
     };
   });
 }
@@ -237,6 +236,7 @@ function parseMarkdownTasks(content: string): PlanTask[] {
     acceptanceCriteria: [],
     done: null,
     trackerId: null,
+    taskSource: match[0],
   }));
 }
 

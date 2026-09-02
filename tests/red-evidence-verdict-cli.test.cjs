@@ -17,29 +17,38 @@ const path = require('node:path');
 
 const { runNode } = require('./helpers/process-seam.cjs');
 const { createTempDir, cleanup } = require('./helpers.cjs');
+const { routeTaskCommand } = require('../gsd-core/bin/lib/task-command-router.cjs');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const GSD_TOOLS = path.join(REPO_ROOT, 'gsd-core', 'bin', 'gsd-tools.cjs');
 
+/** Create an isolated project so linked-worktree root resolution cannot redirect fixtures to the main checkout. */
+function createProject(t) {
+  const projectRoot = createTempDir('red-ev-project-');
+  fs.mkdirSync(path.join(projectRoot, '.planning'));
+  t.after(() => cleanup(projectRoot));
+  return projectRoot;
+}
+
 /** Run the arm and return its combined output; the seam never throws on exit code. */
-function runVerdict(args) {
-  const r = runNode([GSD_TOOLS, 'query', 'task', 'red-evidence-verdict', ...args], { cwd: REPO_ROOT });
+function runVerdict(args, projectRoot) {
+  const r = runNode([
+    GSD_TOOLS, 'query', 'task', 'red-evidence-verdict', '--project-dir', projectRoot, ...args,
+  ], { cwd: projectRoot });
   return `${r.stdout}${r.stderr}`;
 }
 
 describe('task red-evidence-verdict — path guards', () => {
   test('a symlink pointing outside the project is refused, not followed', (t) => {
+    const projectRoot = createProject(t);
     const outside = createTempDir('red-ev-outside-');
     const target = path.join(outside, 'outside.md');
     fs.writeFileSync(target, '<red_contract><target_test>x</target_test></red_contract>\n');
-    const link = path.join(REPO_ROOT, `.red-ev-escape-${process.pid}.md`);
+    const link = path.join(projectRoot, `.red-ev-escape-${process.pid}.md`);
     fs.symlinkSync(target, link);
-    t.after(() => {
-      fs.unlinkSync(link);
-      cleanup(outside);
-    });
+    t.after(() => cleanup(outside));
 
-    assert.match(runVerdict(['--task-file', path.basename(link), '--trailer', '{}']),
+    assert.match(runVerdict(['--task-file', path.basename(link), '--trailer', '{}'], projectRoot),
       /outside project scope/,
       'the containment guard must resolve symlinks before comparing against the project root — '
       + '`path.resolve` does not, so a symlink planted in the repo reads an arbitrary file '
@@ -47,8 +56,9 @@ describe('task red-evidence-verdict — path guards', () => {
       + 'does not enforce it is worse than none.');
   });
 
-  test('a directory path is refused cleanly, without throwing', () => {
-    const out = runVerdict(['--task-file', '.', '--trailer', '{}']);
+  test('a directory path is refused cleanly, without throwing', (t) => {
+    const projectRoot = createProject(t);
+    const out = runVerdict(['--task-file', '.', '--trailer', '{}'], projectRoot);
 
     assert.doesNotMatch(out, /EISDIR|at routeTask|at dispatchHostCommand/,
       'the module documents that it never throws; the CLI arm around it must not either. '
@@ -65,7 +75,7 @@ describe('task red-evidence-verdict — --changed-files membership', () => {
   // no `tests/` directory and no `.test.` infix, so nothing here can be
   // satisfied by a filename convention (LANG-01).
   const TRAILER = `red-evidence: ${JSON.stringify({
-    command: 'go test ./... -run TestDiscountReducesTotal',
+    command: JSON.stringify(['node', '--eval', 'process.exit(1)', 'TestDiscountReducesTotal']),
     exit_status: 1,
     target_test: 'TestDiscountReducesTotal',
     expected: { phase: 'test', class_or_mode: 'undefined: ApplyDiscount', subject: 'TestDiscountReducesTotal' },
@@ -76,13 +86,15 @@ describe('task red-evidence-verdict — --changed-files membership', () => {
     },
   })}`;
 
-  const withTaskFile = (t) => {
+  const withTaskFile = (t, projectRoot) => {
     const rel = `.red-ev-task-${process.pid}.md`;
-    fs.writeFileSync(path.join(REPO_ROOT, rel), `<task tdd="true">
+    fs.writeFileSync(path.join(projectRoot, rel), `<task tdd="true">
   <behavior>Applies a percentage discount and reduces the order total.</behavior>
   <files>pkg/pricing/pricing.go</files>
   <red_contract>
     <target_test>TestDiscountReducesTotal</target_test>
+    <program>node</program>
+    <argv_json>["--eval","process.exit(1)","TestDiscountReducesTotal"]</argv_json>
     <implementation_target>pricing.ApplyDiscount</implementation_target>
     <expected_failure>
       <phase>test</phase>
@@ -92,21 +104,22 @@ describe('task red-evidence-verdict — --changed-files membership', () => {
   </red_contract>
 </task>
 `);
-    t.after(() => fs.unlinkSync(path.join(REPO_ROOT, rel)));
     return rel;
   };
 
   test('the declared file itself satisfies membership', (t) => {
-    const out = runVerdict(['--task-file', withTaskFile(t), '--trailer', TRAILER,
-      '--changed-files', 'pkg/pricing/pricing_test.go']);
+    const projectRoot = createProject(t);
+    const out = runVerdict(['--task-file', withTaskFile(t, projectRoot), '--task-index', '1', '--trailer', TRAILER,
+      '--changed-files', 'pkg/pricing/pricing_test.go'], projectRoot);
     assert.match(out, /"verdict": "authorize"/,
       'the positive control: a commit that touched exactly the declared file must authorize. '
       + 'Without this, the decoy assertion below could pass simply by refusing everything.');
   });
 
   test('a same-basename file in a DIFFERENT directory does not satisfy membership (WR-01)', (t) => {
-    const out = runVerdict(['--task-file', withTaskFile(t), '--trailer', TRAILER,
-      '--changed-files', 'vendor/other/pricing_test.go']);
+    const projectRoot = createProject(t);
+    const out = runVerdict(['--task-file', withTaskFile(t, projectRoot), '--task-index', '1', '--trailer', TRAILER,
+      '--changed-files', 'vendor/other/pricing_test.go'], projectRoot);
     assert.match(out, /"verdict": "red_commit_not_failing"/,
       'WR-01: the membership check exists to prove the RED commit touched the file its own '
       + 'evidence names. Comparing basenames lets any same-named file anywhere in the tree '
@@ -122,10 +135,10 @@ describe('task red-evidence-verdict — --changed-files membership', () => {
 
 describe('task red-evidence-verdict — task-scoped execution', () => {
   test('executes only the selected contract and emits typed bounded observation metadata', (t) => {
+    const projectRoot = createProject(t);
     const plan = `.red-ev-plan-${process.pid}.md`;
-    const selectedTest = `.red-ev-selected-${process.pid}.test.cjs`;
-    fs.writeFileSync(path.join(REPO_ROOT, selectedTest), `const test = require('node:test'); test('selected red', () => { throw new Error('selected failure'); });\n`);
-    fs.writeFileSync(path.join(REPO_ROOT, plan), `<task type="auto">
+    const selectedTest = `red-ev-selected-${process.pid}.test.cjs`;
+    fs.writeFileSync(path.join(projectRoot, plan), `<task type="auto">
   <name>decoy</name><red_contract>
     <target_test>decoy.test.cjs</target_test><program>node</program><argv_json>["--eval","process.exit(0)","decoy.test.cjs"]</argv_json>
     <expected_failure><phase>test</phase><class_or_mode>assertion_failure</class_or_mode><subject>decoy</subject></expected_failure>
@@ -133,17 +146,12 @@ describe('task red-evidence-verdict — task-scoped execution', () => {
 </task>
 <task type="auto">
   <name>selected</name><red_contract>
-    <target_test>${selectedTest}</target_test><program>node</program><argv_json>["--test","${selectedTest}"]</argv_json>
+    <target_test>${selectedTest}</target_test><program>node</program><argv_json>["--eval","process.stderr.write('selected failure'); process.exit(1)","${selectedTest}"]</argv_json>
     <expected_failure><phase>test</phase><class_or_mode>assertion_failure</class_or_mode><subject>selected RED</subject></expected_failure>
   </red_contract>
 </task>\n`);
-    t.after(() => {
-      fs.unlinkSync(path.join(REPO_ROOT, plan));
-      fs.unlinkSync(path.join(REPO_ROOT, selectedTest));
-    });
-
     const trailer = JSON.stringify({
-      command: JSON.stringify(['node', '--test', selectedTest]),
+      command: JSON.stringify(['node', '--eval', "process.stderr.write('selected failure'); process.exit(1)", selectedTest]),
       exit_status: 1,
       target_test: selectedTest,
       expected: { phase: 'test', class_or_mode: 'assertion_failure', subject: 'selected RED' },
@@ -151,18 +159,64 @@ describe('task red-evidence-verdict — task-scoped execution', () => {
       location: { declared: { file: selectedTest, line: 1 }, observed: { file: selectedTest, line: 1 } },
     });
     const result = runNode([
-      GSD_TOOLS, 'query', 'task', 'red-evidence-verdict',
+      GSD_TOOLS, 'query', 'task', 'red-evidence-verdict', '--project-dir', projectRoot,
       '--task-file', plan, '--task-index', '2', '--trailer', trailer,
       '--changed-files', selectedTest, '--raw',
-    ], { cwd: REPO_ROOT });
+    ], { cwd: projectRoot });
 
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.exitCode, 0, result.stderr);
     const payload = JSON.parse(result.stdout);
     assert.deepEqual(Object.keys(payload).sort(), ['observed_exit_status', 'reason', 'stderr_captured', 'verdict']);
-    assert.equal(payload.verdict, 'authorize');
+    assert.equal(payload.verdict, 'authorize', JSON.stringify(payload));
     assert.equal(payload.observed_exit_status, 1);
     assert.equal(payload.stderr_captured, true);
     assert.doesNotMatch(result.stdout, /selected failure/);
     assert.doesNotMatch(result.stderr, /selected failure/);
+  });
+});
+
+
+describe('task red-evidence-verdict — selected execTool seam', () => {
+  test('passes only selected structured program and argv to execTool', (t) => {
+    const projectRoot = createProject(t);
+    const plan = 'selected-plan.md';
+    const targetTest = 'tests/selected-red.test.cjs';
+    fs.writeFileSync(path.join(projectRoot, plan), `<task type="auto">
+  <red_contract><target_test>${targetTest}</target_test><program>node</program>
+  <argv_json>["--test","${targetTest}"]</argv_json>
+  <expected_failure><phase>test</phase><class_or_mode>assertion_failure</class_or_mode><subject>selected RED</subject></expected_failure>
+  </red_contract>
+</task>`);
+
+    const trailer = JSON.stringify({
+      command: JSON.stringify(['node', '--test', targetTest]),
+      exit_status: 1,
+      target_test: targetTest,
+      expected: { phase: 'test', class_or_mode: 'assertion_failure', subject: 'selected RED' },
+      actual: { phase: 'test', class_or_mode: 'assertion_failure', subject: targetTest },
+      location: { declared: { file: targetTest, line: 1 }, observed: { file: targetTest, line: 1 } },
+    });
+    const calls = [];
+    const writes = [];
+    const originalWriteSync = fs.writeSync;
+    fs.writeSync = (fd, buffer, offset, length) => {
+      if (fd === 1) writes.push(Buffer.from(buffer).subarray(offset, offset + length).toString('utf8'));
+      return length;
+    };
+    t.after(() => { fs.writeSync = originalWriteSync; });
+
+    routeTaskCommand({
+      args: ['task', 'red-evidence-verdict', '--task-file', plan, '--task-index', '1',
+        '--trailer', trailer, '--changed-files', targetTest],
+      cwd: projectRoot,
+      raw: false,
+      execToolFn: (program, argv, options) => {
+        calls.push({ program, argv, options });
+        return { exitCode: 1, stdout: 'raw stdout is withheld', stderr: 'raw stderr is withheld', signal: null, error: null, timedOut: false };
+      },
+    });
+
+    assert.deepEqual(calls, [{ program: 'node', argv: ['--test', targetTest], options: { cwd: projectRoot, timeout: 30_000 } }]);
+    assert.doesNotMatch(writes.join(''), /raw stdout is withheld|raw stderr is withheld/);
   });
 });

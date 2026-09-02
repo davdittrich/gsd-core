@@ -14,7 +14,8 @@ const { output, error, ERROR_REASON } = ioMod;
 import { parseNamedArgsOrExit } from './command-arg-projection.cjs';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import redEvidencePredicateMod = require('./red-evidence-predicate.cjs');
-const { evaluateRedEvidence } = redEvidencePredicateMod;
+const { evaluateRedEvidence, parseRedContract } = redEvidencePredicateMod;
+import { execTool } from './shell-command-projection.cjs';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import planDocumentMod = require('./plan-document.cjs');
 const { parsePlanDocument } = planDocumentMod;
@@ -48,9 +49,13 @@ interface RouteTaskCommandOptions {
   args: string[];
   cwd: string;
   raw: boolean;
+  execToolFn?: typeof execTool;
 }
 
 interface PlanTaskLike {
+  index: number;
+  kind: string;
+  taskSource: string;
   trackerId: string | null;
 }
 
@@ -230,29 +235,25 @@ function routeResolveContent(
  * parsing, the call and printing, nothing else (D-17); every JSON parse and
  * key-set check lives in the pure evaluator module.
  */
-function routeRedEvidenceVerdict({ args, cwd, raw }: RouteTaskCommandOptions): void {
+function routeRedEvidenceVerdict({
+  args, cwd, raw, execToolFn,
+}: RouteTaskCommandOptions): void {
   const opts = parseNamedArgsOrExit(
     args,
-    { valueFlags: ['task-file', 'trailer', 'changed-files'], positionals: 2 },
+    { valueFlags: ['task-file', 'task-index', 'trailer', 'changed-files'], positionals: 2 },
     error,
   );
   const taskFile = opts['task-file'];
   const trailer = opts['trailer'];
   if (typeof taskFile !== 'string' || taskFile.length === 0) {
-    error('--task-file <path> is required for `task red-evidence-verdict`', ERROR_REASON.USAGE);
+    error('--task-file <path> is required for task red-evidence-verdict', ERROR_REASON.USAGE);
     return;
   }
   if (typeof trailer !== 'string') {
-    error('--trailer <json> is required for `task red-evidence-verdict`', ERROR_REASON.USAGE);
+    error('--trailer <json> is required for task red-evidence-verdict', ERROR_REASON.USAGE);
     return;
   }
 
-  // Resolve symlinks on BOTH sides before comparing: `path.resolve` does not,
-  // so a symlink planted inside the repo would pass a containment check done on
-  // the unresolved path and then be read anyway. `statSync().isFile()` subsumes
-  // the existence check and additionally rejects a directory, which would
-  // otherwise reach `readFileSync` and throw EISDIR out of a module documented
-  // as never throwing.
   let projectRoot: string;
   let realTaskPath: string;
   try {
@@ -270,33 +271,71 @@ function routeRedEvidenceVerdict({ args, cwd, raw }: RouteTaskCommandOptions): v
   }
   const taskContent = fs.readFileSync(realTaskPath, 'utf-8');
 
-  // Placed AFTER the path guards above, deliberately: the two existing
-  // cases in tests/red-evidence-verdict-cli.test.cjs invoke this arm with a
-  // deliberately bad --task-file and NO --changed-files, and assert on the
-  // path guards' own messages. A usage check placed earlier would report
-  // "--changed-files is required" first and turn both into casualties of
-  // an argument-order choice (#3770 D-1 revised, T-04.1-04).
+  const securityFlags = ['task-file', 'task-index', 'trailer', 'changed-files'];
+  const duplicate = securityFlags.find((flag) => args.filter((arg) => arg === `--${flag}`).length !== 1);
+  if (duplicate) {
+    error(`--${duplicate} must occur exactly once for task red-evidence-verdict`, ERROR_REASON.USAGE);
+    return;
+  }
+  const taskIndexText = opts['task-index'];
+  if (typeof taskIndexText !== 'string' || !/^[1-9]\d*$/.test(taskIndexText)) {
+    error('--task-index must be one canonical positive task index', ERROR_REASON.USAGE);
+    return;
+  }
   const changedFiles = opts['changed-files'];
   if (typeof changedFiles !== 'string') {
-    error(
-      '--changed-files <newline-delimited paths> is required for `task red-evidence-verdict`',
-      ERROR_REASON.USAGE,
-    );
+    error('--changed-files <newline-delimited paths> is required for task red-evidence-verdict', ERROR_REASON.USAGE);
     return;
   }
 
-  const result = evaluateRedEvidence(taskContent, trailer);
-  if (result.verdict === 'authorize' && typeof result.declared_file === 'string'
-    && !changedFilesInclude(changedFiles, result.declared_file)) {
+  const plan = parsePlanDocument(taskContent, realTaskPath) as { tasks?: PlanTaskLike[] };
+  const selected = (plan.tasks ?? []).find((task) => task.index === Number(taskIndexText));
+  if (!selected || selected.kind !== 'auto' || typeof selected.taskSource !== 'string') {
+    error('--task-index must select one executable task in the plan', ERROR_REASON.USAGE);
+    return;
+  }
+  const parsedContract = parseRedContract(selected.taskSource);
+  if (!parsedContract.ok) {
     output({
       verdict: 'red_commit_not_failing',
-      reason: `the commit's changed files do not include "${result.declared_file}", the file `
-        + 'the red-evidence trailer itself declares — matched by path segment',
+      reason: parsedContract.reason,
+      observed_exit_status: null,
+      stderr_captured: false,
     }, raw, undefined);
     return;
   }
 
-  output(result, raw, undefined);
+  const spawned = (execToolFn ?? execTool)(
+    parsedContract.plan.program,
+    parsedContract.plan.argv,
+    { cwd: projectRoot, timeout: 30_000 },
+  );
+  const observation = {
+    exit_status: Number.isInteger(spawned.exitCode) ? spawned.exitCode : null,
+    stderr_captured: typeof spawned.stderr === 'string',
+    spawn_error: spawned.error !== null && spawned.error !== undefined,
+    signal: spawned.signal ?? null,
+    timed_out: spawned.timedOut === true,
+  };
+  const result = evaluateRedEvidence(selected.taskSource, trailer, observation, parsedContract);
+  const publicResult = {
+    verdict: result.verdict,
+    reason: result.reason,
+    observed_exit_status: observation.exit_status,
+    stderr_captured: observation.stderr_captured,
+  };
+  if (result.verdict === 'authorize' && typeof result.declared_file === 'string'
+    && !changedFilesInclude(changedFiles, result.declared_file)) {
+    output({
+      verdict: 'red_commit_not_failing',
+      reason: `the commit's changed files do not include "${result.declared_file}"`,
+      observed_exit_status: observation.exit_status,
+      stderr_captured: observation.stderr_captured,
+    }, raw, undefined);
+    return;
+  }
+
+  output(publicResult, raw, undefined);
 }
 
 /**
@@ -361,14 +400,14 @@ function changedFilesInclude(changedFilesText: string, declaredFile: string): bo
       || (changed.includes('/') && declaredPath.endsWith(`/${changed}`)));
 }
 
-function routeTaskCommand({ args, cwd, raw }: RouteTaskCommandOptions): void {
+function routeTaskCommand({ args, cwd, raw, execToolFn }: RouteTaskCommandOptions): void {
   const subcommand = args[1];
   if (subcommand === 'resolve-content') {
     routeResolveContent({ args, cwd, raw });
     return;
   }
   if (subcommand === 'red-evidence-verdict') {
-    routeRedEvidenceVerdict({ args, cwd, raw });
+    routeRedEvidenceVerdict({ args, cwd, raw, execToolFn });
     return;
   }
   if (subcommand !== 'is-behavior-adding') {

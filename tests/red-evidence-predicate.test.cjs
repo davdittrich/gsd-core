@@ -66,6 +66,8 @@ function build(c) {
   const taskContent = [
     '<red_contract>',
     `<target_test>${c.planTargetTest}</target_test>`,
+    '<program>node</program>',
+    `<argv_json>${JSON.stringify(['--test', c.planTargetTest])}</argv_json>`,
     '<expected_failure>',
     `<phase>${c.expectedPhase}</phase>`,
     `<class_or_mode>${c.expectedClassOrMode}</class_or_mode>`,
@@ -76,9 +78,7 @@ function build(c) {
 
   const trailer = {
     actual: { phase: actualPhase, class_or_mode: actualClassOrMode, subject: actualSubject },
-    // `command` participates in no conjunct — only its non-emptiness is checked — so it
-    // is a fixed value here rather than another generated field.
-    command: 'x',
+    command: JSON.stringify(['node', '--test', c.planTargetTest]),
     exit_status: exitStatus,
     expected: trailerExpected,
     location: { declared: { file: c.declaredFile, line: c.declaredLine }, observed: observedPoint },
@@ -108,7 +108,13 @@ describe('evaluateRedEvidence — RED Predicate round-trip property (fast-check)
     fc.assert(
       fc.property(trailerCase, (c) => {
         const { taskContent, trailerText } = build(c);
-        const result = evaluateRedEvidence(taskContent, trailerText);
+        const result = evaluateRedEvidence(taskContent, trailerText, {
+          exit_status: c.exitZero ? 0 : c.nonZeroExit,
+          stderr_captured: true,
+          spawn_error: false,
+          signal: null,
+          timed_out: false,
+        });
         assert.equal(result.verdict, referenceVerdict(c));
       }),
       { numRuns: 500 },
@@ -152,7 +158,10 @@ describe('evaluateRedEvidence — selected invocation observation', () => {
       assert.equal(evaluateRedEvidence(task, trailer, invalidObservation).verdict, 'red_commit_not_failing');
     }
 
-    const forgedDisplay = trailer.replace(JSON.stringify(['node', '--test', 'tests/selected-red.test.cjs']), 'node --test tests/selected-red.test.cjs');
+    const forgedDisplay = trailer.replace(
+      JSON.stringify(JSON.stringify(['node', '--test', 'tests/selected-red.test.cjs'])),
+      JSON.stringify('node --test tests/selected-red.test.cjs'),
+    );
     assert.equal(evaluateRedEvidence(task, forgedDisplay, observation).verdict, 'red_commit_not_failing');
   });
 });
