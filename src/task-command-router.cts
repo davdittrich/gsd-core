@@ -425,9 +425,8 @@ function routeResolveContent(
 function routeRedEvidenceCapture({
   args, cwd, raw, execToolFn, gitToolFn, fsFn,
 }: RouteTaskCommandOptions): void {
-  const separatorIndexes = args.flatMap((arg, index) => arg === '--' ? [index] : []);
-  if (separatorIndexes.length !== 1) failCapture();
-  const separator = separatorIndexes[0];
+  const separator = args.indexOf('--');
+  if (separator === -1) failCapture();
   const prefix = args.slice(0, separator);
   const vector = args.slice(separator + 1);
   const opts = parseNamedArgsOrExit(

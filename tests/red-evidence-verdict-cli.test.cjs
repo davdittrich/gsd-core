@@ -482,12 +482,11 @@ describe('public CLI receipt lifecycle', () => {
         '雪',
         '--',
       ];
-      const publicPrefix = pick
-        ? ['--pick', 'exit_status', 'query', ...command]
-        : ['query', ...command];
+      const publicPrefix = ['query', ...command];
+      const projection = pick ? ['--pick', 'exit_status'] : [];
       const captured = runNode([
         GSD_TOOLS, ...publicPrefix, '--project-dir', root,
-        '--task-file', plan, '--task-index', '1', '--',
+        '--task-file', plan, '--task-index', '1', ...projection, '--',
         process.execPath, recorder, ...childArgs,
       ], { cwd: root });
 

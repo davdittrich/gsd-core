@@ -4550,6 +4550,21 @@ function resolveMainWorktreeCwd(cwd, deps = {}) {
 async function main() {
   let args = process.argv.slice(2);
 
+  // `task red-evidence-capture` owns every token after its first `--`.
+  // Isolate that tail before position-independent global parsing so child flags
+  // remain opaque, then restore it only after command/global validation.
+  let captureTail = null;
+  const captureArgs = args[0] === 'query' ? args.slice(1) : args;
+  const isRedEvidenceCapture = captureArgs[0] === 'task.red-evidence-capture'
+    || (captureArgs[0] === 'task' && captureArgs[1] === 'red-evidence-capture');
+  if (isRedEvidenceCapture) {
+    const separator = args.indexOf('--');
+    if (separator !== -1) {
+      captureTail = args.slice(separator);
+      args = args.slice(0, separator);
+    }
+  }
+
   // These two global-flag blocks (--json-errors, --exit-contract) MUST run
   // BEFORE the run-with-timeout interception below. run-with-timeout treats
   // args[0] (post `query` stripping) as the sentinel and otherwise passes the
@@ -4595,7 +4610,7 @@ async function main() {
   // name). Splice EVERY occurrence, not just the first — findExitContractFlag
   // only consults the first match, so a stray second token would otherwise
   // survive into the dispatcher and reproduce the same "Unknown command".
-  resolveContractVersion({ argv: process.argv, env: process.env });
+  resolveContractVersion({ argv: args, env: process.env });
   for (let i = args.length - 1; i >= 0; i--) {
     if (typeof args[i] === 'string' && args[i].startsWith('--exit-contract=')) {
       args.splice(i, 1);
@@ -4788,6 +4803,8 @@ async function main() {
   if (!projectDirExplicit && !SKIP_ROOT_RESOLUTION.has(command)) {
     cwd = findProjectRoot(cwd);
   }
+
+  if (captureTail) args.push(...captureTail);
 
   // When --pick is active, capture stdout and extract the requested field.
   // ADR-3473 §8.4 (#3365, #3358): an absent field or non-JSON command output
