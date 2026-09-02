@@ -255,6 +255,16 @@ const RULES = [
     ],
   },
   {
+    name: 'RED evidence prose parity',
+    match: path => [
+      'agents/gsd-executor.md',
+      'gsd-core/references/tdd.md',
+    ].includes(path),
+    tests: [
+      'tests/red-evidence-prose-parity.test.cjs',
+    ],
+  },
+  {
     name: 'agent prompts',
     match: path => path.startsWith('agents/'),
     tests: [

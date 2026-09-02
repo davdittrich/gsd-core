@@ -334,6 +334,7 @@ const DOCS_GUARD_TESTS = {
     'docs/pt-BR/README.md',
   ],
   'tests/progress-forensic.test.cjs': ['docs/COMMANDS.md'],
+  'tests/red-evidence-prose-parity.test.cjs': ['docs/COMMANDS.md', 'docs/INVENTORY.md'],
   'tests/repo-layout.test.cjs': ['docs/contributing/bootstrap.md'],
   'tests/reversibility-tagging.test.cjs': ['docs/reference/plan-md.md'],
   'tests/reviewer-docs-parity.test.cjs': [

@@ -417,7 +417,7 @@ When the plan frontmatter has `type: tdd`, the entire plan follows the RED/GREEN
 **Fail-fast rule:** An unexpected pass in the RED phase is the RED Contract's `halt` verdict in `~/.claude/gsd-core/references/tdd.md`. Apply it there.
 
 **Gate sequence validation:** After completing the plan, verify in git log:
-1. A `test(...)` commit exists AND carries a `red-evidence:` trailer whose contents satisfy the RED Predicate in `~/.claude/gsd-core/references/tdd.md` (RED gate), AND the commit's changed files include the file the trailer declares — checked by `changedFilesInclude` (`src/task-command-router.cts`) via `task.red-evidence-verdict`, not by filename pattern. A commit that merely exists is not RED evidence.
+1. A `test(...)` commit exists AND carries a `red-evidence:` trailer whose contents satisfy the RED Predicate in `~/.claude/gsd-core/references/tdd.md` (RED gate), AND `task.red-evidence-verdict` uses `--red-sha` to derive the commit's sole parent and exact NUL-delimited changed paths from Git before `changedFilesInclude` (`src/task-command-router.cts`) requires those paths to include the selected `<red_contract>`'s `target_test`. This is not a filename-pattern search, and a commit that merely exists is not RED evidence.
 2. A `feat(...)` commit exists after it (GREEN gate)
 3. Optionally a `refactor(...)` commit exists after GREEN (REFACTOR gate)
 

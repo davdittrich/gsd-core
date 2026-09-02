@@ -250,9 +250,10 @@ field comparisons, omitting `subject` because the predicate binds `actual.subjec
 values instead.
 
 The predicate applies no condition proving the target test exists; **Executor Gate
-Validation** below supplies that separately by requiring the RED commit to touch the file its own
-evidence reports the failure in, checked after selection rather than by filtering the search, and
-it fires for every `type: tdd` plan. `gsd-core/references/execute-mvp-tdd.md` repeats the same
+Validation** below supplies that separately by using `--red-sha` to derive the RED commit's sole
+parent and exact NUL-delimited changed paths from Git, then requiring those paths to include the
+selected `<red_contract>`'s `target_test` after selection rather than filtering the search. It fires
+for every `type: tdd` plan. `gsd-core/references/execute-mvp-tdd.md` repeats the same
 condition, but only under MVP+TDD, so it is not the live path on a project that sets `tdd_mode`
 alone. The predicate itself cannot tell whether the target test was ever written.
 
@@ -263,8 +264,8 @@ declaration that pre-committed to outside-in mode. It does not prove the missing
 message text. The admitted case is narrower than before: an unrelated missing dependency in the
 declared test file, at the same declared phase, the same declared class, and the same declared file
 and line — a same-basename, same-line collision the `location` conjunct alone does not distinguish
-from the plan's own declared failure site. Two controls compensate: **Executor Gate Validation**
-requires the RED commit to touch the file its own evidence names, and `implementation_target`
+from the plan's own declared failure site. Two controls compensate: **Executor Gate Validation** requires the internally derived RED
+changed paths to include the selected `<red_contract>`'s `target_test`, and `implementation_target`
 stays declared, so a human or a later coded gate can compare it against the recorded `command` and
 the message. Note
 that this state is strictly NARROWER than the one it replaces: the outside-in residual was
@@ -288,9 +289,9 @@ before: an unrelated assertion earlier in the body of the declared test, failing
 declared phase, the same declared class, and the same declared file and line — and, at a fixture
 phase, an unrelated fixture crash at that same declared file and line, which the `location`
 conjunct alone does not distinguish from the fixture the plan declared as the behavior under test.
-The same two controls compensate: **Executor Gate Validation** requires the RED commit to touch
-the file its own evidence names, and `implementation_target` stays declared for a human or a later
-coded gate to compare against. These residuals remain admitted, narrower than before, on the same
+The same two controls compensate: **Executor Gate Validation** requires the internally derived
+RED changed paths to include the selected `<red_contract>`'s `target_test`, and
+`implementation_target` stays declared for a human or a later coded gate to compare against. These residuals remain admitted, narrower than before, on the same
 terms as the outside-in
 residual's: they
 are one root cause with three surfaces, bound by the same declared-versus-observed collision the
@@ -525,7 +526,7 @@ exit "$STATUS"
 
 Every search matches the commit **subject**, never the message body: a commit that quotes a `test(...)` subject in its body would otherwise match, and since git logs newest-first the decoy would be selected over the real RED commit.
 
-**This block is illustrative, and it does not check membership at all.** Whether the RED commit actually touches the file its evidence declares is decided in exactly one place: `task.red-evidence-verdict` (`changedFilesInclude`, `src/task-command-router.cts`), which the task-scoped gate in `execute-phase.md` calls with the selected RED SHA. Read this block for the shape of the gate, never as a second specification of what membership admits.
+**This block is illustrative, and it does not check membership at all.** `task.red-evidence-verdict` (`changedFilesInclude`, `src/task-command-router.cts`) is the single membership authority: the task-scoped gate in `execute-phase.md` calls it with `--red-sha`, it derives that commit's sole parent and exact NUL-delimited changed paths from Git, and it requires those paths to include the selected `<red_contract>`'s `target_test`. Read this block for the shape of the gate, never as a second specification of what membership admits.
 
 The two RED failures are distinct. No commit whose subject matches `test({phase}-{plan}-{task-index}):` is `missing_red_commit` — there is nothing to read. A matching commit whose `red-evidence:` trailer value comes back empty is a missing RED gate — the commit exists but was made without evidence. Judging the trailer's contents against the RED Predicate **is** mechanised: the gate passes the trailer to `gsd_run query task.red-evidence-verdict` and proceeds only on verdict `authorize`. Any other verdict — `red_commit_not_failing`, `unexpected_pass` — trips the gate under the verdict's own name. Existence of a subject-matching commit authorizes nothing on its own. The predicate is in **RED Contract** above.
 

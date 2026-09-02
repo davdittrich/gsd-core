@@ -795,18 +795,23 @@ recorded command text or any test.
 | `--trailer` | **Yes** | RED commit's raw `red-evidence:` trailer text or JSON payload |
 | `--raw` | No | Machine-readable JSON output |
 
-Verdict obtains the RED commit's sole parent and exact NUL-delimited changed paths from Git. It
-requires that parent to equal the receipt's `pre_red_head`, that receipt plan/task/target values
-match the selected contract, that the trailer records the same integer exit status, that the local
-process terminated normally and nonzero, and that the commit changed the declared target path.
-Missing, stale, colliding, oversized, symlinked, malformed, or unconsumable receipts fail closed.
+`--red-sha` identifies the RED commit; verdict obtains its sole parent and exact NUL-delimited changed paths
+from Git. It requires that parent to equal the receipt's `pre_red_head`, that receipt
+plan/task/target values match the selected contract, that the trailer records the same integer exit
+status, that the local process terminated normally and nonzero, and that those changed paths include
+the selected `<red_contract>`'s `target_test`. The receipt is consumed terminally on every verdict
+path. Missing, stale, colliding, oversized, symlinked, malformed, or unconsumable receipts fail
+closed.
 
 **Exit codes:**
+
+Missing or duplicate required security flags produce a typed fail-closed verdict at exit `0`;
+malformed command shape or flag value exits non-zero.
 
 | Exit | Meaning |
 |------|---------|
 | `0` | A typed verdict was produced, including fail-closed evidence/Git/receipt outcomes |
-| non-zero | The CLI could not parse the command shape or a required flag |
+| non-zero | Malformed command shape or flag value prevented typed verdict production |
 
 **Output fields (JSON, exit 0 only):**
 
