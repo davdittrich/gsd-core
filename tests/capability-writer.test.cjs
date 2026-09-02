@@ -509,6 +509,30 @@ describe('capability-writer: setCapabilityState', () => {
     }
   });
 
+  test('Kimi materialization resolves agent_tools from the explicit project cwd (#4211)', () => {
+    process.env.GSD_TEST_MODE = '1';
+    const { rcd, cwd } = makeTempDirs();
+    try {
+      fs.writeFileSync(path.join(cwd, '.planning', 'config.json'), JSON.stringify({
+        agent_tools: { 'gsd-executor': ['WebSearch'] },
+      }));
+
+      const result = setCapabilityState(
+        cwd,
+        rcd,
+        [{ id: 'ui', enabled: false }],
+        { materialize: { runtime: 'kimi', scope: 'global' } },
+      );
+
+      assert.deepStrictEqual(result.errors, []);
+      const executor = fs.readFileSync(path.join(rcd, 'agents', 'subagents', 'gsd-executor.yaml'), 'utf8');
+      assert.match(executor, /kimi_cli\.tools\.web:SearchWeb/);
+    } finally {
+      cleanup(rcd);
+      cleanup(cwd);
+    }
+  });
+
 });
 
 // ─── Null-intermediate config tests ──────────────────────────────────────────
