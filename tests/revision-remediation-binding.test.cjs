@@ -337,6 +337,23 @@ describe('#3771 revision re-checks constraints and has a conflict path', () => {
     }
   });
 
+  test('gsd-planner declares and emits REVISION COMPLETE for successful revision returns', () => {
+    assert.match(PLANNER, /```markdown\r?\n## REVISION COMPLETE/,
+      'the producer must emit the exact marker required by revision workflows');
+    const plannerRow = CONTRACTS.split(/\r?\n/).find((l) => l.startsWith('| gsd-planner |'));
+    assert.ok(plannerRow, 'gsd-planner registry row must exist');
+    assert.match(plannerRow, /`## REVISION COMPLETE`/,
+      'the registry must declare the successful revision marker');
+    for (const consumer of [
+      'gsd-core/workflows/plan-phase.md',
+      'gsd-core/workflows/quick/steps/plan-checker-loop.md',
+      'gsd-core/workflows/verify-work.md',
+    ]) {
+      assert.ok(plannerRow.includes(consumer),
+        `gsd-planner's Consumed by must list ${consumer}`);
+    }
+  });
+
   test('agent documentation exposes the binding split and conflict outcome', () => {
     const plannerDocs = AGENT_DOCS.slice(
       AGENT_DOCS.indexOf('### gsd-planner'),
