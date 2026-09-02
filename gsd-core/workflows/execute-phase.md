@@ -194,10 +194,10 @@ Offer these recovery options:
 - `mark-and-skip` — record the anomaly and move on only with explicit confirmation.
 </step>
 
-**TDD gate.** Task-scoped enforcement runs inside plan execution (immediately before each implementation step), where `TASK_FILE`, `PLAN_ID`, and `TASK_ID` are defined. #4011: keys on `TDD_MODE` alone — coupling to `MVP_MODE` left this inert on non-MVP phases, contradicting `gsd-core/references/tdd.md`'s contract that `workflow.tdd_mode` binds every `type: tdd` plan. Same predicate and RED-commit contract:
+**TDD gate.** Task-scoped enforcement runs inside plan execution (immediately before each implementation step), where the parser-owned `PLAN_PATH`, one-based `TASK_INDEX`, `PLAN_ID`, and `TASK_ID` are defined. Do not materialize a task fragment. #4011: keys on `TDD_MODE` alone — coupling to `MVP_MODE` left this inert on non-MVP phases, contradicting `gsd-core/references/tdd.md`'s contract that `workflow.tdd_mode` binds every `type: tdd` plan. Same predicate and RED-commit contract:
 ```bash
 if [ "$TDD_MODE" = "true" ]; then
-  IS_BEHAVIOR_ADDING=$(gsd_run query task.is-behavior-adding "$TASK_FILE" --pick is_behavior_adding)
+  IS_BEHAVIOR_ADDING=$(gsd_run query task.is-behavior-adding "$PLAN_PATH" --task-index "$TASK_INDEX" --pick is_behavior_adding)
   if [ "$IS_BEHAVIOR_ADDING" = "true" ]; then
     BASE_BRANCH=$(gsd_run query git.base-branch 2>/dev/null || echo "")
     RED_RANGE=""
@@ -215,7 +215,7 @@ if [ "$TDD_MODE" = "true" ]; then
 TAB=$(printf '\t')
     # One pass, bounded to RED_RANGE: SHA<TAB>trailer<TAB>subject; newest subject wins, trailer judged after.
     RED_RECORD=$(git log "$RED_RANGE" --format='%H%x09%(trailers:key=red-evidence,valueonly,separator=%x20)%x09%s' \
-      | grep -m1 -E "^[0-9a-f]+${TAB}[^${TAB}]*${TAB}test\(${PHASE_NUMBER}-${PLAN_ID}\):" || true)
+      | grep -m1 -E "^[0-9a-f]+${TAB}[^${TAB}]*${TAB}test\(${PHASE_NUMBER}-${PLAN_ID}-${TASK_INDEX}\):" || true)
     RED_SHA=$(printf '%s' "$RED_RECORD" | cut -d"$TAB" -f1)
     if [ -z "$RED_SHA" ]; then
       gsd_run query state.update last_gate_trip "${PLAN_ID}/${TASK_ID}" || true
@@ -229,7 +229,7 @@ TAB=$(printf '\t')
       exit 1
     fi
     # quotePath=false escapes non-ASCII paths
-    RED_VERDICT=$(gsd_run query task.red-evidence-verdict --task-file "$TASK_FILE" --trailer "$RED_TRAILER" --changed-files "$(git -c core.quotePath=false show --name-only --format= "$RED_SHA")" --pick verdict) || exit 1
+    RED_VERDICT=$(gsd_run query task.red-evidence-verdict --task-file "$PLAN_PATH" --task-index "$TASK_INDEX" --trailer "$RED_TRAILER" --changed-files "$(git -c core.quotePath=false show --name-only --format= "$RED_SHA")" --pick verdict) || exit 1
     if [ "$RED_VERDICT" != "authorize" ]; then
       gsd_run query state.update last_gate_trip "${PLAN_ID}/${TASK_ID}" || true
       echo "TDD GATE TRIPPED: ${RED_VERDICT} for ${PLAN_ID}/${TASK_ID}"

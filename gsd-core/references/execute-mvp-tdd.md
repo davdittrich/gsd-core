@@ -14,8 +14,8 @@ If any of these is false, the gate is inactive — execution proceeds normally.
 
 For each task gated by TDD, the executor MUST verify (before running the implementation step):
 
-1. **A failing-test commit exists.** Search git log on the current branch for a commit matching `test({phase}-{plan})` whose subject mentions the same plan as the current task.
-2. **The failing-test commit carries its evidence, and that evidence authorizes.** The commit carries a `red-evidence:` trailer; the executor reads that trailer and reports it. A matching commit whose trailer value comes back empty is `missing_red_evidence` — the commit exists but was made without evidence. Judging the recorded run against the RED predicate in `~/.claude/gsd-core/references/tdd.md` **is** mechanised: the gate passes the trailer, plus the commit's changed files (`git show --name-only`), to `gsd_run query task.red-evidence-verdict` and proceeds only when the verdict is `authorize`. That call also decides membership — whether the commit actually touches the file its evidence declares — via `changedFilesInclude` (`src/task-command-router.cts`), not a filename-extension or directory-glob heuristic. Any other verdict — `red_commit_not_failing`, `unexpected_pass` — trips the gate under that verdict's own name. Existence of a subject-matching commit authorizes nothing on its own.
+1. **A failing-test commit exists.** Select the parser-owned one-based task index once, then search git log on the current branch for `test({phase}-{plan}-{task-index})`; a sibling task's identical contract cannot satisfy this task.
+2. **The failing-test commit carries its evidence, and that evidence authorizes.** The commit carries a `red-evidence:` trailer; the executor reads that trailer and reports it. A matching commit whose trailer value comes back empty is `missing_red_evidence` — the commit exists but was made without evidence. Judging the recorded run against the RED predicate in `~/.claude/gsd-core/references/tdd.md` **is** mechanised: the gate passes the plan path, parser-owned task index, trailer, and commit's changed files (`git show --name-only`) to `gsd_run query task.red-evidence-verdict` and proceeds only when the verdict is `authorize`. That call also decides membership — whether the commit actually touches the file its evidence declares — via `changedFilesInclude` (`src/task-command-router.cts`), not a filename-extension or directory-glob heuristic. Any other verdict — `red_commit_not_failing`, `unexpected_pass` — trips the gate under that verdict's own name. Existence of a subject-matching commit authorizes nothing on its own.
 3. **No implementation commit yet.** No `feat({phase}-{plan})` commit may exist for the same plan ID before the failing-test commit.
 
 If any check fails, the gate trips.
@@ -46,7 +46,7 @@ The executor MUST:
 
    Required next step:
    1. Write a failing test for the behavior above.
-   2. Commit it as: test({phase}-{plan}): {short description}
+   2. Commit it as: test({phase}-{plan}-{task-index}): {short description}
    3. Re-run /gsd execute-phase
    ```
 
@@ -56,7 +56,7 @@ The executor MUST:
    - **`missing_red_evidence`**: the RED commit already exists, made without evidence, so the
      remedy is amending that commit's trailer, not writing another failing test:
      1. Re-run the RED test and record its `red-evidence:` trailer.
-     2. Amend the existing `test({phase}-{plan})` commit with that trailer.
+     2. Amend the existing `test({phase}-{plan}-{task-index})` commit with that trailer.
      3. Re-run `/gsd execute-phase`
    - **`feat_before_test`**: a `feat({phase}-{plan})` commit already precedes any RED test commit
      for this plan, so writing a new failing test afterward leaves that ordering violation intact

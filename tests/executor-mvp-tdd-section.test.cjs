@@ -68,7 +68,7 @@ describe('gsd-executor — MVP+TDD gate section', () => {
     // Module-owned (D-14): taken from evaluateRedEvidence's own verdict domain, not
     // scraped from the gate — the gate only ever echoes `${RED_VERDICT}`, a shell
     // expansion, so grepping the snippet for these two would find nothing there.
-    const { evaluateRedEvidence } = require(RED_EVIDENCE_PREDICATE_PATH);
+    const evaluateRedEvidence = evaluateObservedEvidence;
     const taskContent = CONTRACT_TASK_LINES.join('\n');
     const mismatched = (() => {
       const parsed = JSON.parse(trailerLine().slice(trailerLine().indexOf('{')));
@@ -415,11 +415,16 @@ function runIsBehaviorAdding(taskContent) {
   return JSON.parse(result.stdout);
 }
 
+const CONTROLLED_FAILURE_CODE = 'process.stderr.write("fixture failure\\n"); process.exit(1)';
+const controlledNodeArgv = (targetTest) => ['-e', CONTROLLED_FAILURE_CODE, targetTest];
+
 const CONTRACT_TASK_LINES = [
   '<task type="auto" tdd="true">',
   '  <files>src/pricing.py, tests/test_pricing.py</files>',
   '  <behavior>Applying a discount reduces the order total.</behavior>',
   '  <red_contract>',
+  '    <program>node</program>',
+  `    <argv_json>${JSON.stringify(controlledNodeArgv('tests/test_pricing.py::test_discount_reduces_total'))}</argv_json>`,
   '    <target_test>tests/test_pricing.py::test_discount_reduces_total</target_test>',
   '    <implementation_target>pricing.apply_discount</implementation_target>',
   '    <expected_failure>',
@@ -430,6 +435,34 @@ const CONTRACT_TASK_LINES = [
   '  </red_contract>',
   '</task>',
 ];
+
+const OBSERVED_FAILURE = Object.freeze({
+  exit_status: 1,
+  stderr_captured: true,
+  spawn_error: false,
+  signal: null,
+  timed_out: false,
+});
+
+/**
+ * Give the evaluator the same typed local observation the router supplies.
+ * The trailer remains evaluator-owned: malformed JSON must return its typed
+ * fail-closed result, never throw while this test harness tries to inspect it.
+ */
+function evaluateObservedEvidence(taskSource, trailerText, parsedContract) {
+  let exitStatus = null;
+  try {
+    const payload = JSON.parse(trailerText.slice(trailerText.indexOf('{')));
+    if (Number.isInteger(payload.exit_status)) exitStatus = payload.exit_status;
+  } catch {
+    // The evaluator owns malformed-trailer classification.
+  }
+  const { evaluateRedEvidence } = require(RED_EVIDENCE_PREDICATE_PATH);
+  return evaluateRedEvidence(taskSource, trailerText, {
+    ...OBSERVED_FAILURE,
+    exit_status: exitStatus,
+  }, parsedContract);
+}
 
 describe('RED contract — router still classifies a red_contract-carrying task (#3770)', () => {
   test('a tdd task carrying both <behavior> and <red_contract> is behavior-adding', () => {
@@ -457,15 +490,15 @@ describe('RED contract — router still classifies a red_contract-carrying task 
 // executor dispatch — its text IS the deployed contract, so reading the file
 // is testing the product, not grepping an implementation.
 describe('RED contract — gsd-core/references/tdd.md (#3770)', () => {
-  test('### Declaration names exactly the seven contract tags', () => {
+  test('### Declaration names exactly the nine contract tags', () => {
     const block = soleFencedBlock(CONTRACT, 'Declaration');
     const found = new Set();
     for (const match of block.matchAll(/<\/?([a-z][a-z_]{0,60})[\s>]/g)) found.add(match[1]);
     assert.deepStrictEqual(
       [...found].sort(),
-      ['class_or_mode', 'expected_failure', 'implementation_target', 'phase',
-        'red_contract', 'subject', 'target_test'],
-      'the declaration example must carry exactly the seven contract tags — ' +
+      ['argv_json', 'class_or_mode', 'expected_failure', 'implementation_target', 'phase',
+        'program', 'red_contract', 'subject', 'target_test'],
+      'the declaration example must carry exactly the nine contract tags — ' +
       'a stray, renamed or dropped field is a schema change. See #3770.',
     );
   });
@@ -557,7 +590,7 @@ describe('RED contract — gsd-core/references/tdd.md (#3770)', () => {
       },
       {
         section: 'Evidence',
-        needle: 'still binds nothing about its content to `target_test`',
+        needle: 'Canonical JSON display of the selected `program` plus `argv_json`',
         verdict: null,
         why: 'the predicate now validates `command` for non-emptiness (GATE-06), but a reader '
           + 'who believes it is validated AGAINST `target_test` will build a coded gate that '
@@ -747,7 +780,7 @@ describe('RED contract — gsd-core/references/tdd.md (#3770)', () => {
         ...plan,
       },
       trailer: {
-        command: 'pytest tests/test_pricing.py::test_discount_reduces_total -q',
+        command: '["pytest","tests/test_pricing.py::test_discount_reduces_total","-q"]',
         exit_status: 1,
         target_test: 'tests/test_pricing.py::test_discount_reduces_total',
         expected: {
@@ -777,7 +810,11 @@ describe('RED contract — gsd-core/references/tdd.md (#3770)', () => {
    * guard (D-24).
    */
   function buildTaskContent(plan, { redContractCount = 1 } = {}) {
+    const program = plan.program ?? 'pytest';
+    const argv = plan.argv ?? [plan.target_test, '-q'];
     const block = `<red_contract>
+  <program>${program}</program>
+  <argv_json>${JSON.stringify(argv)}</argv_json>
   <target_test>${plan.target_test}</target_test>
   <implementation_target>${plan.implementation_target}</implementation_target>
   <expected_failure>
@@ -814,7 +851,7 @@ ${Array(redContractCount).fill(block).join('\n')}
       },
     },
     trailer: {
-      command: 'pytest tests/test_pricing.py::test_discount_reduces_total -q',
+      command: '["pytest","tests/test_pricing.py::test_discount_reduces_total","-q"]',
       exit_status: 1,
       target_test: 'tests/test_pricing.py::test_discount_reduces_total',
       expected: {
@@ -845,7 +882,7 @@ ${Array(redContractCount).fill(block).join('\n')}
       },
     },
     trailer: {
-      command: 'pytest tests/test_pricing.py::test_discount_reduces_total -q',
+      command: '["pytest","tests/test_pricing.py::test_discount_reduces_total","-q"]',
       exit_status: 1,
       target_test: 'tests/test_pricing.py::test_discount_reduces_total',
       expected: {
@@ -876,7 +913,7 @@ ${Array(redContractCount).fill(block).join('\n')}
       },
     },
     trailer: {
-      command: 'pytest tests/test_pricing.py -q',
+      command: '["pytest","tests/test_pricing.py","-q"]',
       exit_status: 2,
       target_test: 'tests/test_pricing.py',
       expected: {
@@ -907,7 +944,7 @@ ${Array(redContractCount).fill(block).join('\n')}
       },
     },
     trailer: {
-      command: 'pytest tests/test_pricing.py -q',
+      command: '["pytest","tests/test_pricing.py","-q"]',
       exit_status: 2,
       target_test: 'tests/test_pricing.py',
       expected: {
@@ -938,7 +975,7 @@ ${Array(redContractCount).fill(block).join('\n')}
       },
     },
     trailer: {
-      command: 'pytest tests/test_pricing.py::test_discount_reduces_total -q',
+      command: '["pytest","tests/test_pricing.py::test_discount_reduces_total","-q"]',
       exit_status: 1,
       target_test: 'tests/test_pricing.py::test_discount_reduces_total',
       expected: {
@@ -969,7 +1006,7 @@ ${Array(redContractCount).fill(block).join('\n')}
       },
     },
     trailer: {
-      command: 'pytest tests/test_pricing.py::test_discount_reduces_total -q',
+      command: '["pytest","tests/test_pricing.py::test_discount_reduces_total","-q"]',
       exit_status: 1,
       target_test: 'tests/test_pricing.py::test_discount_reduces_total',
       expected: {
@@ -1161,7 +1198,7 @@ ${Array(redContractCount).fill(block).join('\n')}
           },
         },
         trailer: {
-          command: 'pytest tests/test_pricing.py -q',
+          command: '["pytest","tests/test_pricing.py","-q"]',
           exit_status: 2,
           target_test: 'tests/test_pricing.py',
           expected: {
@@ -1267,6 +1304,8 @@ ${Array(redContractCount).fill(block).join('\n')}
       vector: vector({
         plan: {
           target_test: 'oi.cpp',
+          program: 'g++',
+          argv: ['-g', '-o', 'oi', 'oi.cpp', '-lgtest', '-lgtest_main', '-pthread'],
           implementation_target: 'apply_discount(int, double)',
           expected_failure: {
             phase: 'build',
@@ -1275,7 +1314,7 @@ ${Array(redContractCount).fill(block).join('\n')}
           },
         },
         trailer: {
-          command: 'g++ -g -o oi oi.cpp -lgtest -lgtest_main -pthread',
+          command: '["g++","-g","-o","oi","oi.cpp","-lgtest","-lgtest_main","-pthread"]',
           exit_status: 1,
           target_test: 'oi.cpp',
           expected: {
@@ -1357,7 +1396,7 @@ ${Array(redContractCount).fill(block).join('\n')}
 
   test('the RED Predicate fence is derived from what the shipped module actually decides '
     + '(D-5, D-6)', () => {
-    const { evaluateRedEvidence } = require(RED_EVIDENCE_PREDICATE_PATH);
+    const evaluateRedEvidence = evaluateObservedEvidence;
 
     // A vector engineered to fail all six post-exit-status conjuncts at once,
     // never used in EVIDENCE_VECTORS (each named scenario there isolates
@@ -1419,7 +1458,7 @@ ${Array(redContractCount).fill(block).join('\n')}
   });
 
   test('the shipped module computes the verdict each evidence vector must receive', () => {
-    const { evaluateRedEvidence } = require(RED_EVIDENCE_PREDICATE_PATH);
+    const evaluateRedEvidence = evaluateObservedEvidence;
 
     for (const testCase of EVIDENCE_VECTORS) {
       const taskContent = buildTaskContent(testCase.vector.plan);
@@ -1436,7 +1475,7 @@ ${Array(redContractCount).fill(block).join('\n')}
   });
 
   test('a failing subject-equality check is reported once, from one conjunction with no arms', () => {
-    const { evaluateRedEvidence } = require(RED_EVIDENCE_PREDICATE_PATH);
+    const evaluateRedEvidence = evaluateObservedEvidence;
     for (const id of ['different-test-failed', 'parametrized-variant-subject']) {
       const vectorCase = EVIDENCE_VECTORS.find((c) => c.id === id);
       const taskContent = buildTaskContent(vectorCase.vector.plan);
@@ -1452,7 +1491,7 @@ ${Array(redContractCount).fill(block).join('\n')}
   });
 
   test('every Outcomes row verdict agrees with what the shipped module computes', () => {
-    const { evaluateRedEvidence } = require(RED_EVIDENCE_PREDICATE_PATH);
+    const evaluateRedEvidence = evaluateObservedEvidence;
     const outcomes = sliceH3(CONTRACT, 'Outcomes').split('\n');
 
     // The Outcomes table carries the FENCE's two-plus-halt vocabulary
@@ -1490,7 +1529,7 @@ ${Array(redContractCount).fill(block).join('\n')}
 
   test('zero-test discovery blocks GREEN on the declared-versus-observed phase, not on a '
     + 'selection counter (REGR-02)', () => {
-    const { evaluateRedEvidence } = require(RED_EVIDENCE_PREDICATE_PATH);
+    const evaluateRedEvidence = evaluateObservedEvidence;
     const zeroTestsSelected = EVIDENCE_VECTORS.find((c) => c.id === 'zero-tests-selected');
     const taskContent = buildTaskContent(zeroTestsSelected.vector.plan);
     const trailerText = `red-evidence: ${JSON.stringify(zeroTestsSelected.vector.trailer)}`;
@@ -1533,7 +1572,7 @@ ${Array(redContractCount).fill(block).join('\n')}
 
   test('the built module fails closed on a malformed trailer or a malformed red-contract '
     + 'declaration', () => {
-    const { evaluateRedEvidence } = require(RED_EVIDENCE_PREDICATE_PATH);
+    const evaluateRedEvidence = evaluateObservedEvidence;
     const validTask = buildTaskContent(GENUINE.plan);
     const validTrailerText = `red-evidence: ${JSON.stringify(GENUINE.trailer)}`;
     const { location, ...fiveKeyTrailer } = GENUINE.trailer;
@@ -1691,7 +1730,7 @@ ${Array(redContractCount).fill(block).join('\n')}
 
   test('shape-check edges: empty, absent and malformed trailer values fail closed; '
     + 'path-form differences alone still authorize (#3770)', () => {
-    const { evaluateRedEvidence } = require(RED_EVIDENCE_PREDICATE_PATH);
+    const evaluateRedEvidence = evaluateObservedEvidence;
     const exemplarLine = trailerLine();
     const shippedTrailer = JSON.parse(exemplarLine.slice(exemplarLine.indexOf('{')));
     const validTask = buildTaskContent(GENUINE.plan);
@@ -1713,7 +1752,7 @@ ${Array(redContractCount).fill(block).join('\n')}
 
   test('an EMPTY <red_contract> fails closed even when the trailer echoes its empty '
     + 'strings back (CR-02)', () => {
-    const { evaluateRedEvidence } = require(RED_EVIDENCE_PREDICATE_PATH);
+    const evaluateRedEvidence = evaluateObservedEvidence;
     // Every compared field declared but empty. `extractTag` returns '' for an
     // absent tag too, so this one fixture covers both the empty and the absent
     // spelling — they are indistinguishable by construction.
@@ -1751,7 +1790,7 @@ ${Array(redContractCount).fill(block).join('\n')}
 
   test('a task file carrying two <red_contract> blocks fails closed with a reason naming the '
     + 'ambiguity, even with an otherwise valid trailer (#3770)', () => {
-    const { evaluateRedEvidence } = require(RED_EVIDENCE_PREDICATE_PATH);
+    const evaluateRedEvidence = evaluateObservedEvidence;
     const exemplarLine = trailerLine();
     const shippedTrailer = JSON.parse(exemplarLine.slice(exemplarLine.indexOf('{')));
     const dualContractTask = buildTaskContent(GENUINE.plan, { redContractCount: 2 });
@@ -1942,8 +1981,8 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
     // here (the pre-DI-6 shape) let a NEWER, trailer-less commit be skipped
     // in favor of an OLDER commit's stale trailer — exactly the
     // stale-evidence-authorizes-GREEN hole DI-6 closes.
-    assert.ok(snippet.includes(`grep -m1 -E "^[0-9a-f]+\${TAB}[^\${TAB}]*\${TAB}test\\(\${PHASE}-\${PLAN}\\):"`),
-      'the RED search must select the NEWEST candidate anchored to this plan\'s commit subject, ' +
+    assert.ok(snippet.includes(`grep -m1 -E "^[0-9a-f]+\${TAB}[^\${TAB}]*\${TAB}test\\(\${PHASE}-\${PLAN}-\${TASK_INDEX}\\):"`),
+      'the RED search must select the NEWEST candidate anchored to this plan/task commit subject, ' +
       'regardless of whether it carries a trailer. Dropping the plan scope (CR-11 M1) lets an ' +
       'unrelated plan\'s RED authorize this plan\'s GREEN; requiring a non-empty trailer at ' +
       'selection (pre-DI-6) lets a newer trailer-less commit be silently skipped in favor of an ' +
@@ -2006,7 +2045,7 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
     fs.writeFileSync(scriptPath, `#!/usr/bin/env bash\nset -e\n${snippet}`, { mode: 0o755 });
 
     const runGate = (cwd) => runHook(scriptPath, [], {
-      interpreter: 'bash', cwd, env: { ...process.env, PHASE: '08', PLAN: '02' },
+      interpreter: 'bash', cwd, env: { ...process.env, PHASE: '08', PLAN: '02', TASK_INDEX: '1' },
     });
 
     // Derived from the shipped `### Evidence` fixture, never retyped; the
@@ -2045,7 +2084,7 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
     // it "after completing the plan" — so RED alone is not the compliant
     // state, it is the mid-cycle state that no shipped consumer gates.
     const s1 = newRepo();
-    commit(s1, 'tests/test_pricing.py', 'test(08-02): add failing test for discount', evidence('S1'));
+    commit(s1, 'tests/test_pricing.py', 'test(08-02-1): add failing test for discount', evidence('S1'));
     commit(s1, 'src/pricing.py', 'feat(08-02): implement discount');
     const r1 = runGate(s1);
     assert.strictEqual(r1.exitCode, 0,
@@ -2064,7 +2103,7 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
     // ── S2, the five-condition repository (CR-04 retired by DI-6; M1/M4 live) ──
     const s2 = newRepo();
     const realRed = commit(s2, 'tests/test_pricing.py',
-      'test(08-02): add failing test for discount', evidence('S2-REAL'));
+      'test(08-02-1): add failing test for discount', evidence('S2-REAL'));
     commit(s2, 'src/pricing.py', 'feat(08-02): implement discount');
     // Newer, same plan, trailerless — AND a body that mentions red-evidence:
     // mid-message so it cannot parse as a trailer. Pre-DI-6, CR-04's fix was
@@ -2073,7 +2112,7 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
     // mechanism: it is the exact stale-evidence-authorizes-GREEN shape #3770
     // (DI-6) closes, so this NEWEST commit must now be judged on its own
     // missing evidence instead of falling back to realRed's.
-    runGit(['commit', '--allow-empty', '-m', 'test(08-02): add another failing test',
+    runGit(['commit', '--allow-empty', '-m', 'test(08-02-1): add another failing test',
       '-m', 'red-evidence: S2-BODY-PROSE', '-m', 'trailing paragraph so the above is body, not a trailer'],
     { cwd: s2 });
     fs.writeFileSync(path.join(s2, 'tests', 'test_pricing.py'), '# another\n');
@@ -2114,8 +2153,8 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
 
     // ── S4, matching commits with no evidence (CR-04, F1) ────────────────
     const s4 = newRepo();
-    commit(s4, 'tests/test_pricing.py', 'test(08-02): add failing test for discount');
-    commit(s4, 'tests/test_more.py', 'test(08-02): add failing test for discount');
+    commit(s4, 'tests/test_pricing.py', 'test(08-02-1): add failing test for discount');
+    commit(s4, 'tests/test_more.py', 'test(08-02-1): add failing test for discount');
     const r4 = runGate(s4);
     assert.notStrictEqual(r4.exitCode, 0,
       'F1: matching commits that carry no evidence is a violation and must exit NON-ZERO');
@@ -2140,7 +2179,7 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
     // A fully compliant RED — evidence-bearing, plan-scoped, touching a test
     // file — and no `feat(08-02)` commit at all.
     const s6 = newRepo();
-    commit(s6, 'tests/test_pricing.py', 'test(08-02): add failing test for discount', evidence('S6'));
+    commit(s6, 'tests/test_pricing.py', 'test(08-02-1): add failing test for discount', evidence('S6'));
     const r6 = runGate(s6);
     assert.notStrictEqual(r6.exitCode, 0,
       'F-3: `### Gate Definitions:442` marks GREEN `Required | Yes`, and this block runs only ' +
@@ -2171,7 +2210,7 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
     };
 
     const s7 = newRepo();
-    commit(s7, 'pricing_test.go', 'test(08-02): add failing test for discount',
+    commit(s7, 'pricing_test.go', 'test(08-02-1): add failing test for discount',
       evidenceFor('S7', 'pricing_test.go'));
     commit(s7, 'pricing.go', 'feat(08-02): implement discount');
     const r7 = runGate(s7);
@@ -2189,8 +2228,8 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
     // or amends a RED test later without carrying its evidence forward.
     // Mirrors G10 against execute-phase.md's shipped gate.
     const s8 = newRepo();
-    commit(s8, 'tests/test_pricing.py', 'test(08-02): add failing test for discount', evidence('S8'));
-    commit(s8, 'tests/test_pricing_more.py', 'test(08-02): add failing test for discount', undefined);
+    commit(s8, 'tests/test_pricing.py', 'test(08-02-1): add failing test for discount', evidence('S8'));
+    commit(s8, 'tests/test_pricing_more.py', 'test(08-02-1): add failing test for discount', undefined);
     const r8 = runGate(s8);
     assert.notStrictEqual(r8.exitCode, 0,
       'S8: the NEWEST plan-scoped commit carries no red-evidence: trailer and must NOT authorize ' +
@@ -2232,7 +2271,7 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
   const runGate = (script, cwd, taskFile) => runHook(script, [], {
     interpreter: 'bash',
     cwd,
-    env: { ...process.env, ...GATE_BASE_ENV, TASK_FILE: taskFile },
+    env: { ...process.env, ...GATE_BASE_ENV, PLAN_PATH: taskFile, TASK_INDEX: '1' },
   });
 
   // `CONTRACT_TASK_LINES`' own runner-native id, string-replaced by the
@@ -2254,7 +2293,11 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
     return p;
   };
 
-  const g1Trailer = trailerLine();
+  const g1Trailer = (() => {
+    const trailer = JSON.parse(trailerLine().slice(trailerLine().indexOf('{')));
+    trailer.command = JSON.stringify(['node', ...controlledNodeArgv(trailer.target_test)]);
+    return `red-evidence: ${JSON.stringify(trailer)}`;
+  })();
   const mutateTrailer = (mutator) => {
     const parsed = JSON.parse(g1Trailer.slice(g1Trailer.indexOf('{')));
     mutator(parsed);
@@ -2269,6 +2312,7 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
   // search and membership behavior is under test, never the predicate's
   // own conjuncts (#3770 Task 6).
   const ecoTrailer = (id, file) => mutateTrailer((p) => {
+    p.command = JSON.stringify(['node', ...controlledNodeArgv(id)]);
     p.target_test = id;
     p.expected.subject = id;
     p.actual.subject = id;
@@ -2303,7 +2347,7 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
     return dir;
   };
 
-  const { evaluateRedEvidence } = require(RED_EVIDENCE_PREDICATE_PATH);
+  const evaluateRedEvidence = evaluateObservedEvidence;
 
   test("the extracted MVP+TDD gate block authorizes only on the evaluator's verdict", (t) => {
     // SIBLING of the S1-S6 test above, not an extension of it: that test
@@ -2318,7 +2362,7 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
     // ── G1, valid evidence (characterization) ────────────────────────────
     const s1 = newRepo(t);
     const taskFile1 = behaviorTask(s1);
-    commit(s1, 'tests/test_pricing.py', 'test(08-02): add failing test for discount', g1Trailer);
+    commit(s1, 'tests/test_pricing.py', 'test(08-02-1): add failing test for discount', g1Trailer);
     const r1 = runGate(scriptPath, s1, taskFile1);
     assert.strictEqual(r1.exitCode, 0,
       'G1: valid evidence with agreeing declared and observed locations must authorize — the ' +
@@ -2328,7 +2372,7 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
     // ── G2, mismatched evidence (RED) ─────────────────────────────────────
     const s2 = newRepo(t);
     const taskFile2 = behaviorTask(s2);
-    commit(s2, 'tests/test_pricing.py', 'test(08-02): add failing test for discount', g2Trailer);
+    commit(s2, 'tests/test_pricing.py', 'test(08-02-1): add failing test for discount', g2Trailer);
     const r2 = runGate(scriptPath, s2, taskFile2);
     assert.notStrictEqual(r2.exitCode, 0,
       'G2: a red-evidence trailer whose observed location disagrees with its declared location ' +
@@ -2343,7 +2387,7 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
     // ── G3, trailerless commit (RED) ──────────────────────────────────────
     const s3 = newRepo(t);
     const taskFile3 = behaviorTask(s3);
-    commit(s3, 'tests/test_pricing.py', 'test(08-02): add failing test for discount', undefined);
+    commit(s3, 'tests/test_pricing.py', 'test(08-02-1): add failing test for discount', undefined);
     const r3 = runGate(scriptPath, s3, taskFile3);
     assert.notStrictEqual(r3.exitCode, 0,
       'G3: a plan-scoped commit with no red-evidence: trailer must NOT authorize — it must ' +
@@ -2362,7 +2406,7 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
     // ── G5, unexpected pass (RED) ──────────────────────────────────────────
     const s5 = newRepo(t);
     const taskFile5 = behaviorTask(s5);
-    commit(s5, 'tests/test_pricing.py', 'test(08-02): add failing test for discount', g5Trailer);
+    commit(s5, 'tests/test_pricing.py', 'test(08-02-1): add failing test for discount', g5Trailer);
     const r5 = runGate(scriptPath, s5, taskFile5);
     assert.notStrictEqual(r5.exitCode, 0,
       'G5: a red-evidence trailer recording exit_status 0 means the RED run PASSED — nothing ' +
@@ -2393,7 +2437,7 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
     runGit(['config', 'core.hooksPath', ''], { cwd: s7 });
     const taskFile7 = behaviorTask(s7);
     const decoySha = commit(
-      s7, 'tests/test_pricing.py', 'test(08-02): add failing test for discount', g1Trailer,
+      s7, 'tests/test_pricing.py', 'test(08-02-1): add failing test for discount', g1Trailer,
     );
     runGit(['branch', 'gsd-3770-g7-base', decoySha], { cwd: s7 });
     fs.mkdirSync(path.join(s7, '.planning'), { recursive: true });
@@ -2417,7 +2461,7 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
     // ── G8, source-only evidence (characterization) ─────────────────────────
     const s8 = newRepo(t);
     const taskFile8 = behaviorTask(s8);
-    commit(s8, 'src/pricing.py', 'test(08-02): add failing test for discount', g1Trailer);
+    commit(s8, 'src/pricing.py', 'test(08-02-1): add failing test for discount', g1Trailer);
     const r8 = runGate(scriptPath, s8, taskFile8);
     assert.notStrictEqual(r8.exitCode, 0,
       'G8: a commit whose subject and trailer both qualify but which touches only a source ' +
@@ -2468,7 +2512,7 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
     const omegaFile = 'tests/test_pricing_ω.py';
     const omegaId = `${omegaFile}::test_discount_reduces_total`;
     const taskFile9 = behaviorTask(s9, omegaId);
-    commit(s9, omegaFile, 'test(08-02): add failing test for discount', ecoTrailer(omegaId, omegaFile));
+    commit(s9, omegaFile, 'test(08-02-1): add failing test for discount', ecoTrailer(omegaId, omegaFile));
     const r9 = runGate(scriptPath, s9, taskFile9);
     assert.strictEqual(r9.exitCode, 0,
       'G9: a RED commit that touches the very file its evidence declares must authorize even ' +
@@ -2481,7 +2525,7 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
     const s9Decoy = newRepo(t);
     const decoyId = 'tests/test_shipping_ω.py::test_discount_reduces_total';
     const taskFile9b = behaviorTask(s9Decoy, decoyId);
-    commit(s9Decoy, omegaFile, 'test(08-02): add failing test for discount',
+    commit(s9Decoy, omegaFile, 'test(08-02-1): add failing test for discount',
       ecoTrailer(decoyId, 'tests/test_shipping_ω.py'));
     const r9Decoy = runGate(scriptPath, s9Decoy, taskFile9b);
     assert.notStrictEqual(r9Decoy.exitCode, 0,
@@ -2497,8 +2541,8 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
     // or amends a RED test later without carrying its evidence forward.
     const s10 = newRepo(t);
     const taskFile10 = behaviorTask(s10);
-    commit(s10, 'tests/test_pricing.py', 'test(08-02): add failing test for discount', g1Trailer);
-    commit(s10, 'tests/test_pricing_more.py', 'test(08-02): add failing test for discount', undefined);
+    commit(s10, 'tests/test_pricing.py', 'test(08-02-1): add failing test for discount', g1Trailer);
+    commit(s10, 'tests/test_pricing_more.py', 'test(08-02-1): add failing test for discount', undefined);
     const r10 = runGate(scriptPath, s10, taskFile10);
     assert.notStrictEqual(r10.exitCode, 0,
       'G10: the NEWEST plan-scoped commit carries no red-evidence: trailer and must NOT ' +
@@ -2528,7 +2572,7 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
     runGit(['checkout', '-b', 'gsd-3770-g11-work'], { cwd: s11 });
     runGit(['branch', '-D', initialBranch11], { cwd: s11 });
     const taskFile11 = behaviorTask(s11);
-    commit(s11, 'tests/test_pricing.py', 'test(08-02): add failing test for discount', g1Trailer);
+    commit(s11, 'tests/test_pricing.py', 'test(08-02-1): add failing test for discount', g1Trailer);
     const baseBranch11 = runNode([GSD_TOOLS, 'query', 'git.base-branch', '--raw'], { cwd: s11 });
     assert.strictEqual(baseBranch11.stdout.trim(), 'main',
       'precondition: with no main/master branch, no origin remote, and no config override, ' +
@@ -2576,7 +2620,7 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
       for (const row of ECOSYSTEM_ROWS) {
         const dir = newRepo(t);
         const taskFile = behaviorTask(dir, row.id);
-        commit(dir, row.file, 'test(08-02): add failing test for discount', ecoTrailer(row.id, row.file));
+        commit(dir, row.file, 'test(08-02-1): add failing test for discount', ecoTrailer(row.id, row.file));
         const result = runGate(scriptPath, dir, taskFile);
         assert.strictEqual(result.exitCode, 0,
           `${row.name}: the gate must authorize on ${JSON.stringify(row.id)} declaring ` +
@@ -2598,9 +2642,9 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
       // halts on it instead of silently authorizing stale evidence.
       const staleDir = newRepo(t);
       const staleTaskFile = behaviorTask(staleDir);
-      commit(staleDir, 'tests/test_pricing.py', 'test(08-02): add failing test for discount', g1Trailer);
+      commit(staleDir, 'tests/test_pricing.py', 'test(08-02-1): add failing test for discount', g1Trailer);
       const staleTrailer = mutateTrailer((p) => { p.location.declared.file = 'src/pricing.py'; });
-      commit(staleDir, 'src/pricing.py', 'test(08-02): add failing test for discount', staleTrailer);
+      commit(staleDir, 'src/pricing.py', 'test(08-02-1): add failing test for discount', staleTrailer);
       const staleResult = runGate(scriptPath, staleDir, staleTaskFile);
       assert.notStrictEqual(staleResult.exitCode, 0,
         'stale-fallback: a newer, plan-scoped, evidence-bearing commit that touches only a ' +
@@ -2804,7 +2848,7 @@ describe('MVP+TDD gate — the plan\'s two test-verified prohibitions (#3770)', 
     const ALLOWED_READS = [
       'BASE_BRANCH', 'IS_BEHAVIOR_ADDING', 'MVP_MODE', 'PHASE_NUMBER', 'PLAN_ID',
       'RED_RANGE', 'RED_RECORD', 'RED_SHA', 'RED_TRAILER', 'RED_VERDICT',
-      'TAB', 'TASK_FILE', 'TASK_ID', 'TDD_MODE',
+      'TAB', 'PLAN_PATH', 'TASK_INDEX', 'TASK_ID', 'TDD_MODE',
     ];
     const reads = [...new Set(
       [...gate.matchAll(/\$\{?([A-Za-z_][A-Za-z0-9_]*)/g)].map((m) => m[1]),
@@ -2878,8 +2922,9 @@ describe('task red-evidence-verdict — evidence file membership (#3770 D-1 revi
   const REPO_ROOT = path.join(__dirname, '..');
 
   function shippedTrailerObject() {
-    const line = trailerLine();
-    return JSON.parse(line.slice(line.indexOf('{')));
+    const trailer = JSON.parse(trailerLine().slice(trailerLine().indexOf('{')));
+    trailer.command = JSON.stringify(['node', ...controlledNodeArgv(trailer.target_test)]);
+    return trailer;
   }
 
   function trailerTextWithDeclaredFile(declaredFile) {
@@ -2895,7 +2940,7 @@ describe('task red-evidence-verdict — evidence file membership (#3770 D-1 revi
   }
 
   function runVerdict(args, cwd) {
-    return runNode([GSD_TOOLS, 'query', 'task', 'red-evidence-verdict', ...args], { cwd });
+    return runNode([GSD_TOOLS, 'query', 'task', 'red-evidence-verdict', '--task-index', '1', ...args], { cwd });
   }
 
   // Each row mutates only `location.declared.file` on the shipped exemplar,
@@ -2963,20 +3008,10 @@ describe('task red-evidence-verdict — evidence file membership (#3770 D-1 revi
         assert.ok(typeof parsed.reason === 'string' && parsed.reason.includes(row.declaredFile),
           `${row.name}: the refusal reason must name the declared file so a human reading it `
           + `can act on it. Got: ${parsed.reason}`);
-        // Negative plus positive, so the claim cannot drift back by deleting
-        // the sentence outright. The reason names the matching RULE, and
-        // `changedFilesInclude` stopped reducing to a basename in c4dabbb79 —
-        // its own doc comment now states it deliberately does NOT reuse
-        // `locationsAgree`'s `path.win32.basename` reduction. A message still
-        // saying `basename` sends the engineer reading this refusal after a
-        // basename collision that is not the cause. See #3770 (CCR-02).
-        assert.ok(!parsed.reason.includes('basename'),
-          `${row.name}: the refusal reason must not claim the membership check matched by `
-          + `basename — it matches by path segment, anchored on \`/\`, which is a strictly `
-          + `narrower rule and a different debugging lead. Got: ${parsed.reason}`);
-        assert.ok(parsed.reason.includes('path segment'),
-          `${row.name}: the refusal reason must name the rule that actually decided it — `
-          + `path-segment matching. Got: ${parsed.reason}`);
+        assert.strictEqual(parsed.reason,
+          `the commit's changed files do not include "${row.declaredFile}"`,
+          `${row.name}: the public refusal reason is a stable action: name the declared file `
+          + `the RED commit must include, without leaking matcher internals. Got: ${parsed.reason}`);
       }
     }
   });
@@ -3028,7 +3063,7 @@ describe('task red-evidence-verdict — evidence file membership (#3770 D-1 revi
       scratch,
     );
     const parsed = JSON.parse(result.stdout);
-    const { evaluateRedEvidence } = require(RED_EVIDENCE_PREDICATE_PATH);
+    const evaluateRedEvidence = evaluateObservedEvidence;
     const direct = evaluateRedEvidence(CONTRACT_TASK_LINES.join('\n'), trailerText);
 
     assert.strictEqual(parsed.verdict, direct.verdict,

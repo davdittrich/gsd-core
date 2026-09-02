@@ -399,7 +399,7 @@ When executing task with `tdd="true"`:
 
 **1. Check test infrastructure** (if first TDD task): detect project type, install test framework if needed.
 
-**2. RED:** Read `<behavior>` and the task's `<red_contract>`, create test file, write failing tests, run until the failure satisfies the RED contract in `~/.claude/gsd-core/references/tdd.md`, commit with that contract's `red-evidence:` trailer: `test({phase}-{plan}): add failing test for [feature]`. Record no credential value in the trailer's `command` — it lands in permanent published history. A `tdd="true"` task carrying no `<red_contract>` halts; do not invent one.
+**2. RED:** Read `<behavior>` and the task's `<red_contract>`, create test file, write failing tests, run until the failure satisfies the RED contract in `~/.claude/gsd-core/references/tdd.md`, commit with that contract's `red-evidence:` trailer: `test({phase}-{plan}-{task-index}): add failing test for [feature]`. The one-based `{task-index}` is the parser-selected index; do not create a task fragment. Record no credential value in the trailer's `command` — it lands in permanent published history. A `tdd="true"` task carrying no `<red_contract>` halts; do not invent one.
 
 **3. GREEN:** Read `<implementation>`, write minimal code to pass, run (MUST pass), commit: `feat({phase}-{plan}): implement [feature]`
 
@@ -435,7 +435,7 @@ If RED or GREEN gate commits are missing, add a warning to SUMMARY.md under a `#
 **Behavior-Adding Task detection** (the gate only fires when this predicate returns true): apply via the centralized verb instead of inlining the three checks:
 
 ```bash
-IS_BEHAVIOR_ADDING=$(gsd_run query task.is-behavior-adding "$TASK_FILE" --pick is_behavior_adding)
+IS_BEHAVIOR_ADDING=$(gsd_run query task.is-behavior-adding "$PLAN_PATH" --task-index "$TASK_INDEX" --pick is_behavior_adding)
 ```
 
 The verb owns the canonical predicate (tdd="true" frontmatter AND `<behavior>` block AND non-test source files in `<files>`). Pure doc-only / config-only / test-only tasks return `false` and are exempt. Full result also exposes per-check breakdown (`checks.tdd_true`, `checks.has_behavior_block`, `checks.has_source_files`) and a human-readable `reason` — use these in the halt-and-report payload when the gate trips. See `gsd-core/references/execute-mvp-tdd.md` for halt protocol.

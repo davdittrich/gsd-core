@@ -63,6 +63,8 @@ Output: [Working, tested feature]
     Cases: input → expected output
   </behavior>
   <red_contract>
+    <program>[Executable name, never a shell command]</program>
+    <argv_json>[JSON string array including target_test exactly]</argv_json>
     <target_test>[Runner-native id of the test that must fail]</target_test>
     <implementation_target>[Production module or symbol GREEN will create]</implementation_target>
     <expected_failure>
@@ -94,7 +96,7 @@ After completion, create SUMMARY.md with:
 </output>
 ```
 
-`<red_contract>` is a sibling of `<behavior>`, never an attribute on it. Its five field meanings,
+`<red_contract>` is a sibling of `<behavior>`, never an attribute on it. Its seven field meanings,
 and the predicate that judges the run against them, are in `<red_contract_spec>` below.
 
 **One feature per TDD plan.** If features are trivial enough to batch, they're trivial enough to skip TDD—use a standard plan and add tests after.
@@ -110,7 +112,7 @@ and the predicate that judges the run against them, are in `<red_contract_spec>`
 4. For `tdd="true"` tasks the failure must additionally satisfy the RED Predicate in
    `<red_contract_spec>` below, and the RED commit carries the `red-evidence:` trailer
 5. If test passes: feature exists or test is wrong. Investigate.
-6. Commit: `test({phase}-{plan}): add failing test for [feature]`
+6. Commit: `test({phase}-{plan}-{task-index}): add failing test for [feature]`
 
 **GREEN - Implement to pass:**
 1. Write minimal code to make test pass
@@ -138,6 +140,8 @@ run, and the RED commit records what was actually observed.
 
 ```xml
 <red_contract>
+  <program>pytest</program>
+  <argv_json>["tests/test_pricing.py::test_discount_reduces_total","-q"]</argv_json>
   <target_test>tests/test_pricing.py::test_discount_reduces_total</target_test>
   <implementation_target>pricing.apply_discount</implementation_target>
   <expected_failure>
@@ -150,6 +154,8 @@ run, and the RED commit records what was actually observed.
 
 | Field | Meaning |
 |---|---|
+| `program` | The non-empty executable selected by the contract. It is passed as one argv element through the existing execution seam; shell strings are never accepted. |
+| `argv_json` | A JSON array of strings selected by the contract. It contains `target_test` exactly once, so the observed local invocation cannot be substituted by caller argv. |
 | `target_test` | The runner-native id of the test that must fail. The observed `actual.subject` must equal it exactly. For an outside-in missing-target declaration, declare it at the granularity the runner reports the missing target against — for a compile-time or collection-time failure that is the test FILE, since a module that never imports collects no tests and so offers no single test id to select — and record `expected_failure.subject`, `target_test` and the observed `actual.subject` at that same granularity, each excluding any position suffix (line, column) the runner appends, because a position is not part of the node's identity and moves as edits leave the declaration correct. |
 | `implementation_target` | The production module or symbol GREEN will create or change. Always present, so an outside-in failure that never reaches the test body is still bound to a declared production intent. Recorded for audit only: the predicate reads no field of it. |
 | `expected_failure.phase` | The runner-native lifecycle phase the failure occurs in. **Open vocabulary, not an enum.** pytest's `collection`/`setup`/`call`/`teardown` are one runner's examples; a compiled language has no collection phase at all and declares `build`. The contract compares declared against observed and never validates the value against a list. |
@@ -164,12 +170,14 @@ The RED commit carries what was observed as a Git trailer — one line of JSON w
 top-level fields:
 
 ```text
-red-evidence: {"command":"pytest tests/test_pricing.py::test_discount_reduces_total -q","exit_status":1,"target_test":"tests/test_pricing.py::test_discount_reduces_total","expected":{"phase":"call","class_or_mode":"AssertionError","subject":"tests/test_pricing.py::test_discount_reduces_total"},"actual":{"phase":"call","class_or_mode":"AssertionError","subject":"tests/test_pricing.py::test_discount_reduces_total"},"location":{"declared":{"file":"tests/test_pricing.py","line":8},"observed":{"file":"/srv/build/tests/test_pricing.py","line":8}}}
+red-evidence: {"command":"[\"pytest\",\"tests/test_pricing.py::test_discount_reduces_total\",\"-q\"]","exit_status":1,"target_test":"tests/test_pricing.py::test_discount_reduces_total","expected":{"phase":"call","class_or_mode":"AssertionError","subject":"tests/test_pricing.py::test_discount_reduces_total"},"actual":{"phase":"call","class_or_mode":"AssertionError","subject":"tests/test_pricing.py::test_discount_reduces_total"},"location":{"declared":{"file":"tests/test_pricing.py","line":8},"observed":{"file":"/srv/build/tests/test_pricing.py","line":8}}}
 ```
 
 | Field | Meaning |
 |---|---|
-| `command` | The exact command whose run this is. The predicate reads `command` only to require a non-empty string, and still binds nothing about its content to `target_test`. |
+| `command` | Canonical JSON display of the selected `program` plus `argv_json`; callers do not supply executable argv. |
+
+The runtime observes the selected local process's exit status and whether stderr was captured, but withholds child output. `phase`, `class_or_mode`, and `subject` remain declared semantic fields; this cooperative local observation is not hosted, adversarial, signed, or independently attested provenance.
 | `exit_status` | That command's process exit status, as a JSON number — never a quoted string. A bash-assembled trailer that interpolates `"$?"` inside quotes produces a string and fails the guard; interpolate it unquoted. |
 | `target_test` | The runner-native id the run was asked to produce. |
 | `expected` | The declared `expected_failure`, echoed back: `phase`, `class_or_mode`, `subject`. |
@@ -419,13 +427,13 @@ Framework setup is a one-time cost included in the first TDD plan's RED phase.
 TDD plans produce 2-3 atomic commits (one per phase):
 
 ```
-test(08-02): add failing test for discount reducing order total
+test(08-02-1): add failing test for discount reducing order total
 
 - Tests a percentage discount reduces the total
 - Tests a discount larger than the total floors at zero
 - Tests an absent discount leaves the total unchanged
 
-red-evidence: {"command":"pytest tests/test_pricing.py::test_discount_reduces_total -q","exit_status":1,"target_test":"tests/test_pricing.py::test_discount_reduces_total","expected":{"phase":"call","class_or_mode":"AssertionError","subject":"tests/test_pricing.py::test_discount_reduces_total"},"actual":{"phase":"call","class_or_mode":"AssertionError","subject":"tests/test_pricing.py::test_discount_reduces_total"},"location":{"declared":{"file":"tests/test_pricing.py","line":8},"observed":{"file":"/srv/build/tests/test_pricing.py","line":8}}}
+red-evidence: {"command":"[\"pytest\",\"tests/test_pricing.py::test_discount_reduces_total\",\"-q\"]","exit_status":1,"target_test":"tests/test_pricing.py::test_discount_reduces_total","expected":{"phase":"call","class_or_mode":"AssertionError","subject":"tests/test_pricing.py::test_discount_reduces_total"},"actual":{"phase":"call","class_or_mode":"AssertionError","subject":"tests/test_pricing.py::test_discount_reduces_total"},"location":{"declared":{"file":"tests/test_pricing.py","line":8},"observed":{"file":"/srv/build/tests/test_pricing.py","line":8}}}
 
 feat(08-02): implement discount reduction on order total
 
@@ -462,7 +470,7 @@ When `workflow.tdd_mode` is enabled in config, the RED/GREEN/REFACTOR gate seque
 
 | Gate | Required | Commit Pattern | Validation |
 |------|----------|---------------|------------|
-| RED | Yes | `test({phase}-{plan}): ...` | The commit carries a `red-evidence:` trailer satisfying the RED Predicate — see **RED Contract** |
+| RED | Yes | `test({phase}-{plan}-{task-index}): ...` | The commit carries a `red-evidence:` trailer satisfying the RED Predicate — see **RED Contract** |
 | GREEN | Yes | `feat({phase}-{plan}): ...` | Test passes after implementation |
 | REFACTOR | No | `refactor({phase}-{plan}): ...` | Tests still pass after cleanup |
 
@@ -484,7 +492,7 @@ TAB=$(printf '\t')
 # selects the newest candidate that is plan-scoped by SUBJECT alone — the
 # trailer field is not part of selection, only of the verdict judged below.
 RED_RECORD=$(git log --format='%H%x09%(trailers:key=red-evidence,valueonly,separator=%x20)%x09%s' \
-  | grep -m1 -E "^[0-9a-f]+${TAB}[^${TAB}]*${TAB}test\(${PHASE}-${PLAN}\):" || true)
+  | grep -m1 -E "^[0-9a-f]+${TAB}[^${TAB}]*${TAB}test\(${PHASE}-${PLAN}-${TASK_INDEX}\):" || true)
 RED_SHA=$(printf '%s' "$RED_RECORD" | cut -d"$TAB" -f1 || true)
 if [ -z "$RED_SHA" ]; then
   echo "missing_red_commit"
@@ -494,7 +502,7 @@ else
   printf '%s\n' "$RED_TRAILER"
   if [ -z "$RED_TRAILER" ]; then
     # The two RED failures need different remedies, so they stay distinct.
-    echo "matching test(${PHASE}-${PLAN}) commits exist but none carries a red-evidence: trailer — amend the trailer onto the commit you already made"
+    echo "matching test(${PHASE}-${PLAN}-${TASK_INDEX}) commits exist but none carries a red-evidence: trailer — amend the trailer onto the commit you already made"
     STATUS=1
   else
     # Ask the evidence which file it named, never the path's shape: `tests/`
@@ -525,7 +533,7 @@ Every search matches the commit **subject**, never the message body: a commit th
 
 **This block is illustrative, and it does not check membership at all.** Whether the RED commit actually touches the file its evidence declares is decided in exactly one place: `task.red-evidence-verdict` (`changedFilesInclude`, `src/task-command-router.cts`), which the task-scoped gate in `execute-phase.md` calls. Read this block for the shape of the gate, never as a second specification of what membership admits.
 
-The two RED failures are distinct. No commit whose subject matches `test({phase}-{plan}):` is `missing_red_commit` — there is nothing to read. A matching commit whose `red-evidence:` trailer value comes back empty is a missing RED gate — the commit exists but was made without evidence. Judging the trailer's contents against the RED Predicate **is** mechanised: the gate passes the trailer to `gsd_run query task.red-evidence-verdict` and proceeds only on verdict `authorize`. Any other verdict — `red_commit_not_failing`, `unexpected_pass` — trips the gate under the verdict's own name. Existence of a subject-matching commit authorizes nothing on its own. The predicate is in **RED Contract** above.
+The two RED failures are distinct. No commit whose subject matches `test({phase}-{plan}-{task-index}):` is `missing_red_commit` — there is nothing to read. A matching commit whose `red-evidence:` trailer value comes back empty is a missing RED gate — the commit exists but was made without evidence. Judging the trailer's contents against the RED Predicate **is** mechanised: the gate passes the trailer to `gsd_run query task.red-evidence-verdict` and proceeds only on verdict `authorize`. Any other verdict — `red_commit_not_failing`, `unexpected_pass` — trips the gate under the verdict's own name. Existence of a subject-matching commit authorizes nothing on its own. The predicate is in **RED Contract** above.
 
 If RED or GREEN gate commits are missing, add a `## TDD Gate Compliance` section to SUMMARY.md with the violation details.
 </gate_enforcement>

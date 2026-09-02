@@ -98,6 +98,8 @@ HUMAN_VERIFY_MODE=$(gsd_run query config-get workflow.human_verify_mode --defaul
 grep -n "type=\"checkpoint" .planning/phases/XX-name/{phase}-{plan}-PLAN.md
 ```
 
+For a selected task, carry the original `PLAN_PATH` and its parser-owned one-based `TASK_INDEX` through every runtime query. Do not slice `<task>` text into a transient file or pass caller command argv; `task.red-evidence-verdict` loads the selected contract itself.
+
 **Primary routing: task count threshold (#1979)**
 
 If `INLINE_THRESHOLD > 0` AND `TASK_COUNT <= INLINE_THRESHOLD`: Use Pattern C (inline) regardless of checkpoint type. Small plans execute faster inline — avoids ~14K token subagent spawn overhead and preserves prompt cache. Configure threshold via `workflow.inline_plan_threshold` (default: 2, set to `0` to always spawn subagents).
@@ -292,7 +294,7 @@ End with: **Total deviations:** N auto-fixed (breakdown). **Impact:** assessment
 For `type: tdd` plans — RED-GREEN-REFACTOR:
 
 1. **Infrastructure** (first TDD plan only): detect project, install framework, config, verify empty suite
-2. **RED:** Read `<behavior>` and the task's `<red_contract>` → failing test(s) → run until the failure satisfies the RED contract in `~/.claude/gsd-core/references/tdd.md` → commit with its `red-evidence:` trailer, carrying no credential value in `command`: `test({phase}-{plan}): add failing test for [feature]`. A `tdd="true"` task carrying no `<red_contract>` halts; do not invent one.
+2. **RED:** Read `<behavior>` and the task's `<red_contract>` → failing test(s) → run until the failure satisfies the RED contract in `~/.claude/gsd-core/references/tdd.md` → commit with its `red-evidence:` trailer, carrying no credential value in `command`: `test({phase}-{plan}-{task-index}): add failing test for [feature]`. A `tdd="true"` task carrying no `<red_contract>` halts; do not invent one.
 3. **GREEN:** Read `<implementation>` → minimal code → run (MUST pass) → commit: `feat({phase}-{plan}): implement [feature]`
 4. **REFACTOR:** Clean up → tests MUST pass → commit: `refactor({phase}-{plan}): clean up [feature]`
 
@@ -547,7 +549,7 @@ fi
 If .planning/codebase/ doesn't exist: skip.
 
 ```bash
-FIRST_TASK=$(git log --oneline --grep="feat({phase}-{plan}):" --grep="fix({phase}-{plan}):" --grep="test({phase}-{plan}):" --reverse | head -1 | cut -d' ' -f1)
+FIRST_TASK=$(git log --oneline --grep="feat({phase}-{plan}):" --grep="fix({phase}-{plan}):" --grep="test({phase}-{plan}-" --reverse | head -1 | cut -d' ' -f1)
 git diff --name-only ${FIRST_TASK}^..HEAD 2>/dev/null || true
 ```
 

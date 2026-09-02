@@ -730,7 +730,7 @@ node gsd-tools.cjs task resolve-content --plan .planning/phases/03-name/03-1-PLA
 
 ---
 
-### `task red-evidence-verdict --task-file <path> --trailer <json> --changed-files <paths> --raw`
+### `task red-evidence-verdict --task-file <plan-path> --task-index <one-based-index> --trailer <json> --changed-files <paths> --raw`
 
 Judges a RED commit's `red-evidence:` trailer against the task's `<red_contract>` declaration.
 The evaluator itself never throws; it returns `red_commit_not_failing` on any malformed or
@@ -740,7 +740,8 @@ ambiguous input. Called by the MVP+TDD gate in
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `--task-file` | **Yes** | Path to the regular task file carrying the `<red_contract>` declaration |
+| `--task-file` | **Yes** | Path to the plan carrying the selected `<red_contract>` declaration |
+| `--task-index` | **Yes** | Positive one-based parser index of exactly one task in that plan |
 | `--trailer` | **Yes** | The RED commit's raw `red-evidence:` trailer text (or its JSON payload) |
 | `--changed-files` | **Yes** | Newline-delimited paths from `git show --name-only` on the RED commit |
 | `--raw` | No | Machine-readable JSON output |
@@ -758,10 +759,14 @@ ambiguous input. Called by the MVP+TDD gate in
 |-------|------|-------------|
 | `verdict` | `string` | `authorize`, `red_commit_not_failing`, or `unexpected_pass` |
 | `reason` | `string` | Human-readable explanation of the verdict |
-| `declared_file` | `string` | Present on `authorize` only — the file the trailer declares, for the caller's own changed-files membership check |
+| `observed_exit_status` | `number \| null` | Local selected-contract process status, or `null` when no integer status was observed; child output is withheld |
+| `stderr_captured` | `boolean` | Whether local stderr was captured without returning it |
+
+`phase`, `class_or_mode`, and `subject` remain contract-declared semantic fields. Local exit and stderr observation is not hosted, adversarial, or signed provenance.
+When the selected evidence otherwise authorizes but its declared file is absent from `--changed-files`, the result is `red_commit_not_failing` with the exact reason `the commit's changed files do not include "<declared-file>"`.
 
 ```bash
-node gsd-tools.cjs task red-evidence-verdict --task-file .planning/phases/03-name/03-1-PLAN.md --trailer "$RED_TRAILER" --changed-files "$(git show --name-only --format= "$RED_SHA")" --raw
+node gsd-tools.cjs task red-evidence-verdict --task-file .planning/phases/03-name/03-1-PLAN.md --task-index 1 --trailer "$RED_TRAILER" --changed-files "$(git show --name-only --format= "$RED_SHA")" --raw
 ```
 
 ---
