@@ -417,7 +417,7 @@ describe('#3771 generic revision pattern carries the same separation', () => {
     );
     const yaml = yamlIssueBlocks(issueFormat)[0];
     assert.ok(yaml, 'canonical issue YAML must exist');
-    const keys = yaml.split(/\r?\n/).filter((line) => /^  plans?:/.test(line));
+    const keys = yaml.split(/\r?\n/).filter((line) => /^ {2}plans?:/.test(line));
     assert.equal(keys.length, 1, 'canonical example must contain exactly one of plan or plans');
   });
 
