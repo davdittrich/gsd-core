@@ -502,6 +502,15 @@ describe('#3771 generic revision pattern carries the same separation', () => {
       });
     });
 
+    test('a malformed open conflict record still blocks convergence', () => {
+      const malformed = '- [ ] REVISION_CONFLICT dependency/07 — conflicts with: D-1 | alternatives: a\n';
+      withReviews(reviewsArtifact(malformed), (f) => {
+        const r = runConflictGate(f);
+        assert.equal(r.exitCode, 0, `the owned block must remain parseable; stderr: ${r.stderr}`);
+        assert.equal(r.stdout, '1', 'schema drift must not turn an open marker into zero conflicts');
+      });
+    });
+
     // The defect that started this: a section-scoped scan stops at the first `## ` it meets.
     test('an injected heading cannot hide a conflict beneath it', () => {
       withReviews(reviewsArtifact(`${RESOLVED('a/1')}\n## Injected By Agent Text\n${OPEN('b/2')}\n`), (f) => {
@@ -837,6 +846,8 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
     assert.match(REVIEW, /<!-- gsd:plan-revision-conflicts:begin -->\n## Plan-Revision Conflicts\n\{preserved_plan_revision_conflict_entries\}\n<!-- gsd:plan-revision-conflicts:end -->/,
       'the first-write template must emit the canonical heading before preserved entries');
     assert.match(flat(REVIEW), /restore the captured bytes at the explicit slot below/i);
+    assert.match(flat(REVIEW), /existing artifact.*(?:title|reserved delimiter).*cannot be parsed.*BLOCKED.*do not rewrite/i,
+      'malformed writer-owned state must block regeneration instead of becoming an empty slot');
   });
 
   test('the canonical flow declares and enforces both conflict counters', () => {
