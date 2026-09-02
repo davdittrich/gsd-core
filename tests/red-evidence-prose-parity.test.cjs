@@ -21,12 +21,12 @@ test('stale RED membership and verdict exit contracts are rejected and their gua
   assert.match(commands, /`--red-sha`.*sole parent.*NUL-delimited changed paths/s);
   assert.match(commands, /selected `<red_contract>`'s `target_test`/);
   assert.doesNotMatch(commands, /receipt is consumed terminally on every verdict path/i);
-  assert.match(commands, /Missing or duplicate required security flags.*exit `0`.*before any receipt claim/s);
-  assert.match(commands, /valid-shape `--red-sha`.*after the receipt is claimed and read.*consume.*exit `0`/s);
+  assert.match(commands, /Missing or duplicate required security flags.*exit `0`.*before\s+any receipt claim/s);
+  assert.match(commands, /valid-shape `--red-sha`.*after\s+the receipt is claimed\s+and\s+read.*consume.*exit `0`/s);
   assert.match(commands, /Successfully claimed receipts are consumed on every terminal verdict path/);
-  assert.match(commands, /Strict command-shape parser rejection exits non-zero/);
+  assert.match(commands, /Strict\s+command-shape parser rejection exits non-zero/);
   assert.doesNotMatch(inventory, /consumes the capture receipt terminally on every verdict path/i);
-  assert.match(inventory, /Security-flag cardinality failures.*before claim.*valid-shape.*after claim\/read.*claimed receipts.*consumed.*terminal/s);
+  assert.match(inventory, /Security-flag cardinality.*failures.*before claim.*valid-shape.*after claim\/read.*claimed receipts.*consumed.*terminal/s);
 
   assert.doesNotMatch(inventory, /`--changed-files`/);
   assert.match(inventory, /`--red-sha`.*sole parent.*NUL-delimited changed paths/s);

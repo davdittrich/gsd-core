@@ -799,14 +799,16 @@ recorded command text or any test.
 from Git. It requires that parent to equal the receipt's `pre_red_head`, that receipt
 plan/task/target values match the selected contract, that the trailer records the same integer exit
 status, that the local process terminated normally and nonzero, and that those changed paths include
-the selected `<red_contract>`'s `target_test`. The receipt is consumed terminally on every verdict
-path. Missing, stale, colliding, oversized, symlinked, malformed, or unconsumable receipts fail
+the selected `<red_contract>`'s `target_test`. Missing, stale, colliding, oversized, symlinked, malformed, or unconsumable receipts fail
 closed.
 
 **Exit codes:**
 
-Missing or duplicate required security flags produce a typed fail-closed verdict at exit `0`;
-malformed command shape or flag value exits non-zero.
+Missing or duplicate required security flags produce a typed fail-closed verdict at exit `0` before
+any receipt claim. A present, valid-shape `--red-sha` is evaluated after the receipt is claimed and
+read; Git/object failures consume that claimed receipt and produce a typed fail-closed verdict at
+exit `0`. Successfully claimed receipts are consumed on every terminal verdict path. Strict
+command-shape parser rejection exits non-zero before typed verdict production.
 
 | Exit | Meaning |
 |------|---------|
