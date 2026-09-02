@@ -560,10 +560,10 @@ describe('#3771 generic revision pattern carries the same separation', () => {
 
     test('a recognizable malformed open conflict record still blocks convergence', () => {
       for (const malformed of [
-        '- [ ] REVISION_CONFLICT dependency/07 — required_property: p | conflicts with: D-1 | alternatives: a\n',
-        '- [ ] REVISION_CONFLICT\tdependency/07 — required_property: p | conflicts with: D-1 | alternatives: a\n',
-        ' - [ ] REVISION_CONFLICT dependency/07 — required_property: p | conflicts with: D-1 | alternatives: a\n',
-        '-  [ ] REVISION_CONFLICT dependency/07 — required_property: p | conflicts with: D-1 | alternatives: a\n',
+        '- [ ] REVISION_CONFLICT dependency%2F07 — required_property: p | conflicts with: D-1 | alternatives: a\n',
+        '- [ ] REVISION_CONFLICT\tdependency%2F07 — required_property: p | conflicts with: D-1 | alternatives: a\n',
+        ' - [ ] REVISION_CONFLICT dependency%2F07 — required_property: p | conflicts with: D-1 | alternatives: a\n',
+        '-  [ ] REVISION_CONFLICT dependency%2F07 — required_property: p | conflicts with: D-1 | alternatives: a\n',
       ]) {
         withReviews(reviewsArtifact(malformed), (f) => {
           const r = runConflictGate(f);

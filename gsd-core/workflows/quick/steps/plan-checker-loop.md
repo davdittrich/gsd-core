@@ -115,7 +115,7 @@ Agent(
 
 **On `## REVISION_CONFLICT`:** do NOT increment `iteration_count` or check. Present alternatives to the user; ask them to adopt a named alternative, override the named constraint and apply the hint, or amend the constraint; accepting the blocker is NOT offered here. Derive sorted unique `(issue_identity, required_property)` keys. Any canonical conflict key repeated in consecutive returns, or the THIRD conflict return, escalates as a stall. Percent-encode each nonempty UTF-8 field per RFC 3986 (only unreserved bytes remain). Re-spawn with `{issue_identity} | required_property: {property} | chosen_resolution: {chosen_resolution}` triples and re-evaluate its return from the top of this handler. Quick has no persistence channel.
 
-**Only on `## REVISION COMPLETE`:** spawn checker, then increment `iteration_count`.
+**Only on `## REVISION COMPLETE`:** require `### Applied Conflict Resolutions` to acknowledge every exact `issue_identity | required_property: property | chosen_resolution: chosen_resolution` triple supplied in the re-spawn prompt. If any triple is absent or mismatched, treat the return as unknown: offer Retry or Stop; do not check or increment. On a qualifying return after exact acknowledgement, spawn checker, then increment `iteration_count`.
 
 **Otherwise (unknown, empty, or both markers):** offer Retry or Stop. Do not check or increment.
 

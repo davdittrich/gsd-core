@@ -345,6 +345,13 @@ gsd_run query commit "docs($PHASE): UI design contract" --files "$PHASE_DIR/$PAD
 **Phase:** {phase_number} - {phase_name}
 **Design System:** {shadcn preset / manual / none}
 
+### Applied Conflict Resolutions
+| Issue | required_property | Chosen resolution |
+|-------|-------------------|-------------------|
+| {exact issue_identity} | {exact property} | {exact chosen_resolution} |
+
+Omit this section when no conflict resolutions were supplied.
+
 ### Contract Summary
 - Spacing: {scale summary}
 - Typography: {N} sizes, {N} weights

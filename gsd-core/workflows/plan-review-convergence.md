@@ -410,7 +410,12 @@ if [ ! -f "${REVIEWS_FILE}" ]; then
   exit 1
 fi
 if CONFLICT_SCAN=$(awk '
-  BEGIN { saw_title = 0; in_owned = 0; saw_heading = 0; done = 0; count = 0 }
+  BEGIN {
+    saw_title = 0; in_owned = 0; saw_heading = 0; done = 0; count = 0
+    encoded = "([A-Za-z0-9._~-]|%[0-9A-F][0-9A-F])+"
+    open_record = "^[[:space:]]*-[[:space:]]+\\[[[:space:]]\\][[:space:]]+REVISION_CONFLICT[[:space:]]+" encoded "[[:space:]]+—[[:space:]]+required_property:[[:space:]]+" encoded "[[:space:]]+\\|[[:space:]]+conflicts with:[[:space:]]+" encoded "[[:space:]]+\\|[[:space:]]+alternatives:[[:space:]]+" encoded "[[:space:]]*$"
+    resolved_record = "^[[:space:]]*-[[:space:]]+\\[[xX]\\][[:space:]]+REVISION_CONFLICT[[:space:]]+" encoded "[[:space:]]+—[[:space:]]+required_property:[[:space:]]+" encoded "[[:space:]]+\\|[[:space:]]+conflicts with:[[:space:]]+" encoded "[[:space:]]+\\|[[:space:]]+alternatives:[[:space:]]+" encoded "[[:space:]]+\\|[[:space:]]+resolved:[[:space:]]+" encoded "[[:space:]]*$"
+  }
   { sub(/\r$/, "") }
   !saw_title && /^# Cross-AI Plan Review — Phase / { saw_title = 1; next }
   saw_title && !in_owned && !done {
@@ -428,11 +433,11 @@ if CONFLICT_SCAN=$(awk '
     for (i = 1; i <= count; i++) print open[i]
     exit
   }
-  in_owned && $0 ~ /^[[:space:]]*-[[:space:]]+\[[[:space:]]\][[:space:]]+REVISION_CONFLICT[[:space:]]+[^[:space:]]+[[:space:]]+—[[:space:]]+required_property:[[:space:]]+[^|]+[[:space:]]+\|[[:space:]]+conflicts with:[[:space:]]+[^|]+[[:space:]]+\|[[:space:]]+alternatives:[[:space:]]+[^|]+[[:space:]]*$/ {
+  in_owned && $0 ~ open_record {
     open[++count] = $0
     next
   }
-  in_owned && $0 ~ /^[[:space:]]*-[[:space:]]+\[[xX]\][[:space:]]+REVISION_CONFLICT[[:space:]]+[^[:space:]]+[[:space:]]+—[[:space:]]+required_property:[[:space:]]+[^|]+[[:space:]]+\|[[:space:]]+conflicts with:[[:space:]]+[^|]+[[:space:]]+\|[[:space:]]+alternatives:[[:space:]]+[^|]+[[:space:]]+\|[[:space:]]+resolved:[[:space:]]+[^|]+[[:space:]]*$/ { next }
+  in_owned && $0 ~ resolved_record { next }
   in_owned && $0 == "" { next }
   in_owned { exit 2 }
   END { if (!done) exit 2 }
@@ -452,7 +457,8 @@ between `<!-- gsd:plan-revision-conflicts:begin -->` and
 `<!-- gsd:plan-revision-conflicts:end -->`. Inside that slot, `/gsd:plan-phase` records each
 conflict as a `- [ ] REVISION_CONFLICT` checklist line and flips it to
 `- [x] REVISION_CONFLICT` when resolved. The reader counts only the first fixed slot at that
-position and stops at its explicit end delimiter. Reviewer output is rendered after the slot, so
+position, accepts only canonical RFC 3986 percent-encoded fields, and stops at its explicit end
+delimiter. Any malformed field fails the convergence gate closed. Reviewer output is rendered after the slot, so
 raw reviewer text containing either the heading or an exact conflict-shaped checklist line cannot
 forge blocking state. There is deliberately no fallback to the prior global line-shape scan: that
 shape never merged to `next`, and accepting both grammars would recreate the reviewer collision.
