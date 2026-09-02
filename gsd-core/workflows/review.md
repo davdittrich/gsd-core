@@ -689,7 +689,10 @@ Combine all review responses into `{phase_dir}/{padded_phase}-REVIEWS.md`:
 Capture only the existing conflict entry bytes after the exact `## Plan-Revision Conflicts`
 heading and before the end of the first exact `<!-- gsd:plan-revision-conflicts:begin -->` /
 `<!-- gsd:plan-revision-conflicts:end -->` pair immediately after the artifact title, if present,
-as `{preserved_plan_revision_conflict_entries}`. Ignore identical headings or delimiters in reviewer
+as `{preserved_plan_revision_conflict_entries}`. A nonexistent artifact has empty preserved entries.
+If an existing artifact contains its title or either reserved delimiter but the exact canonical
+bounded slot cannot be parsed, report `BLOCKED` and do not rewrite the artifact; never synthesize
+empty state over malformed reserved state. Ignore identical headings or delimiters in reviewer
 output: reviewers do not own blocking state. Restore the captured bytes at the explicit slot below.
 
 After all reviewers complete, collect trim metadata files written during the run. For each reviewer that was trimmed (i.e. a `.metadata.json` file exists and `hardFailed` or `omitted` is non-empty, or `projectMdShrunk` is true, or `planTruncationPct > 0`), include a `trimmed_reviewers` block in the frontmatter. Omit the key entirely if no reviewer was trimmed.

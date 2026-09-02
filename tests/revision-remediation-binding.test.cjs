@@ -723,8 +723,9 @@ describe('#3771 every revision orchestrator routes conflicts instead of retrying
     assert.match(CONVERGENCE, /OPEN_CONFLICTS=/,
       'the count must be read from REVIEWS.md — CYCLE_SUMMARY does not carry it');
     // The counter and writer must agree on both marker and ownership boundary.
-    assert.match(CONVERGENCE, /in_owned && \/\^- \\\[ \\\] REVISION_CONFLICT \.\*required_property:\//,
-      'the gate must count the conflict line shape only while inside the owned slot');
+    assert.ok(CONVERGENCE.split('\n').some((line) =>
+      line.includes('in_owned &&') && line.includes('REVISION_CONFLICT( |$)')),
+      'the gate must count every open conflict marker only while inside the owned slot');
     assert.match(CONVERGENCE, /gsd:plan-revision-conflicts:begin/);
     assert.match(CONVERGENCE, /gsd:plan-revision-conflicts:end/);
     assert.doesNotMatch(CONVERGENCE, /grep -c/,

@@ -429,7 +429,7 @@ if OPEN_CONFLICTS=$(awk '
     print count
     exit
   }
-  in_owned && /^- \[ \] REVISION_CONFLICT .*required_property:/ { count++ }
+  in_owned && /^- \[ \] REVISION_CONFLICT( |$)/ { count++ }
   END { if (!done) exit 2 }
 ' "${REVIEWS_FILE}"); then
   :
