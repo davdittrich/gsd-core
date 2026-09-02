@@ -31,20 +31,36 @@ describe('SDK-removal CJS query family dispatch', () => {
     assert.equal(parsed.retryAfterSeconds, 45);
   });
 
-  test('query task.is-behavior-adding supports --pick for workflow gate usage', () => {
-    const task = [
-      '<task tdd="true">',
+  test('query task.is-behavior-adding selects the parser-owned plan index for workflow gates', () => {
+    const planPath = path.join(phaseDir, '01-01-PLAN.md');
+    fs.writeFileSync(planPath, [
+      '<task type="auto" tdd="true">',
       '<behavior>User can save a profile</behavior>',
       '<files>',
       '- src/profile.js',
       '- tests/profile.test.js',
       '</files>',
       '</task>',
-    ].join('\n');
+      '<task type="checkpoint:human-verify"><name>middle</name></task>',
+      '<task type="auto"><files>docs/profile.md</files></task>',
+    ].join('\n'));
 
-    const result = runGsdTools(['query', 'task.is-behavior-adding', '--task-content', task, '--pick', 'is_behavior_adding'], tmpDir);
-    assert.strictEqual(result.success, true, result.error);
-    assert.equal(result.output, 'true');
+    const first = runGsdTools([
+      'query', 'task.is-behavior-adding', planPath, '--task-index', '1', '--pick', 'is_behavior_adding',
+    ], tmpDir);
+    assert.strictEqual(first.success, true, first.error);
+    assert.equal(first.output, 'true');
+
+    const middle = runGsdTools([
+      'query', 'task.is-behavior-adding', planPath, '--task-index', '2', '--pick', 'is_behavior_adding',
+    ], tmpDir);
+    assert.strictEqual(middle.success, false, 'checkpoint task index must fail closed');
+
+    const last = runGsdTools([
+      'query', 'task.is-behavior-adding', planPath, '--task-index', '3', '--pick', 'is_behavior_adding',
+    ], tmpDir);
+    assert.strictEqual(last.success, true, last.error);
+    assert.equal(last.output, 'false');
   });
 
   test('query check auto-mode reads workflow flags from config', () => {

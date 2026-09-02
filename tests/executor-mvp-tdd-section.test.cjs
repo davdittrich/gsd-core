@@ -6,6 +6,7 @@
  */
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('fs');
 const path = require('path');
 
@@ -408,11 +409,18 @@ function trailerLine() {
 }
 
 function runIsBehaviorAdding(taskContent) {
-  const result = runNode(
-    [GSD_TOOLS, 'query', 'task.is-behavior-adding', '--task-content', taskContent],
-  );
-  assert.strictEqual(result.exitCode, 0, `gsd-tools exited ${result.exitCode}: ${result.stderr}`);
-  return JSON.parse(result.stdout);
+  const root = createTempDir('gsd-3770-behavior-plan-');
+  try {
+    fs.writeFileSync(path.join(root, 'plan.md'), taskContent);
+    const result = runNode(
+      [GSD_TOOLS, 'query', 'task.is-behavior-adding', 'plan.md', '--task-index', '1'],
+      { cwd: root },
+    );
+    assert.strictEqual(result.exitCode, 0, `gsd-tools exited ${result.exitCode}: ${result.stderr}`);
+    return JSON.parse(result.stdout);
+  } finally {
+    cleanup(root);
+  }
 }
 
 const CONTROLLED_FAILURE_CODE = 'process.stderr.write("fixture failure\\n"); process.exit(1)';
@@ -423,8 +431,6 @@ const CONTRACT_TASK_LINES = [
   '  <files>src/pricing.py, tests/test_pricing.py</files>',
   '  <behavior>Applying a discount reduces the order total.</behavior>',
   '  <red_contract>',
-  '    <program>node</program>',
-  `    <argv_json>${JSON.stringify(controlledNodeArgv('tests/test_pricing.py::test_discount_reduces_total'))}</argv_json>`,
   '    <target_test>tests/test_pricing.py::test_discount_reduces_total</target_test>',
   '    <implementation_target>pricing.apply_discount</implementation_target>',
   '    <expected_failure>',
@@ -435,14 +441,6 @@ const CONTRACT_TASK_LINES = [
   '  </red_contract>',
   '</task>',
 ];
-
-const OBSERVED_FAILURE = Object.freeze({
-  exit_status: 1,
-  stderr_captured: true,
-  spawn_error: false,
-  signal: null,
-  timed_out: false,
-});
 
 /**
  * Give the evaluator the same typed local observation the router supplies.
@@ -457,11 +455,22 @@ function evaluateObservedEvidence(taskSource, trailerText, parsedContract) {
   } catch {
     // The evaluator owns malformed-trailer classification.
   }
+  const target = taskSource.match(/<target_test>([\s\S]*?)<\/target_test>/)?.[1].trim() ?? '';
+  const parent = '1'.repeat(40);
   const { evaluateRedEvidence } = require(RED_EVIDENCE_PREDICATE_PATH);
-  return evaluateRedEvidence(taskSource, trailerText, {
-    ...OBSERVED_FAILURE,
+  return evaluateRedEvidence(taskSource, trailerText, JSON.stringify({
+    version: 1,
+    plan: 'plan.md',
+    task_index: 1,
+    target,
+    pre_red_head: parent,
     exit_status: exitStatus,
-  }, parsedContract);
+    signal: null,
+    timed_out: false,
+    error: false,
+    stdout_bytes: 0,
+    stderr_bytes: 1,
+  }), { plan: 'plan.md', task_index: 1, red_parent: parent }, parsedContract);
 }
 
 describe('RED contract — router still classifies a red_contract-carrying task (#3770)', () => {
@@ -490,15 +499,15 @@ describe('RED contract — router still classifies a red_contract-carrying task 
 // executor dispatch — its text IS the deployed contract, so reading the file
 // is testing the product, not grepping an implementation.
 describe('RED contract — gsd-core/references/tdd.md (#3770)', () => {
-  test('### Declaration names exactly the nine contract tags', () => {
+  test('### Declaration names exactly the seven non-executable contract tags', () => {
     const block = soleFencedBlock(CONTRACT, 'Declaration');
     const found = new Set();
     for (const match of block.matchAll(/<\/?([a-z][a-z_]{0,60})[\s>]/g)) found.add(match[1]);
     assert.deepStrictEqual(
       [...found].sort(),
-      ['argv_json', 'class_or_mode', 'expected_failure', 'implementation_target', 'phase',
-        'program', 'red_contract', 'subject', 'target_test'],
-      'the declaration example must carry exactly the nine contract tags — ' +
+      ['class_or_mode', 'expected_failure', 'implementation_target', 'phase',
+        'red_contract', 'subject', 'target_test'],
+      'the declaration example must carry exactly the seven non-executable contract tags — ' +
       'a stray, renamed or dropped field is a schema change. See #3770.',
     );
   });
@@ -590,7 +599,7 @@ describe('RED contract — gsd-core/references/tdd.md (#3770)', () => {
       },
       {
         section: 'Evidence',
-        needle: 'Canonical JSON display of the selected `program` plus `argv_json`',
+        needle: 'actual RED command argv is supplied only to `task.red-evidence-capture` after `--`',
         verdict: null,
         why: 'the predicate now validates `command` for non-emptiness (GATE-06), but a reader '
           + 'who believes it is validated AGAINST `target_test` will build a coded gate that '
@@ -810,11 +819,7 @@ describe('RED contract — gsd-core/references/tdd.md (#3770)', () => {
    * guard (D-24).
    */
   function buildTaskContent(plan, { redContractCount = 1 } = {}) {
-    const program = plan.program ?? 'pytest';
-    const argv = plan.argv ?? [plan.target_test, '-q'];
     const block = `<red_contract>
-  <program>${program}</program>
-  <argv_json>${JSON.stringify(argv)}</argv_json>
   <target_test>${plan.target_test}</target_test>
   <implementation_target>${plan.implementation_target}</implementation_target>
   <expected_failure>
@@ -2268,11 +2273,47 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
   const GATE_BASE_ENV = {
     MVP_MODE: 'true', TDD_MODE: 'true', PHASE_NUMBER: '08', PLAN_ID: '02', TASK_ID: '1',
   };
-  const runGate = (script, cwd, taskFile) => runHook(script, [], {
-    interpreter: 'bash',
-    cwd,
-    env: { ...process.env, ...GATE_BASE_ENV, PLAN_PATH: taskFile, TASK_INDEX: '1' },
-  });
+  const seedReceiptForExactCommit = (cwd, taskFile, env) => {
+    const subjectPrefix = `test(${env.PHASE_NUMBER}-${env.PLAN_ID}-${env.TASK_INDEX}):`;
+    const records = runGit(['log', '--format=%H%x09%s'], { cwd }).stdout.trim().split('\n');
+    const record = records.find((line) => line.split('\t')[1]?.startsWith(subjectPrefix));
+    if (!record) return;
+
+    const redSha = record.split('\t')[0];
+    const parent = runGit(['rev-list', '--parents', '-n', '1', redSha], { cwd })
+      .stdout.trim().split(' ')[1];
+    if (!parent) return;
+    const taskSource = fs.readFileSync(taskFile, 'utf8');
+    const target = taskSource.match(/<target_test>([\s\S]*?)<\/target_test>/)?.[1].trim();
+    if (!target) return;
+    const relativePlan = path.relative(cwd, taskFile).split(path.sep).join('/');
+    const receiptId = crypto.createHash('sha256')
+      .update(`${relativePlan}\0${env.TASK_INDEX}\0${target}`)
+      .digest('hex');
+    const gitDir = runGit(['rev-parse', '--path-format=absolute', '--git-dir'], { cwd }).stdout.trim();
+    fs.writeFileSync(path.join(gitDir, `gsd-red-evidence-${receiptId}.json`), JSON.stringify({
+      version: 1,
+      plan: relativePlan,
+      task_index: Number(env.TASK_INDEX),
+      target,
+      pre_red_head: parent,
+      exit_status: 1,
+      signal: null,
+      timed_out: false,
+      error: false,
+      stdout_bytes: 0,
+      stderr_bytes: 1,
+    }), { mode: 0o600 });
+  };
+  const runGate = (script, cwd, taskFile, overrides = {}) => {
+    const env = {
+      ...GATE_BASE_ENV, PLAN_PATH: taskFile, TASK_INDEX: '1', ...overrides,
+    };
+    seedReceiptForExactCommit(cwd, taskFile, env);
+    return runHook(script, [], {
+      interpreter: 'bash', cwd, env: { ...process.env, ...env },
+    });
+  };
 
   // `CONTRACT_TASK_LINES`' own runner-native id, string-replaced by the
   // optional second argument so a caller can point the SAME fixture at a
@@ -2916,162 +2957,141 @@ describe('MVP+TDD gate — parser-owned task identity (#4115)', () => {
     assert.ok(!gate.includes('TASK_FILE'),
       'the execution gate must not depend on TASK_FILE: no workflow producer establishes it.');
   });
-});
+  test('the production executor owns one document-order task ordinal before every branch', () => {
+    const agentSource = fs.readFileSync(AGENT, 'utf8');
+    const loop = agentSource.slice(agentSource.indexOf('For each task:'), agentSource.indexOf('</step>', agentSource.indexOf('For each task:')));
+    const prefix = agentSource.slice(0, agentSource.indexOf('For each task:'));
+    assert.match(prefix, /TASK_INDEX=0\s*$/,
+      'TASK_INDEX must be initialized immediately before document-order iteration.');
+    assert.match(loop, /For each task:\s*\n\s*TASK_INDEX=\$\(\(TASK_INDEX \+ 1\)\)\s*\n\s*0\. \*\*Precondition check/,
+      'the ordinal must increment exactly once before precondition and auto/tracer/checkpoint branching.');
+    assert.strictEqual((loop.match(/TASK_INDEX=\$\(\(TASK_INDEX \+ 1\)\)/g) || []).length, 1,
+      'the real task loop must contain one ordinal increment, not one per branch.');
+  });
 
-describe('task red-evidence-verdict — evidence file membership (#3770 D-1 revised)', () => {
-  const REPO_ROOT = path.join(__dirname, '..');
+  test('capture replaces RED execution and verdict receives only plan, index, SHA, and trailer', () => {
+    for (const [name, source] of [
+      ['agents/gsd-executor.md', fs.readFileSync(AGENT, 'utf8')],
+      ['gsd-core/workflows/execute-plan.md', fs.readFileSync(path.join(__dirname, '..', 'gsd-core', 'workflows', 'execute-plan.md'), 'utf8')],
+    ]) {
+      assert.match(source,
+        /task\.red-evidence-capture --task-file "\$PLAN_PATH" --task-index "\$TASK_INDEX" -- \[actual RED command argv\]/,
+        `${name} must route the actual RED argv through capture.`);
+      assert.match(source, /replaces the normal RED test invocation/i,
+        `${name} must prohibit a duplicate direct RED rerun.`);
+    }
 
-  function shippedTrailerObject() {
-    const trailer = JSON.parse(trailerLine().slice(trailerLine().indexOf('{')));
-    trailer.command = JSON.stringify(['node', ...controlledNodeArgv(trailer.target_test)]);
-    return trailer;
-  }
+    const gate = extractGateSnippet(EXECUTE_PHASE_SRC);
+    const verdictLine = gate.split('\n').find((line) => line.includes('task.red-evidence-verdict'));
+    assert.ok(verdictLine?.includes('--red-sha "$RED_SHA"'), 'verdict must receive the selected RED SHA.');
+    assert.ok(!verdictLine?.includes('--changed-files'), 'verdict derives changed files internally.');
+    assert.ok(!verdictLine?.includes(' -- '), 'verdict never receives execution argv.');
+  });
 
-  function trailerTextWithDeclaredFile(declaredFile) {
-    const trailer = shippedTrailerObject();
-    trailer.location.declared.file = declaredFile;
-    return `red-evidence: ${JSON.stringify(trailer)}`;
-  }
+  test('decimal plan identity uses a literal tab-delimited subject prefix', () => {
+    const gate = extractGateSnippet(EXECUTE_PHASE_SRC);
+    assert.match(gate,
+      /grep -m1 -F "\$\{TAB\}test\(\$\{PHASE_NUMBER\}-\$\{PLAN_ID\}-\$\{TASK_INDEX\}\):"/,
+      'a decimal phase must be fixed-string data, never interpolated into an ERE.');
+    assert.ok(!gate.includes('grep -m1 -E'), 'the RED subject lookup must contain no regex interpolation.');
+  });
 
-  function writeTaskFile(cwd) {
-    const p = path.join(cwd, 'task.md');
-    fs.writeFileSync(p, CONTRACT_TASK_LINES.join('\n'));
-    return p;
-  }
+  test('one production task ordinal reaches capture and literal commit verification', (t) => {
+    const dir = createTempGitProject('gsd-4115-task-index-');
+    t.after(() => cleanup(dir));
+    runGit(['config', 'core.hooksPath', ''], { cwd: dir });
+    const baseBranch = runGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: dir }).stdout.trim();
+    fs.mkdirSync(path.join(dir, '.planning'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.planning', 'config.json'),
+      JSON.stringify({ git: { base_branch: baseBranch } }));
+    runGit(['checkout', '-b', 'gsd-4115-work'], { cwd: dir });
 
-  function runVerdict(args, cwd) {
-    return runNode([GSD_TOOLS, 'query', 'task', 'red-evidence-verdict', '--task-index', '1', ...args], { cwd });
-  }
+    const target = 'tests/task-index.test.js';
+    const contract = [
+      '  <files>src/task-index.js, tests/task-index.test.js</files>',
+      '  <behavior>one task ordinal stays stable</behavior>',
+      '  <red_contract>',
+      `    <target_test>${target}</target_test>`,
+      '    <implementation_target>taskIndex</implementation_target>',
+      '    <expected_failure>',
+      '      <class_or_mode>assertion_failure</class_or_mode>',
+      '      <phase>test</phase>',
+      '      <subject>one production task ordinal reaches capture and literal commit verification</subject>',
+      '    </expected_failure>',
+      '  </red_contract>',
+    ];
+    const planPath = path.join(dir, 'plan.md');
+    fs.writeFileSync(planPath, [
+      '<task type="auto" tdd="true">', ...contract, '</task>',
+      '<task type="checkpoint:human-verify"><name>middle</name></task>',
+      '<task type="auto" tdd="true">', ...contract, '</task>',
+    ].join('\n'));
 
-  // Each row mutates only `location.declared.file` on the shipped exemplar,
-  // holding `location.observed.file` (`/srv/build/tests/test_pricing.py`)
-  // fixed so `locationsAgree`'s own basename comparison keeps passing —
-  // every row's basename is `test_pricing.py` — and only the membership
-  // test, not the predicate's own verdict, varies row to row.
-  const MEMBERSHIP_ROWS = [
-    { name: 'the declared file is in the commit',
-      declaredFile: 'tests/test_pricing.py', changedFiles: 'tests/test_pricing.py',
-      expected: 'authorize' },
-    { name: 'a bare-basename declaration',
-      declaredFile: 'test_pricing.py', changedFiles: 'tests/test_pricing.py',
-      expected: 'authorize' },
-    { name: 'a backslash-separated declaration',
-      declaredFile: 'tests\\test_pricing.py', changedFiles: 'tests/test_pricing.py',
-      expected: 'authorize' },
-    { name: 'an absolute declaration',
-      declaredFile: '/srv/build/tests/test_pricing.py', changedFiles: 'tests/test_pricing.py',
-      expected: 'authorize' },
-    // The mirror of the bare-basename DECLARATION row above. That row is the
-    // accepted residual — a bare declaration cannot identify a directory, so
-    // it matches at any depth. This one is not: the declaration names a
-    // directory, so an unrelated root-level file sharing only its basename
-    // must not stand in for it. Reached in production via
-    // `execute-phase.md:229`, which passes `git show --name-only` output
-    // straight through. See gsd-core-ifc.
-    { name: 'a bare-basename changed file against a directory-qualified declaration',
-      declaredFile: 'pkg/pricing/test_pricing.py', changedFiles: 'test_pricing.py',
-      expected: 'red_commit_not_failing' },
-    { name: 'the commit touches only source',
-      declaredFile: 'tests/test_pricing.py', changedFiles: 'src/pricing.py',
-      expected: 'red_commit_not_failing' },
-    { name: 'the commit touches a DIFFERENT test file',
-      declaredFile: 'tests/test_pricing.py', changedFiles: 'tests/test_shipping.py',
-      expected: 'red_commit_not_failing' },
-    { name: 'an empty changed-file list',
-      declaredFile: 'tests/test_pricing.py', changedFiles: '',
-      expected: 'red_commit_not_failing' },
-    { name: 'blank lines only',
-      declaredFile: 'tests/test_pricing.py', changedFiles: '\n\n',
-      expected: 'red_commit_not_failing' },
-  ];
+    const trailer = `red-evidence: ${JSON.stringify({
+      command: JSON.stringify(['node', '--test', target]),
+      exit_status: 1,
+      target_test: target,
+      expected: {
+        phase: 'test', class_or_mode: 'assertion_failure',
+        subject: 'one production task ordinal reaches capture and literal commit verification',
+      },
+      actual: {
+        phase: 'test', class_or_mode: 'assertion_failure',
+        subject: 'one production task ordinal reaches capture and literal commit verification',
+      },
+      location: {
+        declared: { file: target, line: 1 }, observed: { file: target, line: 1 },
+      },
+    })}`;
+    const capture = (taskIndex) => runNode([
+      GSD_TOOLS, 'query', 'task.red-evidence-capture',
+      '--task-file', planPath, '--task-index', String(taskIndex), '--',
+      process.execPath, '-e', 'process.stderr.write("RED\\n"); process.exit(1)', target,
+    ], { cwd: dir });
+    const redCommit = (taskIndex, marker) => {
+      const captured = capture(taskIndex);
+      assert.strictEqual(captured.exitCode, 0, captured.stderr);
+      fs.mkdirSync(path.join(dir, 'tests'), { recursive: true });
+      fs.writeFileSync(path.join(dir, target), `${marker}\n`);
+      runGit(['add', target], { cwd: dir });
+      runGit(['commit', '-m', `test(08.1-02-${taskIndex}): ${marker}`, '-m', trailer], { cwd: dir });
+    };
+    redCommit(1, 'first sibling');
+    redCommit(3, 'last sibling');
+    fs.writeFileSync(path.join(dir, 'decoy.txt'), 'newer decimal decoy\n');
+    runGit(['add', 'decoy.txt'], { cwd: dir });
+    runGit(['commit', '-m', 'test(08x1-02-3): regex decoy', '-m', trailer], { cwd: dir });
 
-  test('the verdict verb refuses a commit that does not touch the file its evidence names', (t) => {
-    const scratch = createTempDir('gsd-3770-changed-files-');
-    t.after(() => cleanup(scratch));
-    const taskFile = writeTaskFile(scratch);
+    const scriptDir = createTempDir('gsd-4115-task-index-script-');
+    t.after(() => cleanup(scriptDir));
+    const script = path.join(scriptDir, 'gate.sh');
+    fs.writeFileSync(script,
+      `#!/usr/bin/env bash\nset -e\ngsd_run() { node ${JSON.stringify(GSD_TOOLS)} "$@"; }\n${extractGateSnippet(EXECUTE_PHASE_SRC)}`,
+      { mode: 0o755 });
+    const result = runHook(script, [], {
+      interpreter: 'bash', cwd: dir, env: {
+        ...process.env, TDD_MODE: 'true', MVP_MODE: 'true',
+        PHASE_NUMBER: '08.1', PLAN_ID: '02', TASK_ID: '3',
+        PLAN_PATH: planPath, TASK_INDEX: '3',
+      },
+    });
+    assert.strictEqual(result.exitCode, 0,
+      `literal lookup must reject the newer dot-wildcard decoy. stdout: ${result.stdout} stderr: ${result.stderr}`);
+    const gitDir = runGit(['rev-parse', '--path-format=absolute', '--git-dir'], { cwd: dir }).stdout.trim();
+    assert.strictEqual(
+      fs.readdirSync(gitDir).filter((name) => name.startsWith('gsd-red-evidence-')).length,
+      1,
+      'verdict must consume only task 3 receipt, leaving the identical task 1 sibling isolated.',
+    );
+  });
 
-    for (const row of MEMBERSHIP_ROWS) {
-      const trailerText = trailerTextWithDeclaredFile(row.declaredFile);
-      const result = runVerdict(
-        ['--task-file', taskFile, '--trailer', trailerText, '--changed-files', row.changedFiles],
-        scratch,
-      );
-      assert.strictEqual(result.exitCode, 0,
-        `${row.name}: the verb must exit 0 and report its verdict on stdout, not crash. `
-        + `stderr: ${result.stderr}`);
-      const parsed = JSON.parse(result.stdout);
-      assert.strictEqual(parsed.verdict, row.expected,
-        `${row.name}: expected \`${row.expected}\`, got \`${parsed.verdict}\` `
-        + `(reason: ${parsed.reason}). declared_file=${JSON.stringify(row.declaredFile)} `
-        + `changed_files=${JSON.stringify(row.changedFiles)}. See #3770 (D-1 revised).`);
-      if (row.expected === 'red_commit_not_failing') {
-        assert.ok(typeof parsed.reason === 'string' && parsed.reason.includes(row.declaredFile),
-          `${row.name}: the refusal reason must name the declared file so a human reading it `
-          + `can act on it. Got: ${parsed.reason}`);
-        assert.strictEqual(parsed.reason,
-          `the commit's changed files do not include "${row.declaredFile}"`,
-          `${row.name}: the public refusal reason is a stable action: name the declared file `
-          + `the RED commit must include, without leaking matcher internals. Got: ${parsed.reason}`);
+  test('planner and reference contracts contain declarations, never executable argv', () => {
+    const planner = fs.readFileSync(path.join(__dirname, '..', 'agents', 'gsd-planner.md'), 'utf8');
+    for (const [name, source] of [['planner', planner], ['reference', CONTRACT]]) {
+      for (const block of source.matchAll(/<red_contract>[\s\S]*?<\/red_contract>/g)) {
+        assert.ok(!/<\/?(?:program|argv_json)>/.test(block[0]),
+          `${name} red_contract must not carry executable program/argv fields.`);
       }
     }
-  });
-
-  test('`--changed-files` is required: omitting it with a valid task file exits non-zero '
-    + 'with a usage error', (t) => {
-    const scratch = createTempDir('gsd-3770-changed-files-usage-');
-    t.after(() => cleanup(scratch));
-    const taskFile = writeTaskFile(scratch);
-    const trailerText = trailerTextWithDeclaredFile('tests/test_pricing.py');
-
-    const result = runVerdict(['--task-file', taskFile, '--trailer', trailerText], scratch);
-    assert.notStrictEqual(result.exitCode, 0,
-      'omitting --changed-files must exit non-zero: a gate that cannot ask the membership '
-      + 'question must not fall through and authorize.');
-    assert.match(`${result.stdout}${result.stderr}`, /--changed-files/,
-      'the usage error must name the missing flag.');
-  });
-
-  test('`--changed-files` omitted with a task file OUTSIDE the project still reports '
-    + '"outside project scope" — pinning that the path guards fire before the usage check', () => {
-    const outside = createTempDir('gsd-3770-changed-files-outside-');
-    const target = path.join(outside, 'outside.md');
-    fs.writeFileSync(target, CONTRACT_TASK_LINES.join('\n'));
-
-    try {
-      const result = runVerdict(['--task-file', target, '--trailer', '{}'], REPO_ROOT);
-      assert.match(`${result.stdout}${result.stderr}`, /outside project scope/,
-        'the path guard must still fire and report "outside project scope" even when '
-        + '--changed-files is ALSO missing — the usage check must sit AFTER the path guards, '
-        + 'never before them, so a security guard is never reported as a mere arity error. '
-        + 'See #3770 (T-04.1-04).');
-    } finally {
-      cleanup(outside);
-    }
-  });
-
-  test('a trailer the predicate already rejects keeps its original verdict and reason when '
-    + 'the changed-file list is empty', (t) => {
-    const scratch = createTempDir('gsd-3770-changed-files-reject-');
-    t.after(() => cleanup(scratch));
-    const taskFile = writeTaskFile(scratch);
-    const trailer = shippedTrailerObject();
-    trailer.exit_status = 0; // the predicate already rejects this: `unexpected_pass`.
-    const trailerText = `red-evidence: ${JSON.stringify(trailer)}`;
-
-    const result = runVerdict(
-      ['--task-file', taskFile, '--trailer', trailerText, '--changed-files', ''],
-      scratch,
-    );
-    const parsed = JSON.parse(result.stdout);
-    const evaluateRedEvidence = evaluateObservedEvidence;
-    const direct = evaluateRedEvidence(CONTRACT_TASK_LINES.join('\n'), trailerText);
-
-    assert.strictEqual(parsed.verdict, direct.verdict,
-      'a trailer the predicate already rejects must keep the SAME verdict when the '
-      + 'changed-file list is empty: membership is tested only when the evaluator itself '
-      + 'already said `authorize`, never used to override an existing rejection.');
-    assert.strictEqual(parsed.reason, direct.reason,
-      'and the SAME reason: the membership check must not overwrite an already-failing '
-      + "trailer's own reason.");
   });
 });
