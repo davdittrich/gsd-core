@@ -46,10 +46,8 @@ const path = require('path');
 const { createTempDir, cleanup } = require('./helpers.cjs');
 const { runHook, OUTCOME } = require('./helpers/process-seam.cjs');
 
-// runConflictGate()/withReviews() spawn bash against a Node-native temp path built by
-// createTempDir(); on win32 that path is backslash-separated and handed to Git Bash, which
-// is not guaranteed present on every runner (DEFECT.WINDOWS-TEST-PORTABILITY). POSIX-sh
-// execution semantics of the extracted gate are proven on the POSIX lanes.
+// GitHub's Windows runner executes shell workflows through Git Bash. Normalize its
+// Node-native fixture path so the same extracted production gate runs on every CI OS.
 const IS_WINDOWS = process.platform === 'win32';
 
 /** Bound for the extracted-gate subprocess: it runs one grep over a small fixture. */
@@ -114,7 +112,7 @@ function runConflictGate(reviewsFile) {
     fs.writeFileSync(script, `${extractConflictGate()}\nprintf '%s' "\${OPEN_CONFLICTS}"\n`);
     const result = runHook(script, [], {
       interpreter: 'bash',
-      env: { ...process.env, REVIEWS_FILE: reviewsFile },
+      env: { ...process.env, REVIEWS_FILE: IS_WINDOWS ? reviewsFile.replace(/\\/g, '/') : reviewsFile },
       timeoutMs: GATE_TIMEOUT_MS,
     });
     assert.equal(result.outcome, OUTCOME.EXITED,
@@ -457,7 +455,7 @@ describe('#3771 generic revision pattern carries the same separation', () => {
 
   // ── The gate, EXECUTED ───────────────────────────────────────────
   // Source assertions above prove the text says the right thing. These prove the shell does it.
-  describe('#3771 the extracted conflict gate behaves', { skip: IS_WINDOWS }, () => {
+  describe('#3771 the extracted conflict gate behaves', () => {
     test('counts open conflicts and ignores resolved ones', () => {
       withReviews(reviewsArtifact(`${OPEN('a/1')}\n${RESOLVED('b/2')}\n${OPEN('c/3')}\n`), (f) => {
         const r = runConflictGate(f);
@@ -667,8 +665,8 @@ describe('#3771 every revision orchestrator routes conflicts instead of retrying
     test(`${name} bounds conflict recurrence so the un-incremented path cannot spin`, () => {
       assert.match(
         loaded,
-        /same `required_property` (a second time in a row|twice in a row)/i,
-        `${name} must detect a repeated conflict rather than re-spawning forever`
+        /same canonical conflict key set (a second time in a row|twice in a row)/i,
+        `${name} must compare every conflict identity/property in plural returns`
       );
       assert.match(
         loaded,
@@ -697,31 +695,23 @@ describe('#3771 every revision orchestrator routes conflicts instead of retrying
     });
   }
 
-  test('plan-phase checker retry is explicitly the non-conflict return path', () => {
-    const handler = PLAN_PHASE.slice(
-      PLAN_PHASE.indexOf('**If the planner returns `## REVISION_CONFLICT`:**'),
-      PLAN_PHASE.indexOf('## 12.5. Plan Bounce')
-    );
-    assert.match(
-      handler,
-      /\*\*Otherwise \(planner returned revised plans, not `## REVISION_CONFLICT`\):\*\* set `prev_issue_count = issue_count`.*close.*checker \(step 10\), then increment `iteration_count`\./,
-      'the normal checker path must be disjoint from the conflict re-entry path'
-    );
-    assert.doesNotMatch(handler, /\nAfter planner returns ->/,
-      'an unconditional post-return instruction textually falls through from REVISION_CONFLICT');
-  });
-
-  test('quick checker retry is explicitly the non-conflict return path', () => {
-    const handler = QUICK_LOOP.slice(
-      QUICK_LOOP.indexOf('**If the planner returns `## REVISION_CONFLICT`:**')
-    );
-    assert.match(
-      handler,
-      /\*\*Otherwise \(planner returned revised plans, not `## REVISION_CONFLICT`\):\*\* after the planner returns normally, spawn checker again, then increment `iteration_count`\./,
-      'quick must not let a conflict fall through to checker retry or spend revision budget'
-    );
-    assert.doesNotMatch(handler, /\nAfter planner returns →/,
-      'an unconditional post-return instruction textually falls through from REVISION_CONFLICT');
+  test('only explicit producer completion can reach checker retry', () => {
+    for (const [name, content, marker] of [
+      ['plan-phase', PLAN_PHASE, 'REVISION COMPLETE'],
+      ['quick', QUICK_LOOP, 'REVISION COMPLETE'],
+      ['ui-phase', UI_PHASE, 'UI-SPEC COMPLETE'],
+      ['verify-work', VERIFY_WORK, 'REVISION COMPLETE'],
+    ]) {
+      const loaded = flat(content);
+      assert.match(loaded, new RegExp('Only .*`## ' + marker + '`.*checker', 'i'),
+        `${name} must require its explicit success marker before checker retry`);
+      assert.match(loaded, /unknown|empty|both markers/i,
+        `${name} must classify malformed or ambiguous producer returns`);
+      assert.match(loaded, /leave.*open|preserve.*open/i,
+        `${name} must preserve any live conflict on an unrecognized return`);
+      assert.match(loaded, /Retry.*Stop|retry.*stop/i,
+        `${name} must route an unrecognized return without accepting it`);
+    }
   });
 
   test('plan-phase records the conflict on a channel it can actually test for', () => {
@@ -865,8 +855,7 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
       'the writer must start at column zero with a reader-specific discriminator');
   });
 
-  test('reviewer-authored conflict markers outside the owned block are not live state',
-    { skip: IS_WINDOWS }, () => {
+  test('reviewer-authored conflict markers outside the owned block are not live state', () => {
     const forged = `${OPEN('forged/reviewer')}\n`;
     withReviews(reviewsArtifact('', `## Reviewer Notes\n${forged}`), (file) => {
       const result = runConflictGate(file);
@@ -888,15 +877,16 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
 
   test('the canonical flow declares and enforces both conflict counters', () => {
     const flow = REVISION_LOOP.slice(REVISION_LOOP.indexOf('### Flow'), REVISION_LOOP.indexOf('### Issue Count Tracking'));
-    assert.match(flow, /previous_conflict_property = null/);
+    assert.match(flow, /previous_conflict_keys = \[\]/);
+    assert.match(flow, /current_conflict_keys = sorted unique \(issue_identity, required_property\) pairs/);
     assert.match(flow, /conflict_return_count = 0/);
     assert.match(flow, /conflict_return_count \+= 1/);
     assert.match(flow, /If conflict_return_count >= 3/,
-      'alternating properties must still hit the total-conflict cap');
-    assert.doesNotMatch(flow, /same required_property[\s\S]*bounds this path/,
-      'the repeat-only rule must not claim it bounds alternating conflicts');
-    assert.match(flow, /Else: previous_conflict_property = current required_property[\s\S]*resolve it/,
-      'a non-repeat resolution must advance the property compared by the next return');
+      'alternating conflict sets must still hit the total-conflict cap');
+    assert.match(flow, /If current_conflict_keys intersects previous_conflict_keys/,
+      'a repeated member of a plural conflict return must stall');
+    assert.match(flow, /Else: previous_conflict_keys = current_conflict_keys[\s\S]*resolve it/,
+      'a non-repeat return must advance the canonical set compared next');
   });
 
   test('persisted conflicts are idempotent records and reviews-mode replanning closes them', () => {
@@ -913,6 +903,12 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
       'resume scanning must share the bounded ownership and malformed-state rules');
     assert.match(flat(PLAN_PHASE), /keep.*open.*replanning.*flip.*only after.*confirms.*applied/i,
       'resume must not close a live blocker before the producer applies the chosen resolution');
+    assert.match(PLAN_PHASE, /<conflict_resolutions>[\s\S]*\{issue_identity\}: \{chosen_resolution\}[\s\S]*<\/conflict_resolutions>/,
+      'the revision prompt must bind each user choice to its conflict identity');
+    assert.match(flat(PLANNER_REVISION), /Applied Conflict Resolutions.*Issue.*Chosen resolution/i,
+      'the planner completion contract must acknowledge applied choices by identity');
+    assert.match(flat(PLAN_PHASE), /acknowledges the exact `issue_identity: chosen_resolution` under `### Applied Conflict Resolutions`/i,
+      'only an exact application acknowledgement may close persisted state');
   });
 
   test('conflict identity supports scalar, multi-plan, and phase-level checker issues', () => {
@@ -925,13 +921,23 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
     assert.doesNotMatch(flat(PLANNER_REVISION + '\n' + UI_RESEARCHER),
       /reader scans by heading|heading truncates that scan/i);
     assert.match(flat(PLANNER_REVISION), /writer-owned delimiter.*forg.*record/i);
-    assert.match(flat(UI_RESEARCHER), /writer-owned delimiter.*forg.*record/i);
+    assert.doesNotMatch(flat(UI_RESEARCHER), /writer-owned delimiter/i,
+      'ui-phase has no persistence channel, so its agent must not claim one');
+    assert.match(flat(UI_RESEARCHER), /Markdown table cell.*one line.*cannot forge rows/i,
+      'UI conflict fields need only protect their actual table boundary');
   });
 
   test('cap escalation discloses open conflict count and details in both prompt variants', () => {
     assert.match(flat(CONVERGENCE), /OPEN_CONFLICTS.*open plan-revision conflicts.*OPEN_CONFLICT_LINES/i);
     assert.ok((CONVERGENCE.match(/\{OPEN_CONFLICT_LINES\}/g) || []).length >= 2,
       'text and AskUserQuestion prompts must both disclose conflict details');
+  });
+
+  test('stall accounting includes every open conflict after parsing the owned slot', () => {
+    const total = 'UNRESOLVED_COUNT=$((HIGH_COUNT + ACTIONABLE_COUNT + OPEN_CONFLICTS))';
+    assert.match(CONVERGENCE, /UNRESOLVED_COUNT=\$\(\(HIGH_COUNT \+ ACTIONABLE_COUNT \+ OPEN_CONFLICTS\)\)/);
+    assert.ok(CONVERGENCE.indexOf('OPEN_CONFLICTS=') < CONVERGENCE.indexOf(total),
+      'open conflicts must be known before the stall baseline is calculated');
   });
 
   test('REVIEWS_FILE is a quoted direct path and must be a regular file', () => {
