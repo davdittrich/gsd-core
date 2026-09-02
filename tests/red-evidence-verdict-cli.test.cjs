@@ -442,6 +442,50 @@ describe('public CLI receipt lifecycle', () => {
     assert.equal(fs.existsSync(path.join(root, 'never-executed-trailer-command')), false);
   });
 
+  test('public verdict distinguishes pre-claim failures from claimed terminal failures', (t) => {
+    const root = createTempDir('red-receipt-public-boundaries-');
+    t.after(() => cleanup(root));
+    fs.mkdirSync(path.join(root, '.planning'));
+    git(root, ['init', '-q']);
+    const target = 'tests/public boundary receipt.test.cjs';
+    const plan = '.planning/02 public boundary plan.md';
+    fs.writeFileSync(path.join(root, plan), contract(target));
+    git(root, ['add', '--', plan]);
+    git(root, ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'baseline']);
+
+    const captured = runNode([
+      GSD_TOOLS, 'query', 'task', 'red-evidence-capture', '--project-dir', root,
+      '--task-file', plan, '--task-index', '1', '--', process.execPath, '--eval',
+      'process.exit(1)', target,
+    ], { cwd: root });
+    assert.equal(captured.exitCode, 0, captured.stderr);
+    assert.equal(receiptFiles(root).length, 1);
+
+    const common = [
+      GSD_TOOLS, 'query', 'task', 'red-evidence-verdict', '--project-dir', root,
+      '--task-file', plan, '--task-index', '1', '--red-sha', 'f'.repeat(40),
+      '--trailer', trailer(target), '--raw',
+    ];
+    const missing = runNode(common.filter(arg => arg !== '--trailer' && arg !== trailer(target)), { cwd: root });
+    assert.equal(missing.exitCode, 0, missing.stderr);
+    assert.equal(JSON.parse(missing.stdout).verdict, 'red_commit_not_failing');
+    assert.equal(receiptFiles(root).length, 1);
+
+    const duplicate = runNode([...common, '--red-sha', 'f'.repeat(40)], { cwd: root });
+    assert.equal(duplicate.exitCode, 0, duplicate.stderr);
+    assert.equal(JSON.parse(duplicate.stdout).verdict, 'red_commit_not_failing');
+    assert.equal(receiptFiles(root).length, 1);
+
+    const malformed = runNode([...common, '--unknown-verdict-flag'], { cwd: root });
+    assert.notEqual(malformed.exitCode, 0);
+    assert.equal(receiptFiles(root).length, 1);
+
+    const invalidObject = runNode(common, { cwd: root });
+    assert.equal(invalidObject.exitCode, 0, invalidObject.stderr);
+    assert.equal(JSON.parse(invalidObject.stdout).verdict, 'red_commit_not_failing');
+    assert.equal(receiptFiles(root).length, 0);
+  });
+
   test('public capture preserves every post-sentinel child argv element', (t) => {
     const spellings = [
       { leading: [], command: ['task', 'red-evidence-capture'], project: 'spaced', pick: true, expectedExit: 0 },
