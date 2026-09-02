@@ -138,7 +138,7 @@ function withReviews(body, fn, filename = '07-REVIEWS.md') {
 }
 
 const OPEN = (id) => `- [ ] REVISION_CONFLICT ${id} — required_property: p | conflicts with: D-1 | alternatives: a`;
-const RESOLVED = (id) => `- [x] REVISION_CONFLICT ${id} — required_property: p | resolved: adopted alternative`;
+const RESOLVED = (id) => `- [x] REVISION_CONFLICT ${id} — required_property: p | conflicts with: D-1 | alternatives: a | resolved: adopted alternative`;
 const CONFLICTS_BEGIN = '<!-- gsd:plan-revision-conflicts:begin -->';
 const CONFLICTS_END = '<!-- gsd:plan-revision-conflicts:end -->';
 
