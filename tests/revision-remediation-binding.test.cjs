@@ -161,6 +161,12 @@ function sanitizeConflictField(value) {
     .replace(/</g, '‹').replace(/>/g, '›').trim();
 }
 
+function assertInjectiveConflictEncoding() {
+  assert.notEqual(sanitizeConflictField('A | B'), sanitizeConflictField('A ¦ B'));
+  assert.notEqual(sanitizeConflictField('<x>'), sanitizeConflictField('‹x›'));
+  assert.throws(() => sanitizeConflictField(''));
+}
+
 function renderConflictTemplate(fields) {
   return extractConflictTemplate()
     .replace('{issue_identity}', sanitizeConflictField(fields.issueIdentity))
@@ -912,7 +918,7 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
       conflictsWith: 'D-1 | repository rule',
       alternatives: 'use A | use B',
     });
-    assert.match(rendered, /¦/, 'internal delimiters must be encoded before persistence');
+    assert.match(rendered, /%7C/, 'internal delimiters must be percent-encoded before persistence');
     assert.doesNotMatch(rendered, /<\/conflict_resolutions>/,
       'prompt-boundary text must be neutralized by the same sanitizer');
     withReviews(reviewsArtifact(`${rendered}\n`), (file) => {
@@ -929,19 +935,19 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
     });
   });
 
-  test('duplicate issue identities remain independently keyed by required_property',
+  test('same-property task findings remain independently keyed',
     { skip: !HAS_BASH }, () => {
     const first = renderConflictTemplate({
-      issueIdentity: 'task_completeness/16-01',
-      requiredProperty: 'Task 1 has verification',
+      issueIdentity: 'task_completeness/16-01/task-1',
+      requiredProperty: 'Task has verification',
       conflictsWith: 'D-1',
       alternatives: 'add a focused check',
     });
     const second = renderConflictTemplate({
-      issueIdentity: 'task_completeness/16-01',
-      requiredProperty: 'Task 2 has rollback',
-      conflictsWith: 'D-2',
-      alternatives: 'add a rollback step',
+      issueIdentity: 'task_completeness/16-01/task-2',
+      requiredProperty: 'Task has verification',
+      conflictsWith: 'D-1',
+      alternatives: 'add a focused check',
     });
     withReviews(reviewsArtifact(`${first}\n${second}\n`), (file) => {
       const result = runConflictGate(file);
@@ -959,9 +965,22 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
       'closure must match identity, property, and choice');
   });
 
-  test('writer contract encodes internal delimiters and rejects empty sanitized fields', () => {
-    assert.match(flat(REVISION_LOOP), /replace every internal \x60\|\x60.*\x60¦\x60/i);
-    assert.match(flat(REVISION_LOOP), /empty after sanitization.*do not write.*BLOCKED/i);
+  test('writer contract uses injective percent encoding and rejects empty fields', () => {
+    assertInjectiveConflictEncoding();
+    assert.match(flat(REVISION_LOOP), /percent-encode.*UTF-8.*RFC 3986.*unreserved/i);
+    assert.match(flat(REVISION_LOOP), /empty input.*do not write.*BLOCKED/i);
+  });
+
+  test('all revision consumers transport the full encoded conflict-resolution triple', () => {
+    for (const [name, content] of [
+      ['quick', QUICK_LOOP], ['ui-phase', UI_PHASE], ['verify-work', VERIFY_WORK],
+    ]) {
+      const contract = flat(content);
+      assert.match(contract, /percent-encode.*UTF-8.*RFC 3986.*unreserved/i, `${name} codec`);
+      assert.match(contract,
+        /\{issue_identity\} \| required_property: \{property\} \| chosen_resolution: \{chosen_resolution\}/,
+        `${name} full resolution triple`);
+    }
   });
 
   test('reviewer-authored conflict markers outside the owned block are not live state',
@@ -981,10 +1000,12 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
     assert.match(REVIEW, /<!-- gsd:plan-revision-conflicts:begin -->\n## Plan-Revision Conflicts\n\{preserved_plan_revision_conflict_entries\}\n<!-- gsd:plan-revision-conflicts:end -->/,
       'the first-write template must emit the canonical heading before preserved entries');
     assert.match(flat(REVIEW), /restore the captured bytes at the explicit slot below/i);
-    assert.match(flat(REVIEW), /title.*neither reserved delimiter.*legacy clean state.*empty preserved entries/i,
-      'a pre-slot review artifact must migrate to an empty canonical slot');
-    assert.match(flat(REVIEW), /either reserved delimiter.*cannot be parsed.*BLOCKED.*do not rewrite/i,
-      'partial or malformed reserved state must block regeneration');
+    assert.match(flat(REVIEW), /inspect only.*canonical position.*immediately after.*title/i,
+      'slot ownership must be decided only at the canonical post-title position');
+    assert.match(flat(REVIEW), /no begin delimiter.*canonical position.*legacy clean.*regardless.*reviewer output/i,
+      'later reviewer prose must not prevent legacy migration');
+    assert.match(flat(REVIEW), /begin delimiter.*canonical position.*malformed.*BLOCKED.*do not rewrite/i,
+      'only partial or malformed state at the canonical position blocks regeneration');
   });
 
   test('the canonical flow accepts only explicit producer completion', () => {
@@ -1045,10 +1066,16 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
       'only an exact application acknowledgement may close persisted state');
   });
 
-  test('conflict identity supports scalar, multi-plan, and phase-level checker issues', () => {
+  test('conflict identity supports scalar, multi-plan, phase-level, and task findings', () => {
     assert.match(flat(PLANNER_REVISION), /issue identity.*`plan`.*sorted `plans`.*phase/i);
+    assert.match(flat(PLANNER_REVISION), /when `task` is present.*append.*\/task-\{task\}/i);
     assert.match(PLANNER_REVISION, /\{issue_identity\}/);
     assert.match(REVISION_LOOP, /\{issue_identity\}/);
+  });
+
+  test('prompt files retain material headroom below their hard caps', () => {
+    assert.ok(Buffer.byteLength(PLAN_PHASE) <= 94391, 'plan-phase needs at least 128 bytes headroom');
+    assert.ok(Buffer.byteLength(PLAN_CHECKER) <= 49024, 'plan-checker needs at least 128 bytes headroom');
   });
 
   test('conflict-field guidance describes delimiter ownership and record forgery, not heading truncation', () => {
@@ -1059,6 +1086,8 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
       'ui-phase has no persistence channel, so its agent must not claim one');
     assert.match(flat(UI_RESEARCHER), /one line.*Markdown table cell.*otherwise.*forge rows/i,
       'UI conflict fields need only protect their actual table boundary');
+    assert.match(flat(UI_RESEARCHER), /percent-encode.*UTF-8.*RFC 3986.*unreserved/i,
+      'UI table fields must use the same injective field codec');
   });
 
   test('cap escalation discloses open conflict count and details in both prompt variants', () => {
