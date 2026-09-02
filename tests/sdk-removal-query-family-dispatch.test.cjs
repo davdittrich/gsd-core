@@ -31,7 +31,7 @@ describe('SDK-removal CJS query family dispatch', () => {
     assert.equal(parsed.retryAfterSeconds, 45);
   });
 
-  test('query task.is-behavior-adding selects the parser-owned plan index for workflow gates', () => {
+  test('query task.is-behavior-adding validates the executor-maintained plan index for workflow gates', () => {
     const planPath = path.join(phaseDir, '01-01-PLAN.md');
     fs.writeFileSync(planPath, [
       '<task type="auto" tdd="true">',

@@ -194,7 +194,7 @@ Offer these recovery options:
 - `mark-and-skip` — record the anomaly and move on only with explicit confirmation.
 </step>
 
-**TDD gate.** Task-scoped enforcement runs inside plan execution (immediately before each implementation step), where the parser-owned `PLAN_PATH`, one-based `TASK_INDEX`, `PLAN_ID`, and `TASK_ID` are defined. Do not materialize a task fragment. #4011: keys on `TDD_MODE` alone — coupling to `MVP_MODE` left this inert on non-MVP phases, contradicting `gsd-core/references/tdd.md`'s contract that `workflow.tdd_mode` binds every `type: tdd` plan. Same predicate and RED-commit contract:
+**TDD gate.** Task-scoped enforcement runs inside plan execution (immediately before each implementation step), where `PLAN_PATH`, `PLAN_ID`, and `TASK_ID` are defined and the executor-maintained one-based `TASK_INDEX` is parser-validated by every task query. Do not materialize a task fragment. #4011: keys on `TDD_MODE` alone — coupling to `MVP_MODE` left this inert on non-MVP phases, contradicting `gsd-core/references/tdd.md`'s contract that `workflow.tdd_mode` binds every `type: tdd` plan. Same predicate and RED-commit contract:
 ```bash
 if [ "$TDD_MODE" = "true" ]; then
   IS_BEHAVIOR_ADDING=$(gsd_run query task.is-behavior-adding "$PLAN_PATH" --task-index "$TASK_INDEX" --pick is_behavior_adding)
