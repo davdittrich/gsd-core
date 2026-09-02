@@ -148,6 +148,18 @@ describe('ci-test-scope.cjs', () => {
     assert.ok(result.targeted_tests.includes('tests/commands.test.cjs'));
   });
 
+  test('RED evidence prose owners select the dedicated parity guard', () => {
+    const executor = scopeFor(['agents/gsd-executor.md']);
+    const reference = scopeFor(['gsd-core/references/tdd.md']);
+    const unrelatedAgent = scopeFor(['agents/gsd-planner.md']);
+    const unrelatedReference = scopeFor(['gsd-core/references/checkpoints.md']);
+
+    assert.ok(executor.targeted_tests.includes('tests/red-evidence-prose-parity.test.cjs'));
+    assert.ok(reference.targeted_tests.includes('tests/red-evidence-prose-parity.test.cjs'));
+    assert.ok(!unrelatedAgent.targeted_tests.includes('tests/red-evidence-prose-parity.test.cjs'));
+    assert.ok(!unrelatedReference.targeted_tests.includes('tests/red-evidence-prose-parity.test.cjs'));
+  });
+
   test('changed test files are selected directly', () => {
     const result = scopeFor(['tests/run-tests-harness.test.cjs']);
     assert.strictEqual(result.code_changed, true);
