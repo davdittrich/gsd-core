@@ -131,12 +131,12 @@ so they restate the operative rules inline; this section is the authority they m
    Before appending, reuse the existing open line instead of appending a duplicate when its
    sanitized fields identify the same conflict. This makes persisted conflict state idempotent.
 
-   **Sanitize before writing — the conflict text is agent-authored.** For EACH field: collapse
-   newlines/tabs to one space; replace every internal `|` with `¦` and `<`/`>` with
-   `‹`/`›`; strip any leading `#`, `-`, `¦` or backtick-fence run; trim. If any field is
-   empty after sanitization, do not write it: report `BLOCKED`. One conflict is exactly one line
-   beginning `- [ ]`. Use this same transform for the chosen resolution before prompt transport
-   or closure; never append agent text verbatim or a fenced block.
+   **Sanitize before writing — the conflict text is agent-authored.** Reject empty input; otherwise
+   percent-encode its UTF-8 bytes with uppercase `%HH`, leaving only RFC 3986 unreserved bytes
+   (`A-Z a-z 0-9 - . _ ~`). This injective transform encodes `%`, `|`, newlines, angle brackets,
+   and record syntax. One conflict is exactly one line beginning `- [ ]`. Apply the same transform
+   to every field and chosen resolution before persistence, prompt transport, or closure; never
+   append agent text verbatim or a fenced block. Empty input: do not write; report `BLOCKED`.
 3. **Resolve** — present the conflict and its alternatives to the user and ask which to take
    (pattern: `gsd-core/references/gate-prompts.md`): adopt a named alternative / override the
    named constraint and apply the hint / amend the constraint itself. Each option resolves the

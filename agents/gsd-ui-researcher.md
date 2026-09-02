@@ -391,8 +391,8 @@ not spend a revision iteration on it.
 | Dimension {N} | {smaller or different mechanism} | {yes / partially — how} | {what it changes} |
 ```
 
-**Every field is one line of plain text.** No newlines inside a Markdown table cell, and never
-begin a field with `#`, `-`, `|` or a code fence; otherwise agent text can forge rows.
+**Every field is one line safe for a Markdown table cell:** reject empty input; percent-encode
+UTF-8 bytes with uppercase `%HH`, leaving only RFC 3986 unreserved bytes, otherwise text can forge rows.
 
 ## UI-SPEC Blocked
 

@@ -262,7 +262,7 @@ Do NOT re-ask the user questions that are already answered.
 </revision>
 ```
 
-- **On `## REVISION_CONFLICT`:** do NOT increment `revision_count` or check. Present alternatives to the user; ask them to adopt a named alternative, override the named constraint and apply the hint, or amend the constraint; accepting the BLOCK is NOT offered here. Derive sorted unique `(issue_identity, required_property)` keys. Any canonical conflict key repeated in consecutive returns, or the THIRD conflict return, escalates as a stall. Re-spawn with sanitized identity/choice pairs and return to this step.
+- **On `## REVISION_CONFLICT`:** do NOT increment `revision_count` or check. Present alternatives to the user; ask them to adopt a named alternative, override the named constraint and apply the hint, or amend the constraint; accepting the BLOCK is NOT offered here. Derive sorted unique `(issue_identity, required_property)` keys. Any canonical conflict key repeated in consecutive returns, or the THIRD conflict return, escalates as a stall. Percent-encode each nonempty UTF-8 field per RFC 3986 (only unreserved bytes remain). Re-spawn with `{issue_identity} | required_property: {property} | chosen_resolution: {chosen_resolution}` triples and return to this step.
 - **Only on `## UI-SPEC COMPLETE`:** increment `revision_count`, then re-spawn checker (step 7).
 - **Otherwise (unknown, empty, or both markers):** offer Retry or Stop. Do not check or increment.
 

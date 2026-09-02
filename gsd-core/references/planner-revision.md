@@ -169,9 +169,10 @@ configured, also records it for the convergence gate; it does not count as a fai
 ```
 
 **Issue identity:** use `{dimension}/{plan}` for scalar `plan`; otherwise join sorted `plans`
-with `+`, or use `{dimension}/phase` when neither exists. The canonical conflict key is this
-identity plus `required_property`; never acknowledge identity alone.
+with `+`, or use `{dimension}/phase` when neither exists. When `task` is present, append
+`/task-{task}`. The canonical key is this identity plus `required_property`; never acknowledge
+identity alone.
 
-**Every field uses the shared Conflict Return sanitizer.** It makes one non-empty line, encodes
-`|` as `¦` and angle brackets as `‹`/`›`, and strips record-leading syntax. Echo the exact
-sanitized prompt values; raw text could forge a record, delimiter, or prompt boundary.
+**Every field uses the shared Conflict Return sanitizer:** reject empty input; percent-encode
+UTF-8 bytes with uppercase `%HH`, leaving only RFC 3986 unreserved bytes. Echo the exact encoded
+prompt values; raw text could forge a record, delimiter, or prompt boundary.

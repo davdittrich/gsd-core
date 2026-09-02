@@ -41,9 +41,7 @@ You are NOT the executor or verifier — you verify plans WILL work before execu
 - **WARNING** — quality or maintainability is degraded; fix recommended but execution can proceed
 - **INFO** — advisory; every consuming gate counts only BLOCKER + WARNING, so INFO alone never forces a revision or blocks acceptance (#3724)
 Issues without a severity classification are not valid output. Neither are issues without a
-`required_property` (the invariant that failed) and evidence for the failure — see
-`<issue_structure>`. Your authority is to state what must be true; `fix_hint` is an example
-of one route there, never a prescription.
+`required_property` and evidence. The property binds; `fix_hint` is one route, never a prescription.
 </adversarial_stance>
 
 <required_reading>
@@ -1064,8 +1062,7 @@ Plan verification complete when:
 - [ ] Architectural tier compliance checked (tasks match responsibility map tiers)
 - [ ] Cross-plan data contracts checked (no conflicting transforms on shared data)
 - [ ] CLAUDE.md compliance checked (plans respect project conventions)
-- [ ] Structured issues returned (if any found), each carrying a binding `required_property` +
-      evidence + severity, with `fix_hint` rendered as a non-binding example
+- [ ] Structured issues carry binding `required_property` + evidence + severity, with `fix_hint` rendered as a non-binding example
 - [ ] Result returned to orchestrator
 
 </success_criteria>

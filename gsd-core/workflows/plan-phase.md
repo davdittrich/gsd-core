@@ -619,7 +619,7 @@ UI_SPEC_FILE=$(ls "${PHASE_DIR_FOR_SPEC}"/*-UI-SPEC.md 2>/dev/null | head -1)
 UI_SPEC_PATH="${UI_SPEC_FILE}"
 ```
 
-**With plans and `--reviews`:** parse the first canonical writer-owned slot at `REVIEWS_PATH`; malformed is `BLOCKED`. Ignore reviewer output. Each open line: get user choice per Conflict Return 3; append sanitized `{issue_identity} | required_property: {property} | chosen_resolution: {chosen_resolution}` to `CONFLICT_RESOLUTIONS`; leave open.
+**With plans and `--reviews`:** at `REVIEWS_PATH`, parse the first canonical writer-owned slot; ignore reviewer output; malformed: `BLOCKED`. Each open: get user choice per Conflict Return 3; add `{issue_identity} | required_property: {property} | chosen_resolution: {chosen_resolution}` to `CONFLICT_RESOLUTIONS`; leave open.
 
 ## 7.5. Verify Nyquist Artifacts
 
@@ -1247,10 +1247,8 @@ ${AGENT_SKILLS_PLANNER}
 </revision_context>
 
 <instructions>
-Make targeted updates under `gsd-core/references/planner-revision.md`, loaded in revision mode.
-Honor binding properties and constraints; hints are examples. Do NOT replan from scratch unless
-issues are fundamental.
-Return what changed.
+Make updates under `gsd-core/references/planner-revision.md`, loaded in revision mode. Honor binding
+properties and constraints; hints are examples. Replan only if fundamental. Return changes.
 </instructions>
 ```
 
@@ -1264,13 +1262,13 @@ Agent(
 )
 ```
 
-**ALL RUNTIMES:** set `TS=$(date +%s)`; while active, run `gsd_stall_watch "$TS" "{outputFile}" "${PHASE_DIR}"'/*-PLAN.md'`; on `stalled`: Retry or Stop.
+**ALL RUNTIMES:** `TS=$(date +%s)`; while active, run `gsd_stall_watch "$TS" "{outputFile}" "${PHASE_DIR}"'/*-PLAN.md'`; on `stalled`: Retry or Stop.
 
 **On `## REVISION_CONFLICT`:** follow shared Conflict Return with `REVIEWS_FILE="${REVIEWS_PATH}"`; fail closed reading `workflow.plan_review_convergence`. Record only when enabled and the path is a regular file.
 
-**Only on `## REVISION COMPLETE`:** close only when `### Applied Conflict Resolutions` acknowledges the exact `issue_identity | required_property: property | chosen_resolution: chosen_resolution`; then set `prev_issue_count`, check, and increment.
+**Only on `## REVISION COMPLETE`:** close only when `### Applied Conflict Resolutions` acknowledges the exact `issue_identity | required_property: property | chosen_resolution: chosen_resolution`; update baseline, check, increment.
 
-**Otherwise (unknown, empty, or both markers):** leave lines open; offer Retry or Stop. Do not check, increment, or update the baseline.
+**Unknown, empty, or both:** leave open; offer Retry or Stop; preserve counters and baseline.
 
 **If iteration_count >= 3:**
 

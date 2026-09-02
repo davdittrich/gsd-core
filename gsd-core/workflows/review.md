@@ -686,15 +686,13 @@ plan_coverage:        # only present if at least one graded lane is incomplete
 
 Combine all review responses into `{phase_dir}/{padded_phase}-REVIEWS.md`:
 
-Capture only the existing conflict entry bytes after the exact `## Plan-Revision Conflicts`
-heading and before the end of the first exact `<!-- gsd:plan-revision-conflicts:begin -->` /
-`<!-- gsd:plan-revision-conflicts:end -->` pair immediately after the artifact title, if present,
-as `{preserved_plan_revision_conflict_entries}`. A nonexistent artifact has empty preserved entries. An artifact with its title but neither
-reserved delimiter is legacy clean state: use empty preserved entries so this write adds the slot.
-If either reserved delimiter exists but the exact canonical bounded slot cannot be parsed, report
-`BLOCKED` and do not rewrite the artifact; never synthesize empty state over malformed reserved
-state. Ignore identical headings or delimiters in reviewer
-output: reviewers do not own blocking state. Restore the captured bytes at the explicit slot below.
+Inspect only the canonical position immediately after the artifact title. If its begin delimiter
+starts there, capture only the existing conflict entry bytes after the exact `## Plan-Revision Conflicts`
+heading through the matching end delimiter as `{preserved_plan_revision_conflict_entries}`. If no begin delimiter starts at that
+canonical position, the artifact is legacy clean: use empty preserved entries regardless of identical
+delimiters later in reviewer output. A begin delimiter at the canonical position whose exact bounded
+slot is malformed is `BLOCKED`; do not rewrite or synthesize empty state. A nonexistent artifact also
+has empty preserved entries. Restore the captured bytes at the explicit slot below.
 
 After all reviewers complete, collect trim metadata files written during the run. For each reviewer that was trimmed (i.e. a `.metadata.json` file exists and `hardFailed` or `omitted` is non-empty, or `projectMdShrunk` is true, or `planTruncationPct > 0`), include a `trimmed_reviewers` block in the frontmatter. Omit the key entirely if no reviewer was trimmed.
 

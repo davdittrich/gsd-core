@@ -157,8 +157,9 @@ function extractConflictTemplate() {
 }
 
 function sanitizeConflictField(value) {
-  return value.replace(/[\r\n\t]+/g, ' ').replace(/\|/g, '¦')
-    .replace(/</g, '‹').replace(/>/g, '›').trim();
+  if (value.length === 0) throw new Error('empty conflict field');
+  return encodeURIComponent(value).replace(/[!'()*]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
 }
 
 function assertInjectiveConflictEncoding() {
@@ -479,13 +480,13 @@ describe('#3771 generic revision pattern carries the same separation', () => {
   test('agent-authored conflict text is sanitized at the write boundary', () => {
     assert.match(flat(REVISION_LOOP), /Sanitize before writing — the conflict text is agent-authored/,
       'the shared protocol must sanitize where the untrusted text enters the file');
-    assert.match(flat(REVISION_LOOP), /collapse newlines\/tabs to one space.*replace every internal `\|` with `¦`/,
-      'the rule must name the delimiter-safe transform');
-    assert.match(flat(REVISION_LOOP), /empty after sanitization.*report `BLOCKED`/,
-      'the writer must reject records whose required fields sanitize to empty');
+    assert.match(flat(REVISION_LOOP), /percent-encode.*UTF-8.*RFC 3986.*unreserved/,
+      'the rule must name the injective delimiter-safe transform');
+    assert.match(flat(REVISION_LOOP), /Empty input.*do not write.*report `BLOCKED`/,
+      'the writer must reject empty required fields');
     for (const [name, agent] of [['planner-revision', PLANNER_REVISION], ['gsd-ui-researcher', UI_RESEARCHER]]) {
-      assert.match(flat(agent), /\*\*Every field (?:is one line of plain text|uses the shared Conflict Return sanitizer)\.\*\*/,
-        `${name} must forbid the shapes the writer would otherwise have to strip`);
+      assert.match(flat(agent), /\*\*Every field (?:is one line safe for a Markdown table cell|uses the shared Conflict Return sanitizer):?\*\*/,
+        `${name} must define its field boundary`);
     }
     assert.match(flat(CONVERGENCE), /reader counts only the first fixed slot at that position/,
       'the reader must state the ownership boundary that excludes raw reviewer text');
