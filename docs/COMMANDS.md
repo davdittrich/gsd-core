@@ -730,28 +730,83 @@ node gsd-tools.cjs task resolve-content --plan .planning/phases/03-name/03-1-PLA
 
 ---
 
-### `task red-evidence-verdict --task-file <plan-path> --task-index <one-based-index> --trailer <json> --changed-files <paths> --raw`
+### `task red-evidence-capture --task-file <plan-path> --task-index <one-based-index> [--raw] -- <program> [args...]`
 
-Judges a RED commit's `red-evidence:` trailer against the task's `<red_contract>` declaration.
-The evaluator itself never throws; it returns `red_commit_not_failing` on any malformed or
-ambiguous input. Called by the MVP+TDD gate in
-`execute-phase.md`'s per-task loop. See the RED Predicate in
-[`gsd-core/references/tdd.md`](../gsd-core/references/tdd.md).
+Runs the executor-selected RED command exactly once and records the local process result in a
+task-bound receipt. Capture is a mutation: it creates one receipt under the worktree Git directory
+before returning. It does not parse child output or infer which named test ran.
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `--task-file` | **Yes** | Path to the plan carrying the selected `<red_contract>` declaration |
-| `--task-index` | **Yes** | Positive one-based parser index of exactly one task in that plan |
-| `--trailer` | **Yes** | The RED commit's raw `red-evidence:` trailer text (or its JSON payload) |
-| `--changed-files` | **Yes** | Newline-delimited paths from `git show --name-only` on the RED commit |
-| `--raw` | No | Machine-readable JSON output |
+| `--task-file` | **Yes** | Project-contained regular plan file carrying the selected `<red_contract>` |
+| `--task-index` | **Yes** | Canonical positive one-based document-order index of one `auto` or `tracer` task |
+| `--raw` | No | Machine-readable JSON output; place it before the `--` separator |
+| `--` | **Yes** | Separates capture flags from the exact program/argument vector |
+| `<program> [args...]` | **Yes** | Non-empty vector whose arguments contain the declared `target_test` exactly once |
+
+Capture runs from the project root with a 30-second timeout and withholds child stdout/stderr.
+A child exit, signal, timeout, or spawn error is recorded rather than treated as authorization.
 
 **Exit codes:**
 
 | Exit | Meaning |
 |------|---------|
-| `0` | Evaluated — see `verdict` below |
-| non-zero | **Usage error.** `--task-file` not found, outside the project, or not a regular file; a required flag is missing |
+| `0` | The invocation result was captured and the receipt was published; this does not mean RED authorizes |
+| non-zero | Capture failed closed because its inputs, selected contract, Git directory, or receipt write were invalid |
+
+**Output fields (JSON, exit 0 only):**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `captured` | `boolean` | `true` after the receipt is published |
+| `pre_red_head` | `string` | Full Git object ID observed immediately before the RED process |
+| `exit_status` | `number \| null` | Local child exit status, or `null` when unavailable |
+| `signal` | `string \| null` | Terminating signal, if any |
+| `timed_out` | `boolean` | Whether the 30-second process limit expired |
+| `error` | `boolean` | Whether process launch/execution reported an error |
+| `stdout_bytes` | `number` | Captured stdout byte count; content is withheld |
+| `stderr_bytes` | `number` | Captured stderr byte count; content is withheld |
+
+The receipt is JSON capped at 16 KiB, named from a SHA-256 digest of plan path, task index, and
+target, and published with mode `0600` through an exclusive temporary file. Existing final,
+temporary, or claimed receipt paths fail capture closed. These controls prevent accidental
+cross-task reuse; they do not establish integrity against a hostile same-UID process.
+
+```bash
+node gsd-tools.cjs query task red-evidence-capture \
+  --task-file .planning/phases/03-name/03-1-PLAN.md --task-index 1 --raw -- \
+  node --test tests/feature.test.cjs
+```
+
+---
+
+### `task red-evidence-verdict --task-file <plan-path> --task-index <one-based-index> --red-sha <object-id> --trailer <json> [--raw]`
+
+Consumes the matching capture receipt and judges the RED commit's `red-evidence:` trailer
+against the selected task's `<red_contract>`. Verdict is a mutation because it atomically claims
+and deletes the receipt; a successful receipt cannot be replayed. The command never executes the
+recorded command text or any test.
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `--task-file` | **Yes** | Same project-contained plan path used for capture |
+| `--task-index` | **Yes** | Same positive one-based task index used for capture |
+| `--red-sha` | **Yes** | Full 40- or 64-hex RED commit object ID |
+| `--trailer` | **Yes** | RED commit's raw `red-evidence:` trailer text or JSON payload |
+| `--raw` | No | Machine-readable JSON output |
+
+Verdict obtains the RED commit's sole parent and exact NUL-delimited changed paths from Git. It
+requires that parent to equal the receipt's `pre_red_head`, that receipt plan/task/target values
+match the selected contract, that the trailer records the same integer exit status, that the local
+process terminated normally and nonzero, and that the commit changed the declared target path.
+Missing, stale, colliding, oversized, symlinked, malformed, or unconsumable receipts fail closed.
+
+**Exit codes:**
+
+| Exit | Meaning |
+|------|---------|
+| `0` | A typed verdict was produced, including fail-closed evidence/Git/receipt outcomes |
+| non-zero | The CLI could not parse the command shape or a required flag |
 
 **Output fields (JSON, exit 0 only):**
 
@@ -759,14 +814,20 @@ ambiguous input. Called by the MVP+TDD gate in
 |-------|------|-------------|
 | `verdict` | `string` | `authorize`, `red_commit_not_failing`, or `unexpected_pass` |
 | `reason` | `string` | Human-readable explanation of the verdict |
-| `observed_exit_status` | `number \| null` | Local selected-contract process status, or `null` when no integer status was observed; child output is withheld |
-| `stderr_captured` | `boolean` | Whether local stderr was captured without returning it |
+| `observed_exit_status` | `number \| null` | Receipt's locally observed process status, or `null` when unavailable |
+| `stderr_captured` | `boolean` | Whether the receipt carried a valid stderr byte count; child output remains withheld |
 
-`phase`, `class_or_mode`, and `subject` remain contract-declared semantic fields. Local exit and stderr observation is not hosted, adversarial, or signed provenance.
-When the selected evidence otherwise authorizes but its declared file is absent from `--changed-files`, the result is `red_commit_not_failing` with the exact reason `the commit's changed files do not include "<declared-file>"`.
+Only the process termination facts and exact argv target membership are machine-observed locally.
+The trailer's `phase`, `class_or_mode`, `subject`, and locations are declared or reported
+semantic fields compared for syntactic agreement; capture does not derive them from runner output.
+The mechanism therefore does not prove that a named test executed or failed for the asserted
+reason, and provides no hosted, adversarial, signed, independently attested, or hostile same-UID
+provenance.
 
 ```bash
-node gsd-tools.cjs task red-evidence-verdict --task-file .planning/phases/03-name/03-1-PLAN.md --task-index 1 --trailer "$RED_TRAILER" --changed-files "$(git show --name-only --format= "$RED_SHA")" --raw
+node gsd-tools.cjs query task red-evidence-verdict \
+  --task-file .planning/phases/03-name/03-1-PLAN.md --task-index 1 \
+  --red-sha "$RED_SHA" --trailer "$RED_TRAILER" --raw
 ```
 
 ---

@@ -175,7 +175,7 @@ GSD uses a multi-agent architecture where thin orchestrators (workflow files) sp
 - Reads PROJECT.md, REQUIREMENTS.md, CONTEXT.md, RESEARCH.md
 - Creates 2-3 atomic task plans sized for single context windows
 - Uses XML structure with `<task>` elements
-- Requires every behavior-adding `<red_contract>` to declare `program`, JSON `argv_json`, and exact `target_test` argv membership
+- Requires every behavior-adding `<red_contract>` to declare `target_test`, `implementation_target`, and the expected failure's phase, class or mode, and subject; executable argv is supplied only by the executor at capture time
 - Emits a `<fails_when>` sibling for every runnable `<automated>` verify command, naming what output constitutes failure (#3172)
 - Includes `read_first` and `acceptance_criteria` sections
 - Groups plans into dependency waves
@@ -222,7 +222,7 @@ GSD uses a multi-agent architecture where thin orchestrators (workflow files) sp
 - Fresh 200K context window per plan
 - Follows XML task instructions precisely
 - Atomic git commit per completed task
-- Carries one parser-owned plan path and one-based task index through behavior detection, task-scoped RED commit selection, and structured verdict invocation
+- Carries one parser-validated plan path and document-order task index through behavior detection, one-shot RED capture, literal task-scoped commit selection, and receipt-consuming verdict invocation
 - Handles task types: auto, tracer, checkpoint (human-verify, decision, human-action)
 - Tracer feedback gate: after a `tracer` slice, verifies it end-to-end before expansion tasks — autonomous runs halt on failure; interactive runs honor `workflow.human_verify_mode` (under the `end-of-phase` default an automated-only `<verify>` continues with no checkpoint; otherwise a human-verify checkpoint is emitted, #3299)
 - Reports deviations from plan in SUMMARY.md
