@@ -516,10 +516,10 @@ describe('#3771 generic revision pattern carries the same separation', () => {
 
     test('a recognizable malformed open conflict record still blocks convergence', () => {
       for (const malformed of [
-        '- [ ] REVISION_CONFLICT dependency/07 — conflicts with: D-1 | alternatives: a\n',
-        '- [ ] REVISION_CONFLICT\tdependency/07 — conflicts with: D-1 | alternatives: a\n',
-        ' - [ ] REVISION_CONFLICT dependency/07 — conflicts with: D-1 | alternatives: a\n',
-        '-  [ ] REVISION_CONFLICT dependency/07 — conflicts with: D-1 | alternatives: a\n',
+        '- [ ] REVISION_CONFLICT dependency/07 — required_property: p | conflicts with: D-1 | alternatives: a\n',
+        '- [ ] REVISION_CONFLICT\tdependency/07 — required_property: p | conflicts with: D-1 | alternatives: a\n',
+        ' - [ ] REVISION_CONFLICT dependency/07 — required_property: p | conflicts with: D-1 | alternatives: a\n',
+        '-  [ ] REVISION_CONFLICT dependency/07 — required_property: p | conflicts with: D-1 | alternatives: a\n',
       ]) {
         withReviews(reviewsArtifact(malformed), (f) => {
           const r = runConflictGate(f);
@@ -757,9 +757,9 @@ describe('#3771 every revision orchestrator routes conflicts instead of retrying
     assert.match(CONVERGENCE, /OPEN_CONFLICTS=/,
       'the count must be read from REVIEWS.md — CYCLE_SUMMARY does not carry it');
     // The counter and writer must agree on both marker and ownership boundary.
-    assert.match(CONVERGENCE, /in_owned && \/REVISION_CONFLICT\//,
-      'reserved conflict tokens must be interpreted only inside the owned slot');
-    assert.match(CONVERGENCE, /REVISION_CONFLICT\(\[\[:space:\]\]\|\$\)/,
+    assert.match(CONVERGENCE, /in_owned \{ exit 2 \}/,
+      'every unrecognized nonblank line in the owned slot must fail closed');
+    assert.match(CONVERGENCE, /\[\[:space:\]\]\+REVISION_CONFLICT\[\[:space:\]\]\+/,
       'open and resolved record grammars must accept POSIX whitespace');
     assert.match(CONVERGENCE, /gsd:plan-revision-conflicts:begin/);
     assert.match(CONVERGENCE, /gsd:plan-revision-conflicts:end/);
