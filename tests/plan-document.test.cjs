@@ -106,3 +106,32 @@ Some body text.
     assert.equal(t.trackerId, 'beads:GSD-7');
   });
 });
+
+
+describe('plan-document: parser-owned task source', () => {
+  test('first and last task rows retain only their own source and one-based identity', () => {
+    const doc = parsePlanDocument(`
+<task type="auto"><name>first</name><files>src/first.cts</files><red_contract>first</red_contract></task>
+<task type="checkpoint:decision"><decision>stop</decision></task>
+<task type="auto"><name>last</name><files>src/last.cts</files><red_contract>last</red_contract></task>
+`);
+
+    assert.equal(doc.tasks[0].index, 1);
+    assert.equal(doc.tasks[0].taskSource.includes('src/first.cts'), true);
+    assert.equal(doc.tasks[0].taskSource.includes('src/last.cts'), false);
+    assert.equal(doc.tasks[2].index, 3);
+    assert.equal(doc.tasks[2].taskSource.includes('src/last.cts'), true);
+    assert.equal(doc.tasks[2].taskSource.includes('src/first.cts'), false);
+  });
+
+  test('an unclosed sibling remains bounded at the next opening', () => {
+    const doc = parsePlanDocument(`
+<task type="auto"><name>unclosed</name><red_contract>first</red_contract>
+<task type="auto"><name>selected</name><red_contract>second</red_contract></task>
+`);
+
+    assert.equal(doc.tasks.length, 2);
+    assert.equal(doc.tasks[0].taskSource.includes('second'), false);
+    assert.equal(doc.tasks[1].taskSource.includes('second'), true);
+  });
+});

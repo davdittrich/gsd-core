@@ -115,3 +115,44 @@ describe('evaluateRedEvidence — RED Predicate round-trip property (fast-check)
     );
   });
 });
+
+
+describe('evaluateRedEvidence — selected invocation observation', () => {
+  const task = `<task type="auto">
+  <red_contract>
+    <target_test>tests/selected-red.test.cjs</target_test>
+    <program>node</program>
+    <argv_json>["--test","tests/selected-red.test.cjs"]</argv_json>
+    <expected_failure>
+      <phase>test</phase><class_or_mode>assertion_failure</class_or_mode><subject>selected RED</subject>
+    </expected_failure>
+  </red_contract>
+</task>`;
+  const trailer = `red-evidence: ${JSON.stringify({
+    command: JSON.stringify(['node', '--test', 'tests/selected-red.test.cjs']),
+    exit_status: 7,
+    target_test: 'tests/selected-red.test.cjs',
+    expected: { phase: 'test', class_or_mode: 'assertion_failure', subject: 'selected RED' },
+    actual: { phase: 'test', class_or_mode: 'assertion_failure', subject: 'tests/selected-red.test.cjs' },
+    location: { declared: { file: 'tests/selected-red.test.cjs', line: 1 }, observed: { file: 'tests/selected-red.test.cjs', line: 1 } },
+  })}`;
+
+  test('requires the selected canonical command and a matching non-zero observed exit', () => {
+    const observation = { exit_status: 7, stderr_captured: true, spawn_error: false, signal: null, timed_out: false };
+    assert.equal(evaluateRedEvidence(task, trailer, observation).verdict, 'authorize');
+
+    for (const invalidObservation of [
+      undefined,
+      { ...observation, exit_status: 0 },
+      { ...observation, exit_status: 8 },
+      { ...observation, spawn_error: true },
+      { ...observation, signal: 'SIGTERM' },
+      { ...observation, timed_out: true },
+    ]) {
+      assert.equal(evaluateRedEvidence(task, trailer, invalidObservation).verdict, 'red_commit_not_failing');
+    }
+
+    const forgedDisplay = trailer.replace(JSON.stringify(['node', '--test', 'tests/selected-red.test.cjs']), 'node --test tests/selected-red.test.cjs');
+    assert.equal(evaluateRedEvidence(task, forgedDisplay, observation).verdict, 'red_commit_not_failing');
+  });
+});

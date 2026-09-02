@@ -118,3 +118,51 @@ describe('task red-evidence-verdict — --changed-files membership', () => {
       + 'fixture-is-the-behavior (REGR-04). See gsd-core-vlh.');
   });
 });
+
+
+describe('task red-evidence-verdict — task-scoped execution', () => {
+  test('executes only the selected contract and emits typed bounded observation metadata', (t) => {
+    const plan = `.red-ev-plan-${process.pid}.md`;
+    const selectedTest = `.red-ev-selected-${process.pid}.test.cjs`;
+    fs.writeFileSync(path.join(REPO_ROOT, selectedTest), `const test = require('node:test'); test('selected red', () => { throw new Error('selected failure'); });\n`);
+    fs.writeFileSync(path.join(REPO_ROOT, plan), `<task type="auto">
+  <name>decoy</name><red_contract>
+    <target_test>decoy.test.cjs</target_test><program>node</program><argv_json>["--eval","process.exit(0)","decoy.test.cjs"]</argv_json>
+    <expected_failure><phase>test</phase><class_or_mode>assertion_failure</class_or_mode><subject>decoy</subject></expected_failure>
+  </red_contract>
+</task>
+<task type="auto">
+  <name>selected</name><red_contract>
+    <target_test>${selectedTest}</target_test><program>node</program><argv_json>["--test","${selectedTest}"]</argv_json>
+    <expected_failure><phase>test</phase><class_or_mode>assertion_failure</class_or_mode><subject>selected RED</subject></expected_failure>
+  </red_contract>
+</task>\n`);
+    t.after(() => {
+      fs.unlinkSync(path.join(REPO_ROOT, plan));
+      fs.unlinkSync(path.join(REPO_ROOT, selectedTest));
+    });
+
+    const trailer = JSON.stringify({
+      command: JSON.stringify(['node', '--test', selectedTest]),
+      exit_status: 1,
+      target_test: selectedTest,
+      expected: { phase: 'test', class_or_mode: 'assertion_failure', subject: 'selected RED' },
+      actual: { phase: 'test', class_or_mode: 'assertion_failure', subject: selectedTest },
+      location: { declared: { file: selectedTest, line: 1 }, observed: { file: selectedTest, line: 1 } },
+    });
+    const result = runNode([
+      GSD_TOOLS, 'query', 'task', 'red-evidence-verdict',
+      '--task-file', plan, '--task-index', '2', '--trailer', trailer,
+      '--changed-files', selectedTest, '--raw',
+    ], { cwd: REPO_ROOT });
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.deepEqual(Object.keys(payload).sort(), ['observed_exit_status', 'reason', 'stderr_captured', 'verdict']);
+    assert.equal(payload.verdict, 'authorize');
+    assert.equal(payload.observed_exit_status, 1);
+    assert.equal(payload.stderr_captured, true);
+    assert.doesNotMatch(result.stdout, /selected failure/);
+    assert.doesNotMatch(result.stderr, /selected failure/);
+  });
+});
