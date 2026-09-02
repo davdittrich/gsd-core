@@ -444,11 +444,15 @@ describe('public CLI receipt lifecycle', () => {
 
   test('public capture preserves every post-sentinel child argv element', (t) => {
     const spellings = [
-      { command: ['task', 'red-evidence-capture'], project: 'spaced', pick: true },
-      { command: ['task.red-evidence-capture'], project: 'dotted', pick: false },
+      { leading: [], command: ['task', 'red-evidence-capture'], project: 'spaced', pick: true },
+      { leading: [], command: ['task.red-evidence-capture'], project: 'dotted', pick: false },
+      { leading: ['--json-errors'], command: ['task', 'red-evidence-capture'], project: 'leading-json-spaced', pick: false },
+      { leading: ['--json-errors'], command: ['task.red-evidence-capture'], project: 'leading-json-dotted', pick: false },
+      { leading: ['--exit-contract=v2'], command: ['task', 'red-evidence-capture'], project: 'leading-exit-spaced', pick: false },
+      { leading: ['--exit-contract=v2'], command: ['task.red-evidence-capture'], project: 'leading-exit-dotted', pick: false },
     ];
 
-    for (const { command, project, pick } of spellings) {
+    for (const { leading, command, project, pick } of spellings) {
       const root = createTempDir(`red-receipt-${project}-`);
       t.after(() => cleanup(root));
       fs.mkdirSync(path.join(root, '.planning'));
@@ -485,7 +489,7 @@ describe('public CLI receipt lifecycle', () => {
       const publicPrefix = ['query', ...command];
       const projection = pick ? ['--pick', 'exit_status'] : [];
       const captured = runNode([
-        GSD_TOOLS, ...publicPrefix, '--project-dir', root,
+        GSD_TOOLS, ...leading, ...publicPrefix, '--project-dir', root,
         '--task-file', plan, '--task-index', '1', ...projection, '--',
         process.execPath, recorder, ...childArgs,
       ], { cwd: root });
