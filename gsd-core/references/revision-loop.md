@@ -58,9 +58,9 @@ Display iteration progress before each revision spawn:
 When re-spawning the producing agent for revision, pass the checker's YAML-formatted issues. The checker's output contains a `## Issues` heading followed by a YAML block. Parse this block and pass it verbatim to the revision agent.
 
 The field names are the plan-checker's schema (`agents/gsd-plan-checker.md` → `<issue_structure>`):
-`plan`, `dimension`, `severity`, `required_property`, `description`, `task`, `fix_hint`. There is no
-`suggested_fix` field and no `finding` or `affected_field` field — those names were drift, and every
-producer now emits the schema above.
+`plan` or `plans`, `dimension`, `severity`, `required_property`, `description`, `task`, `fix_hint`.
+`plan` and `plans` are mutually exclusive; omit both for phase-level issues. There is no
+`suggested_fix`, `finding`, or `affected_field` field — those names were drift.
 
 ```
 <checker_issues>

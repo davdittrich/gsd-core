@@ -430,14 +430,13 @@ if CONFLICT_SCAN=$(awk '
     for (i = 1; i <= count; i++) print open[i]
     exit
   }
-  in_owned && /REVISION_CONFLICT/ {
-    if ($0 ~ /^[[:space:]]*-[[:space:]]+\[[[:space:]]\][[:space:]]+REVISION_CONFLICT([[:space:]]|$)/) {
-      open[++count] = $0
-      next
-    }
-    if ($0 ~ /^[[:space:]]*-[[:space:]]+\[[xX]\][[:space:]]+REVISION_CONFLICT([[:space:]]|$)/) next
-    exit 2
+  in_owned && $0 ~ /^[[:space:]]*-[[:space:]]+\[[[:space:]]\][[:space:]]+REVISION_CONFLICT[[:space:]]+[^[:space:]]+[[:space:]]+—[[:space:]]+required_property:[[:space:]]+[^|]+[[:space:]]+\|[[:space:]]+conflicts with:[[:space:]]+[^|]+[[:space:]]+\|[[:space:]]+alternatives:[[:space:]]+[^|]+[[:space:]]*$/ {
+    open[++count] = $0
+    next
   }
+  in_owned && $0 ~ /^[[:space:]]*-[[:space:]]+\[[xX]\][[:space:]]+REVISION_CONFLICT[[:space:]]+[^[:space:]]+[[:space:]]+—[[:space:]]+required_property:[[:space:]]+[^|]+[[:space:]]+\|[[:space:]]+conflicts with:[[:space:]]+[^|]+[[:space:]]+\|[[:space:]]+alternatives:[[:space:]]+[^|]+[[:space:]]+\|[[:space:]]+resolved:[[:space:]]+[^|]+[[:space:]]*$/ { next }
+  in_owned && $0 == "" { next }
+  in_owned { exit 2 }
   END { if (!done) exit 2 }
 ' "${REVIEWS_FILE}"); then
   OPEN_CONFLICTS=$(printf '%s\n' "$CONFLICT_SCAN" | sed -n '1p')

@@ -907,7 +907,8 @@ Severities: `blocker` (must fix), `warning` (should fix), `info` (suggestions).
 
 ```yaml
 issue:
-  plan: "16-01"              # Which plan (null if phase-level)
+  plan: "16-01"              # Single; omit for multi
+  plans: ["02", "03"]          # Multi; omit for single
   dimension: "task_completeness"  # Which dimension failed
   severity: "blocker"        # blocker | warning | info
   required_property: "..."   # BINDING — the invariant that must hold
@@ -915,6 +916,8 @@ issue:
   task: 2                    # Task number if applicable
   fix_hint: "..."            # NON-BINDING — ONE example route to the property
 ```
+
+`plan` and `plans` are mutually exclusive; omit both for phase-level issues.
 
 ## Binding Payload vs Advisory Remediation
 
