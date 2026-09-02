@@ -21,7 +21,7 @@ const path = require('node:path');
 
 const { createTempDir, cleanup } = require('./helpers.cjs');
 
-const { routeResolveContent } = require('../gsd-core/bin/lib/task-command-router.cjs');
+const { routeResolveContent, routeTaskCommand } = require('../gsd-core/bin/lib/task-command-router.cjs');
 const { ExitError } = require('../gsd-core/bin/lib/cli-exit.cjs');
 const {
   ResolverFailedError,
@@ -275,5 +275,34 @@ describe('task resolve-content (rows 17-19)', () => {
     });
     const printed = JSON.parse(stdout);
     assert.deepStrictEqual(printed, { resolved: false });
+  });
+});
+
+describe('task is-behavior-adding — parser-owned indexed selection', () => {
+  test('selects first/tracer last tasks and rejects a middle checkpoint or invalid index', (t) => {
+    const dir = createTempDir('gsd-behavior-index-');
+    t.after(() => cleanup(dir));
+    const plan = 'indexed PLAN.md';
+    fs.writeFileSync(path.join(dir, plan), [
+      '<task type="auto" tdd="true"><files>src/a.cts</files><behavior>a</behavior></task>',
+      '<task type="checkpoint:human-verify"><name>stop</name></task>',
+      '<task type="tracer" tdd="true"><files>src/z.cts</files><behavior>z</behavior></task>',
+    ].join('\n'));
+
+    for (const index of ['1', '3']) {
+      const stdout = captureStdout(() => routeTaskCommand({
+        args: ['task', 'is-behavior-adding', plan, '--task-index', index],
+        cwd: dir,
+        raw: true,
+      }));
+      assert.equal(JSON.parse(stdout).is_behavior_adding, true);
+    }
+    for (const index of ['0', '01', '2', '4', '-1', '1.0']) {
+      assert.throws(() => routeTaskCommand({
+        args: ['task', 'is-behavior-adding', plan, '--task-index', index],
+        cwd: dir,
+        raw: true,
+      }), ExitError);
+    }
   });
 });

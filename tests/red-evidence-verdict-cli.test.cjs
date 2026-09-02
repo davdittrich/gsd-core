@@ -1,222 +1,379 @@
 'use strict';
 
-/**
- * Behavioural tests for the `task red-evidence-verdict` CLI arm (#3770).
- *
- * The arm had no behavioural coverage: the only existing assertions check that
- * the string `task.red-evidence-verdict` appears in workflow prose. These pin
- * the two guards the arm actually makes claims about — that a task file
- * outside the project is refused, and that a non-file path is refused cleanly
- * rather than by throwing.
- */
-
-const { test, describe } = require('node:test');
+const { describe, test, mock } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 const { runNode } = require('./helpers/process-seam.cjs');
 const { createTempDir, cleanup } = require('./helpers.cjs');
 const { routeTaskCommand } = require('../gsd-core/bin/lib/task-command-router.cjs');
+const { ExitError } = require('../gsd-core/bin/lib/cli-exit.cjs');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const GSD_TOOLS = path.join(REPO_ROOT, 'gsd-core', 'bin', 'gsd-tools.cjs');
+const BASE = '1'.repeat(40);
+const RED = '2'.repeat(40);
 
-/** Create an isolated project so linked-worktree root resolution cannot redirect fixtures to the main checkout. */
-function createProject(t) {
-  const projectRoot = createTempDir('red-ev-project-');
-  fs.mkdirSync(path.join(projectRoot, '.planning'));
-  t.after(() => cleanup(projectRoot));
-  return projectRoot;
-}
-
-/** Run the arm and return its combined output; the seam never throws on exit code. */
-function runVerdict(args, projectRoot) {
-  const r = runNode([
-    GSD_TOOLS, 'query', 'task', 'red-evidence-verdict', '--project-dir', projectRoot, ...args,
-  ], { cwd: projectRoot });
-  return `${r.stdout}${r.stderr}`;
-}
-
-describe('task red-evidence-verdict — path guards', () => {
-  test('a symlink pointing outside the project is refused, not followed', (t) => {
-    const projectRoot = createProject(t);
-    const outside = createTempDir('red-ev-outside-');
-    const target = path.join(outside, 'outside.md');
-    fs.writeFileSync(target, '<red_contract><target_test>x</target_test></red_contract>\n');
-    const link = path.join(projectRoot, `.red-ev-escape-${process.pid}.md`);
-    fs.symlinkSync(target, link);
-    t.after(() => cleanup(outside));
-
-    assert.match(runVerdict(['--task-file', path.basename(link), '--trailer', '{}'], projectRoot),
-      /outside project scope/,
-      'the containment guard must resolve symlinks before comparing against the project root — '
-      + '`path.resolve` does not, so a symlink planted in the repo reads an arbitrary file '
-      + 'while the guard reports success. A guard that announces "outside project scope" and '
-      + 'does not enforce it is worse than none.');
-  });
-
-  test('a directory path is refused cleanly, without throwing', (t) => {
-    const projectRoot = createProject(t);
-    const out = runVerdict(['--task-file', '.', '--trailer', '{}'], projectRoot);
-
-    assert.doesNotMatch(out, /EISDIR|at routeTask|at dispatchHostCommand/,
-      'the module documents that it never throws; the CLI arm around it must not either. '
-      + '`fs.readFileSync` on a directory raises EISDIR with a stack trace instead of the '
-      + 'arm\'s own USAGE error.');
-    assert.match(out, /not found|outside project scope/,
-      'a non-file path must produce the arm\'s own usage error');
-  });
-});
-
-describe('task red-evidence-verdict — --changed-files membership', () => {
-  // A contract that authorizes on its own content, so the ONLY variable under
-  // test below is which changed-file list is passed. Go-shaped on purpose:
-  // no `tests/` directory and no `.test.` infix, so nothing here can be
-  // satisfied by a filename convention (LANG-01).
-  const TRAILER = `red-evidence: ${JSON.stringify({
-    command: JSON.stringify(['node', '--eval', 'process.exit(1)', 'TestDiscountReducesTotal']),
-    exit_status: 1,
-    target_test: 'TestDiscountReducesTotal',
-    expected: { phase: 'test', class_or_mode: 'undefined: ApplyDiscount', subject: 'TestDiscountReducesTotal' },
-    actual: { phase: 'test', class_or_mode: 'undefined: ApplyDiscount', subject: 'TestDiscountReducesTotal' },
-    location: {
-      declared: { file: 'pkg/pricing/pricing_test.go', line: 6 },
-      observed: { file: 'pkg/pricing/pricing_test.go', line: 6 },
-    },
-  })}`;
-
-  const withTaskFile = (t, projectRoot) => {
-    const rel = `.red-ev-task-${process.pid}.md`;
-    fs.writeFileSync(path.join(projectRoot, rel), `<task tdd="true">
-  <behavior>Applies a percentage discount and reduces the order total.</behavior>
-  <files>pkg/pricing/pricing.go</files>
+function contract(target = 'tests/red receipt Ω\ncase.test.cjs', type = 'auto') {
+  return `<task type="${type}" tdd="true">
+  <files>src/task-command-router.cts, ${target}</files>
+  <behavior>capture once</behavior>
   <red_contract>
-    <target_test>TestDiscountReducesTotal</target_test>
-    <program>node</program>
-    <argv_json>["--eval","process.exit(1)","TestDiscountReducesTotal"]</argv_json>
-    <implementation_target>pricing.ApplyDiscount</implementation_target>
+    <target_test>${target}</target_test>
+    <implementation_target>src/task-command-router.cts</implementation_target>
     <expected_failure>
-      <phase>test</phase>
-      <class_or_mode>undefined: ApplyDiscount</class_or_mode>
-      <subject>TestDiscountReducesTotal</subject>
+      <class_or_mode>assertion_failure</class_or_mode><phase>test</phase>
+      <subject>capture once and consume bounded task-bound RED receipt without rerun</subject>
     </expected_failure>
   </red_contract>
-</task>
-`);
-    return rel;
+</task>`;
+}
+
+function planText(target, selectedType = 'auto') {
+  return [
+    contract('tests/decoy.test.cjs'),
+    '<task type="checkpoint:human-verify"><name>middle</name></task>',
+    contract(target, selectedType),
+  ].join('\n');
+}
+
+function trailer(target, exitStatus = 1) {
+  return `red-evidence: ${JSON.stringify({
+    command: 'printf never-executed-trailer-command',
+    exit_status: exitStatus,
+    target_test: target,
+    expected: {
+      phase: 'test',
+      class_or_mode: 'assertion_failure',
+      subject: 'capture once and consume bounded task-bound RED receipt without rerun',
+    },
+    actual: { phase: 'test', class_or_mode: 'assertion_failure', subject: target },
+    location: {
+      declared: { file: 'src/task-command-router.cts', line: 1 },
+      observed: { file: 'src/task-command-router.cts', line: 1 },
+    },
+  })}`;
+}
+
+function createProject(t, target = 'tests/red receipt Ω\ncase.test.cjs', selectedType = 'auto') {
+  const root = createTempDir('red-receipt-project-');
+  fs.mkdirSync(path.join(root, '.planning'));
+  fs.mkdirSync(path.join(root, '.git'));
+  const plan = '.planning/02 plan Ω\nPLAN.md';
+  fs.writeFileSync(path.join(root, plan), planText(target, selectedType));
+  t.after(() => cleanup(root));
+  return { root, plan, target };
+}
+
+function result(exitCode = 0, overrides = {}) {
+  return { exitCode, stdout: '', stderr: '', signal: null, error: null, timedOut: false, ...overrides };
+}
+
+function gitSeam(root, target, options = {}) {
+  const parent = options.parent ?? BASE;
+  const changed = options.changed ?? 'src/task-command-router.cts';
+  const failures = options.failures ?? [];
+  return (program, argv, execOptions) => {
+    assert.equal(program, 'git');
+    assert.equal(execOptions.cwd, fs.realpathSync(root));
+    if (failures.some((prefix) => argv.join(' ').startsWith(prefix))) {
+      return result(1, { stderr: 'sensitive git fault' });
+    }
+    if (argv[0] === 'rev-parse' && argv.includes('--git-dir')) {
+      return result(0, { stdout: `${path.join(root, '.git')}\n` });
+    }
+    if (argv[0] === 'rev-parse' && argv[1] === 'HEAD') return result(0, { stdout: `${BASE}\n` });
+    if (argv[0] === 'rev-list') return result(0, { stdout: `${RED} ${parent}\n` });
+    if (argv[0] === 'diff-tree') return result(0, { stdout: `${changed}\0` });
+    throw new Error(`unexpected git argv: ${JSON.stringify(argv)}`);
   };
+}
 
-  test('the declared file itself satisfies membership', (t) => {
-    const projectRoot = createProject(t);
-    const out = runVerdict(['--task-file', withTaskFile(t, projectRoot), '--task-index', '1', '--trailer', TRAILER,
-      '--changed-files', 'pkg/pricing/pricing_test.go'], projectRoot);
-    assert.match(out, /"verdict": "authorize"/,
-      'the positive control: a commit that touched exactly the declared file must authorize. '
-      + 'Without this, the decoy assertion below could pass simply by refusing everything.');
+function captureOutput(fn) {
+  const stdout = [];
+  const stderr = [];
+  const original = fs.writeSync.bind(fs);
+  const write = mock.method(fs, 'writeSync', (fd, buffer, ...rest) => {
+    if (fd === 1 || fd === 2) {
+      const value = Buffer.isBuffer(buffer) ? buffer.toString('utf8') : String(buffer);
+      (fd === 1 ? stdout : stderr).push(value);
+      return Buffer.byteLength(value);
+    }
+    return original(fd, buffer, ...rest);
   });
+  let thrown = null;
+  try { fn(); } catch (err) { thrown = err; } finally { write.mock.restore(); }
+  return { stdout: stdout.join(''), stderr: stderr.join(''), thrown };
+}
 
-  test('a same-basename file in a DIFFERENT directory does not satisfy membership (WR-01)', (t) => {
-    const projectRoot = createProject(t);
-    const out = runVerdict(['--task-file', withTaskFile(t, projectRoot), '--task-index', '1', '--trailer', TRAILER,
-      '--changed-files', 'vendor/other/pricing_test.go'], projectRoot);
-    assert.match(out, /"verdict": "red_commit_not_failing"/,
-      'WR-01: the membership check exists to prove the RED commit touched the file its own '
-      + 'evidence names. Comparing basenames lets any same-named file anywhere in the tree '
-      + 'stand in for it, which defeats exactly the anti-decoy property the check provides. '
-      + 'Both sides here are repo-relative paths from git, so there is no prefix skew to '
-      + 'normalize away — unlike locationsAgree, whose declared/observed inputs come from '
-      + 'different tools and DO legitimately differ by prefix. Do not close this by changing '
-      + 'locationsAgree: an endsWith narrowing there blocks outside-in and '
-      + 'fixture-is-the-behavior (REGR-04). See gsd-core-vlh.');
-  });
-});
+function routeCapture(project, execToolFn, extra = {}) {
+  return captureOutput(() => routeTaskCommand({
+    args: ['task', 'red-evidence-capture', '--task-file', project.plan, '--task-index', '3', '--',
+      'node', '--test', project.target],
+    cwd: project.root,
+    raw: true,
+    execToolFn,
+    gitToolFn: gitSeam(project.root, project.target),
+    ...extra,
+  }));
+}
 
+function routeVerdict(project, exitStatus = 1, extra = {}) {
+  return captureOutput(() => routeTaskCommand({
+    args: ['task', 'red-evidence-verdict', '--task-file', project.plan, '--task-index', '3',
+      '--red-sha', RED, '--trailer', trailer(project.target, exitStatus)],
+    cwd: project.root,
+    raw: true,
+    execToolFn: () => { throw new Error('verdict must not execute a test'); },
+    gitToolFn: gitSeam(project.root, project.target),
+    ...extra,
+  }));
+}
 
-describe('task red-evidence-verdict — task-scoped execution', () => {
-  test('executes only the selected contract and emits typed bounded observation metadata', (t) => {
-    const projectRoot = createProject(t);
-    const plan = `.red-ev-plan-${process.pid}.md`;
-    const selectedTest = `red-ev-selected-${process.pid}.test.cjs`;
-    fs.writeFileSync(path.join(projectRoot, plan), `<task type="auto">
-  <name>decoy</name><red_contract>
-    <target_test>decoy.test.cjs</target_test><program>node</program><argv_json>["--eval","process.exit(0)","decoy.test.cjs"]</argv_json>
-    <expected_failure><phase>test</phase><class_or_mode>assertion_failure</class_or_mode><subject>decoy</subject></expected_failure>
-  </red_contract>
-</task>
-<task type="auto">
-  <name>selected</name><red_contract>
-    <target_test>${selectedTest}</target_test><program>node</program><argv_json>["--eval","process.stderr.write('selected failure'); process.exit(1)","${selectedTest}"]</argv_json>
-    <expected_failure><phase>test</phase><class_or_mode>assertion_failure</class_or_mode><subject>selected RED</subject></expected_failure>
-  </red_contract>
-</task>\n`);
-    const trailer = JSON.stringify({
-      command: JSON.stringify(['node', '--eval', "process.stderr.write('selected failure'); process.exit(1)", selectedTest]),
-      exit_status: 1,
-      target_test: selectedTest,
-      expected: { phase: 'test', class_or_mode: 'assertion_failure', subject: 'selected RED' },
-      actual: { phase: 'test', class_or_mode: 'assertion_failure', subject: selectedTest },
-      location: { declared: { file: selectedTest, line: 1 }, observed: { file: selectedTest, line: 1 } },
-    });
-    const result = runNode([
-      GSD_TOOLS, 'query', 'task', 'red-evidence-verdict', '--project-dir', projectRoot,
-      '--task-file', plan, '--task-index', '2', '--trailer', trailer,
-      '--changed-files', selectedTest, '--raw',
-    ], { cwd: projectRoot });
+function receiptFiles(root) {
+  return fs.readdirSync(path.join(root, '.git')).filter((name) => name.startsWith('gsd-red-evidence-'));
+}
 
-    assert.equal(result.exitCode, 0, result.stderr);
-    const payload = JSON.parse(result.stdout);
-    assert.deepEqual(Object.keys(payload).sort(), ['observed_exit_status', 'reason', 'stderr_captured', 'verdict']);
-    assert.equal(payload.verdict, 'authorize', JSON.stringify(payload));
-    assert.equal(payload.observed_exit_status, 1);
-    assert.equal(payload.stderr_captured, true);
-    assert.doesNotMatch(result.stdout, /selected failure/);
-    assert.doesNotMatch(result.stderr, /selected failure/);
-  });
-});
-
-
-describe('task red-evidence-verdict — selected execTool seam', () => {
-  test('passes only selected structured program and argv to execTool', (t) => {
-    const projectRoot = createProject(t);
-    const plan = 'selected-plan.md';
-    const targetTest = 'tests/selected-red.test.cjs';
-    fs.writeFileSync(path.join(projectRoot, plan), `<task type="auto">
-  <red_contract><target_test>${targetTest}</target_test><program>node</program>
-  <argv_json>["--test","${targetTest}"]</argv_json>
-  <expected_failure><phase>test</phase><class_or_mode>assertion_failure</class_or_mode><subject>selected RED</subject></expected_failure>
-  </red_contract>
-</task>`);
-
-    const trailer = JSON.stringify({
-      command: JSON.stringify(['node', '--test', targetTest]),
-      exit_status: 1,
-      target_test: targetTest,
-      expected: { phase: 'test', class_or_mode: 'assertion_failure', subject: 'selected RED' },
-      actual: { phase: 'test', class_or_mode: 'assertion_failure', subject: targetTest },
-      location: { declared: { file: targetTest, line: 1 }, observed: { file: targetTest, line: 1 } },
-    });
+describe('task red-evidence-capture — explicit vector and bounded receipt', () => {
+  test('executes post-sentinel argv once and persists metadata only', (t) => {
+    const project = createProject(t);
     const calls = [];
-    const writes = [];
-    const originalWriteSync = fs.writeSync;
-    fs.writeSync = (fd, buffer, offset, length) => {
-      if (fd === 1) writes.push(Buffer.from(buffer).subarray(offset, offset + length).toString('utf8'));
-      return length;
-    };
-    t.after(() => { fs.writeSync = originalWriteSync; });
-
-    routeTaskCommand({
-      args: ['task', 'red-evidence-verdict', '--task-file', plan, '--task-index', '1',
-        '--trailer', trailer, '--changed-files', targetTest],
-      cwd: projectRoot,
-      raw: false,
-      execToolFn: (program, argv, options) => {
-        calls.push({ program, argv, options });
-        return { exitCode: 1, stdout: 'raw stdout is withheld', stderr: 'raw stderr is withheld', signal: null, error: null, timedOut: false };
-      },
+    const captured = routeCapture(project, (program, argv, options) => {
+      calls.push({ program, argv, options });
+      return result(1, { stdout: 'stdout-secret', stderr: 'stderr-secret' });
     });
 
-    assert.deepEqual(calls, [{ program: 'node', argv: ['--test', targetTest], options: { cwd: projectRoot, timeout: 30_000 } }]);
-    assert.doesNotMatch(writes.join(''), /raw stdout is withheld|raw stderr is withheld/);
+    assert.equal(captured.thrown, null, captured.stderr);
+    assert.deepEqual(calls, [{
+      program: 'node', argv: ['--test', project.target],
+      options: { cwd: fs.realpathSync(project.root), timeout: 30_000 },
+    }]);
+    assert.doesNotMatch(captured.stdout + captured.stderr, /stdout-secret|stderr-secret/);
+    const files = receiptFiles(project.root);
+    assert.equal(files.length, 1);
+    const stored = JSON.parse(fs.readFileSync(path.join(project.root, '.git', files[0]), 'utf8'));
+    assert.deepEqual(Object.keys(stored).sort(), [
+      'error', 'exit_status', 'plan', 'pre_red_head', 'signal', 'stderr_bytes',
+      'stdout_bytes', 'target', 'task_index', 'timed_out', 'version',
+    ]);
+    assert.equal(stored.stdout_bytes, Buffer.byteLength('stdout-secret'));
+    assert.equal(stored.stderr_bytes, Buffer.byteLength('stderr-secret'));
+    assert.doesNotMatch(JSON.stringify(stored), /stdout-secret|stderr-secret|--test|argv|env/);
+  });
+
+  test('sets restrictive mode before atomic publication inside the worktree git-dir', (t) => {
+    const project = createProject(t);
+    const events = [];
+    const fsFn = Object.create(fs);
+    fsFn.openSync = (...args) => { events.push(['open', args[1], args[2]]); return fs.openSync(...args); };
+    fsFn.fchmodSync = (...args) => { events.push(['fchmod', args[1]]); return fs.fchmodSync(...args); };
+    fsFn.renameSync = (...args) => { events.push(['rename', ...args]); return fs.renameSync(...args); };
+    const captured = routeCapture(project, () => result(1), { fsFn });
+    assert.equal(captured.thrown, null, captured.stderr);
+    assert.deepEqual(events[0], ['open', 'wx', 0o600]);
+    assert.deepEqual(events[1], ['fchmod', 0o600]);
+    assert.equal(events[2][0], 'rename');
+    for (const publishedPath of events[2].slice(1)) {
+      assert.equal(path.dirname(publishedPath), path.join(project.root, '.git'));
+    }
+  });
+
+  test('rejects malformed grammar, target ambiguity, invalid selection, and NUL before execution', (t) => {
+    const project = createProject(t);
+    const base = ['task', 'red-evidence-capture', '--task-file', project.plan, '--task-index', '3', '--',
+      'node', '--test', project.target];
+    const invalid = [
+      base.filter((arg) => arg !== '--'),
+      [...base.slice(0, 6), '--', ...base.slice(6)],
+      base.slice(0, 7),
+      [...base, project.target],
+      base.map((arg) => arg === project.target ? `${arg}\0x` : arg),
+      base.map((arg) => arg === '3' ? '0' : arg),
+      base.map((arg) => arg === '3' ? '2' : arg),
+      [...base.slice(0, 4), '--task-file', project.plan, ...base.slice(4)],
+      base.map((arg) => arg === project.target ? `${project.target}.other` : arg),
+    ];
+    for (const args of invalid) {
+      let calls = 0;
+      const out = captureOutput(() => routeTaskCommand({
+        args, cwd: project.root, raw: true,
+        execToolFn: () => { calls++; return result(1); },
+        gitToolFn: gitSeam(project.root, project.target),
+      }));
+      assert.ok(out.thrown instanceof ExitError, `${JSON.stringify(args)} should fail`);
+      assert.equal(calls, 0);
+    }
+  });
+});
+
+describe('task red-evidence-verdict — consume without rerun', () => {
+  test('authorizes bound RED parent and consumes receipt exactly once', (t) => {
+    const project = createProject(t, 'tests/receipt.test.cjs', 'tracer');
+    assert.equal(routeCapture(project, () => result(1, { stderr: 'expected failure' })).thrown, null);
+    assert.equal(receiptFiles(project.root).length, 1);
+
+    const verdict = routeVerdict(project);
+    assert.equal(verdict.thrown, null, verdict.stderr);
+    assert.equal(JSON.parse(verdict.stdout).verdict, 'authorize');
+    assert.equal(receiptFiles(project.root).length, 0);
+
+    const replay = routeVerdict(project);
+    assert.equal(replay.thrown, null, replay.stderr);
+    assert.equal(JSON.parse(replay.stdout).verdict, 'red_commit_not_failing');
+  });
+
+  test('maps zero exit distinctly and rejects signal, timeout, error, and stale parent', (t) => {
+    const rows = [
+      { captured: result(0), trailerExit: 0, expected: 'unexpected_pass' },
+      { captured: result(1, { signal: 'SIGTERM' }), trailerExit: 1, expected: 'red_commit_not_failing' },
+      { captured: result(1, { timedOut: true }), trailerExit: 1, expected: 'red_commit_not_failing' },
+      { captured: result(1, { error: new Error('secret argv env buffer failure') }), trailerExit: 1, expected: 'red_commit_not_failing' },
+    ];
+    for (const [index, row] of rows.entries()) {
+      const project = createProject(t, `tests/process-${index}.test.cjs`);
+      routeCapture(project, () => row.captured);
+      const verdict = routeVerdict(project, row.trailerExit);
+      assert.equal(JSON.parse(verdict.stdout).verdict, row.expected);
+      assert.doesNotMatch(verdict.stdout + verdict.stderr, /secret argv env buffer failure/);
+      assert.equal(receiptFiles(project.root).length, 0);
+    }
+
+    const stale = createProject(t, 'tests/stale.test.cjs');
+    routeCapture(stale, () => result(1));
+    const verdict = routeVerdict(stale, 1, {
+      gitToolFn: gitSeam(stale.root, stale.target, { parent: '3'.repeat(40) }),
+    });
+    assert.equal(JSON.parse(verdict.stdout).verdict, 'red_commit_not_failing');
+    assert.equal(receiptFiles(stale.root).length, 0);
+  });
+
+  test('rejects malformed/cross-task receipts, Git faults, and missing receipts', (t) => {
+    const mutations = [
+      (stored) => ({ ...stored, task_index: 1 }),
+      (stored) => ({ ...stored, target: 'tests/other.test.cjs' }),
+      (stored) => ({ ...stored, unexpected: true }),
+      () => '{',
+    ];
+    for (const [index, mutate] of mutations.entries()) {
+      const project = createProject(t, `tests/tamper-${index}.test.cjs`);
+      routeCapture(project, () => result(1));
+      const receiptPath = path.join(project.root, '.git', receiptFiles(project.root)[0]);
+      const next = mutate(JSON.parse(fs.readFileSync(receiptPath, 'utf8')));
+      fs.writeFileSync(receiptPath, typeof next === 'string' ? next : JSON.stringify(next));
+      const verdict = routeVerdict(project);
+      assert.equal(JSON.parse(verdict.stdout).verdict, 'red_commit_not_failing');
+      assert.equal(receiptFiles(project.root).length, 0);
+    }
+
+    const gitFault = createProject(t, 'tests/git-fault.test.cjs');
+    routeCapture(gitFault, () => result(1));
+    const failed = routeVerdict(gitFault, 1, {
+      gitToolFn: gitSeam(gitFault.root, gitFault.target, { failures: ['rev-list'] }),
+    });
+    assert.equal(JSON.parse(failed.stdout).verdict, 'red_commit_not_failing');
+    assert.doesNotMatch(failed.stdout + failed.stderr, /sensitive git fault/);
+
+    const absent = createProject(t, 'tests/absent.test.cjs');
+    assert.equal(JSON.parse(routeVerdict(absent).stdout).verdict, 'red_commit_not_failing');
+  });
+
+  test('rejects escaping/broken symlinks and terminal unlink failure', (t) => {
+    const project = createProject(t, 'tests/symlink.test.cjs');
+    routeCapture(project, () => result(1));
+    const receiptPath = path.join(project.root, '.git', receiptFiles(project.root)[0]);
+    fs.unlinkSync(receiptPath);
+    const outside = path.join(project.root, 'outside.json');
+    fs.writeFileSync(outside, '{}');
+    fs.symlinkSync(outside, receiptPath);
+    assert.equal(JSON.parse(routeVerdict(project).stdout).verdict, 'red_commit_not_failing');
+    assert.equal(fs.readFileSync(outside, 'utf8'), '{}');
+    fs.unlinkSync(receiptPath);
+    fs.symlinkSync(path.join(project.root, 'missing.json'), receiptPath);
+    assert.equal(JSON.parse(routeVerdict(project).stdout).verdict, 'red_commit_not_failing');
+
+    const unlink = createProject(t, 'tests/unlink.test.cjs');
+    routeCapture(unlink, () => result(1));
+    const fsFn = Object.create(fs);
+    fsFn.unlinkSync = () => { throw new Error('secret unlink'); };
+    const unlinkFailure = routeVerdict(unlink, 1, { fsFn });
+    assert.equal(JSON.parse(unlinkFailure.stdout).verdict, 'red_commit_not_failing');
+    assert.doesNotMatch(unlinkFailure.stdout + unlinkFailure.stderr, /secret unlink/);
+  });
+});
+
+describe('receipt filesystem faults', () => {
+  test('open, short-write, chmod, fsync, rename, cleanup, and collision fail closed', (t) => {
+    const rows = [
+      ['openSync', () => { throw new Error('secret open'); }],
+      ['writeSync', () => 1],
+      ['fchmodSync', () => { throw new Error('secret chmod'); }],
+      ['fsyncSync', () => { throw new Error('secret fsync'); }],
+      ['renameSync', () => { throw new Error('secret rename'); }],
+    ];
+    for (const [index, [method, replacement]] of rows.entries()) {
+      const project = createProject(t, `tests/fs-${index}.test.cjs`);
+      const fsFn = Object.create(fs);
+      fsFn[method] = replacement;
+      if (method !== 'openSync') fsFn.unlinkSync = () => { throw new Error('secret cleanup'); };
+      const captured = routeCapture(project, () => result(1, { stderr: 'secret child output' }), { fsFn });
+      assert.ok(captured.thrown instanceof ExitError, `${method} must fail closed`);
+      assert.doesNotMatch(captured.stdout + captured.stderr, /secret|--test|argv|env/);
+      assert.equal(receiptFiles(project.root).length, 0);
+    }
+
+    const collision = createProject(t, 'tests/collision.test.cjs');
+    routeCapture(collision, () => result(1));
+    let calls = 0;
+    const second = routeCapture(collision, () => { calls++; return result(1); });
+    assert.ok(second.thrown instanceof ExitError);
+    assert.equal(calls, 0);
+  });
+});
+
+describe('public CLI receipt lifecycle', () => {
+  function git(root, args) {
+    const out = spawnSync('git', args, {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null' },
+    });
+    assert.equal(out.status, 0, out.stderr);
+    return out.stdout.trim();
+  }
+
+  test('real capture is consumed after a RED commit without executing command text', (t) => {
+    const root = createTempDir('red-receipt-public-');
+    t.after(() => cleanup(root));
+    fs.mkdirSync(path.join(root, '.planning'));
+    git(root, ['init', '-q']);
+    const target = 'tests/public receipt Ω.test.cjs';
+    const plan = '.planning/02 public plan.md';
+    fs.writeFileSync(path.join(root, plan), contract(target));
+    git(root, ['add', '--', plan]);
+    git(root, ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'baseline']);
+
+    const captured = runNode([
+      GSD_TOOLS, 'query', 'task', 'red-evidence-capture', '--project-dir', root,
+      '--task-file', plan, '--task-index', '1', '--', process.execPath, '--eval',
+      'process.stdout.write("raw-public-out");process.stderr.write("raw-public-err");process.exit(1)', target,
+    ], { cwd: root });
+    assert.equal(captured.exitCode, 0, captured.stderr);
+    assert.doesNotMatch(captured.stdout + captured.stderr, /raw-public-out|raw-public-err/);
+
+    fs.mkdirSync(path.join(root, 'tests'));
+    fs.writeFileSync(path.join(root, target), 'public RED\n');
+    git(root, ['add', '--', target]);
+    git(root, ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'test: RED']);
+    const red = git(root, ['rev-parse', 'HEAD']);
+    const verdict = runNode([
+      GSD_TOOLS, 'query', 'task', 'red-evidence-verdict', '--project-dir', root,
+      '--task-file', plan, '--task-index', '1', '--red-sha', red,
+      '--trailer', trailer(target), '--raw',
+    ], { cwd: root });
+    assert.equal(verdict.exitCode, 0, verdict.stderr);
+    assert.equal(JSON.parse(verdict.stdout).verdict, 'authorize');
+    assert.equal(fs.existsSync(path.join(root, 'never-executed-trailer-command')), false);
   });
 });

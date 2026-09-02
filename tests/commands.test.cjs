@@ -4175,6 +4175,13 @@ describe('feat-3251: command-aliases.cjs manifest coverage', () => {
       'NON_FAMILY_COMMAND_ALIASES must be sorted by canonical for deterministic regeneration',
     );
   });
+
+  test('RED capture and consuming verdict aliases are both declared mutations', () => {
+    manifest = manifest ?? require(COMMAND_ALIASES_FILE);
+    const byCanonical = new Map(manifest.NON_FAMILY_COMMAND_ALIASES.map((entry) => [entry.canonical, entry]));
+    assert.equal(byCanonical.get('task.red-evidence-capture')?.mutation, true);
+    assert.equal(byCanonical.get('task.red-evidence-verdict')?.mutation, true);
+  });
 });
 
 function createProject() {

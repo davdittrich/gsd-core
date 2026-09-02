@@ -1,167 +1,151 @@
 'use strict';
 
-/**
- * Property-based coverage for `evaluateRedEvidence` (#3770) — per
- * RULESET.TESTS.property-based-testing, matching the fast-check property the
- * sibling module `gate-predicate-evaluator.cjs` already carries.
- *
- * The verdict must agree with the `valid_red` formula in `gsd-core/references/tdd.md`'s
- * `### RED Predicate` fence. Each of the formula's seven conjuncts is driven by
- * its own boolean flag (independent random strings would almost never collide,
- * so a plain arbitrary-string generator can't reach `authorize` or isolate a
- * single conjunct). Location `file` values carry no path separators, so
- * `locationsAgree`'s basename reduction is a no-op here; cross-path basename
- * behavior is covered elsewhere (WR-01 in tests/executor-mvp-tdd-section.test.cjs).
- */
-
 const { describe, test } = require('node:test');
 const assert = require('node:assert/strict');
 const fc = require('fast-check');
 
-const { evaluateRedEvidence } = require('../gsd-core/bin/lib/red-evidence-predicate.cjs');
+const {
+  evaluateRedEvidence,
+  parseRedContract,
+} = require('../gsd-core/bin/lib/red-evidence-predicate.cjs');
 
-// Safe alphabet: excludes `<`, `>`, `{`, `}`, and whitespace so generated
-// values can never be confused with XML tag boundaries, break JSON
-// serialization, or be silently trimmed by `extractTag` on the XML side only
-// (the JSON side of the same value is never trimmed, so a whitespace-edged
-// value would make two conceptually-equal fields compare unequal).
-const safeString = fc.stringMatching(/^[a-zA-Z0-9_.-]{1,12}$/);
+const TARGET = 'tests/red-evidence-verdict-cli.test.cjs';
+const PLAN = '.planning/quick/plan/02-PLAN.md';
+const PARENT = '1'.repeat(40);
 
-/** Guaranteed different from `base` (strictly longer), never re-collides with it. */
-const differ = (base) => `${base}_alt`;
-
-const trailerCase = fc.record({
-  planTargetTest: safeString,
-  expectedPhase: safeString,
-  expectedClassOrMode: safeString,
-  expectedSubject: safeString,
-  declaredFile: safeString,
-  declaredLine: fc.integer({ min: 0, max: 10000 }),
-  exitZero: fc.boolean(),
-  nonZeroExit: fc.integer({ min: -2, max: 2 }).filter((n) => n !== 0),
-  mismatchExpected: fc.boolean(),
-  mismatchActualPhase: fc.boolean(),
-  mismatchActualClassOrMode: fc.boolean(),
-  mismatchTargetTest: fc.boolean(),
-  mismatchLocationFile: fc.boolean(),
-  mismatchLocationLine: fc.boolean(),
-  mismatchActualSubject: fc.boolean(),
-});
-
-function build(c) {
-  const trailerExpected = c.mismatchExpected
-    ? { phase: differ(c.expectedPhase), class_or_mode: differ(c.expectedClassOrMode), subject: differ(c.expectedSubject) }
-    : { phase: c.expectedPhase, class_or_mode: c.expectedClassOrMode, subject: c.expectedSubject };
-  const actualPhase = c.mismatchActualPhase ? differ(trailerExpected.phase) : trailerExpected.phase;
-  const actualClassOrMode = c.mismatchActualClassOrMode
-    ? differ(trailerExpected.class_or_mode) : trailerExpected.class_or_mode;
-  const trailerTargetTest = c.mismatchTargetTest ? differ(c.planTargetTest) : c.planTargetTest;
-  const observedPoint = {
-    file: c.mismatchLocationFile ? differ(c.declaredFile) : c.declaredFile,
-    line: c.mismatchLocationLine ? c.declaredLine + 1 : c.declaredLine,
+function task(overrides = {}) {
+  const values = {
+    target: TARGET,
+    implementation: 'src/task-command-router.cts',
+    phase: 'test',
+    mode: 'assertion_failure',
+    subject: 'capture once and consume bounded task-bound RED receipt without rerun',
+    ...overrides,
   };
-  const actualSubject = c.mismatchActualSubject ? differ(c.planTargetTest) : c.planTargetTest;
-  const exitStatus = c.exitZero ? 0 : c.nonZeroExit;
-
-  const taskContent = [
-    '<red_contract>',
-    `<target_test>${c.planTargetTest}</target_test>`,
-    '<program>node</program>',
-    `<argv_json>${JSON.stringify(['--test', c.planTargetTest])}</argv_json>`,
-    '<expected_failure>',
-    `<phase>${c.expectedPhase}</phase>`,
-    `<class_or_mode>${c.expectedClassOrMode}</class_or_mode>`,
-    `<subject>${c.expectedSubject}</subject>`,
-    '</expected_failure>',
-    '</red_contract>',
-  ].join('\n');
-
-  const trailer = {
-    actual: { phase: actualPhase, class_or_mode: actualClassOrMode, subject: actualSubject },
-    command: JSON.stringify(['node', '--test', c.planTargetTest]),
-    exit_status: exitStatus,
-    expected: trailerExpected,
-    location: { declared: { file: c.declaredFile, line: c.declaredLine }, observed: observedPoint },
-    target_test: trailerTargetTest,
-  };
-  const trailerText = `red-evidence: ${JSON.stringify(trailer)}`;
-
-  return { taskContent, trailerText };
-}
-
-/** `valid_red` from `gsd-core/references/tdd.md`'s `### RED Predicate` fence,
- * evaluated directly from the flags the fixture used to build the input. */
-function referenceVerdict(c) {
-  if (c.exitZero) return 'unexpected_pass';
-  const validRed = !c.mismatchExpected
-    && !c.mismatchActualPhase
-    && !c.mismatchActualClassOrMode
-    && !c.mismatchTargetTest
-    && !c.mismatchLocationFile
-    && !c.mismatchLocationLine
-    && !c.mismatchActualSubject;
-  return validRed ? 'authorize' : 'red_commit_not_failing';
-}
-
-describe('evaluateRedEvidence — RED Predicate round-trip property (fast-check)', () => {
-  test('verdict agrees with the tdd.md valid_red formula on arbitrary well-shaped trailers', () => {
-    fc.assert(
-      fc.property(trailerCase, (c) => {
-        const { taskContent, trailerText } = build(c);
-        const result = evaluateRedEvidence(taskContent, trailerText, {
-          exit_status: c.exitZero ? 0 : c.nonZeroExit,
-          stderr_captured: true,
-          spawn_error: false,
-          signal: null,
-          timed_out: false,
-        });
-        assert.equal(result.verdict, referenceVerdict(c));
-      }),
-      { numRuns: 500 },
-    );
-  });
-});
-
-
-describe('evaluateRedEvidence — selected invocation observation', () => {
-  const task = `<task type="auto">
+  return `<task type="auto" tdd="true">
   <red_contract>
-    <target_test>tests/selected-red.test.cjs</target_test>
-    <program>node</program>
-    <argv_json>["--test","tests/selected-red.test.cjs"]</argv_json>
+    <target_test>${values.target}</target_test>
+    <implementation_target>${values.implementation}</implementation_target>
     <expected_failure>
-      <phase>test</phase><class_or_mode>assertion_failure</class_or_mode><subject>selected RED</subject>
+      <class_or_mode>${values.mode}</class_or_mode>
+      <phase>${values.phase}</phase>
+      <subject>${values.subject}</subject>
     </expected_failure>
   </red_contract>
 </task>`;
-  const trailer = `red-evidence: ${JSON.stringify({
-    command: JSON.stringify(['node', '--test', 'tests/selected-red.test.cjs']),
-    exit_status: 7,
-    target_test: 'tests/selected-red.test.cjs',
-    expected: { phase: 'test', class_or_mode: 'assertion_failure', subject: 'selected RED' },
-    actual: { phase: 'test', class_or_mode: 'assertion_failure', subject: 'tests/selected-red.test.cjs' },
-    location: { declared: { file: 'tests/selected-red.test.cjs', line: 1 }, observed: { file: 'tests/selected-red.test.cjs', line: 1 } },
+}
+
+function trailer(overrides = {}) {
+  return `red-evidence: ${JSON.stringify({
+    command: 'node --test tests/red-evidence-verdict-cli.test.cjs',
+    exit_status: 1,
+    target_test: TARGET,
+    expected: {
+      phase: 'test',
+      class_or_mode: 'assertion_failure',
+      subject: 'capture once and consume bounded task-bound RED receipt without rerun',
+    },
+    actual: { phase: 'test', class_or_mode: 'assertion_failure', subject: TARGET },
+    location: {
+      declared: { file: 'src/task-command-router.cts', line: 1 },
+      observed: { file: 'src/task-command-router.cts', line: 1 },
+    },
+    ...overrides,
   })}`;
+}
 
-  test('requires the selected canonical command and a matching non-zero observed exit', () => {
-    const observation = { exit_status: 7, stderr_captured: true, spawn_error: false, signal: null, timed_out: false };
-    assert.equal(evaluateRedEvidence(task, trailer, observation).verdict, 'authorize');
+function receipt(overrides = {}) {
+  return JSON.stringify({
+    version: 1,
+    plan: PLAN,
+    task_index: 1,
+    target: TARGET,
+    pre_red_head: PARENT,
+    exit_status: 1,
+    signal: null,
+    timed_out: false,
+    error: false,
+    stdout_bytes: 0,
+    stderr_bytes: 17,
+    ...overrides,
+  });
+}
 
-    for (const invalidObservation of [
-      undefined,
-      { ...observation, exit_status: 0 },
-      { ...observation, exit_status: 8 },
-      { ...observation, spawn_error: true },
-      { ...observation, signal: 'SIGTERM' },
-      { ...observation, timed_out: true },
+const context = { plan: PLAN, task_index: 1, red_parent: PARENT };
+
+describe('parseRedContract — selected-task exact cardinality', () => {
+  test('requires one target, implementation target, expected block, and every expected field', () => {
+    assert.equal(parseRedContract(task()).ok, true);
+
+    for (const invalid of [
+      task().replace('<target_test>', '<target_test>x</target_test><target_test>'),
+      task().replace('<implementation_target>', '<implementation_target>x</implementation_target><implementation_target>'),
+      task().replace('<expected_failure>', '<expected_failure></expected_failure><expected_failure>'),
+      task().replace('<phase>test</phase>', ''),
+      task().replace('<class_or_mode>assertion_failure</class_or_mode>', ''),
+      task().replace('<subject>capture once and consume bounded task-bound RED receipt without rerun</subject>', ''),
     ]) {
-      assert.equal(evaluateRedEvidence(task, trailer, invalidObservation).verdict, 'red_commit_not_failing');
+      assert.equal(parseRedContract(invalid).ok, false);
     }
+  });
 
-    const forgedDisplay = trailer.replace(
-      JSON.stringify(JSON.stringify(['node', '--test', 'tests/selected-red.test.cjs'])),
-      JSON.stringify('node --test tests/selected-red.test.cjs'),
+  test('rejects PLAN-authored program and argv_json execution declarations', () => {
+    const withLegacyCommands = task().replace(
+      '<target_test>',
+      '<program>node</program><argv_json>["--eval","process.exit(0)"]</argv_json><target_test>',
     );
-    assert.equal(evaluateRedEvidence(task, forgedDisplay, observation).verdict, 'red_commit_not_failing');
+    assert.equal(parseRedContract(withLegacyCommands).ok, false);
+  });
+});
+
+describe('evaluateRedEvidence — bounded receipt and semantic trailer', () => {
+  test('authorizes only exact plan/task/target/parent-bound non-zero observation', () => {
+    assert.equal(evaluateRedEvidence(task(), trailer(), receipt(), context).verdict, 'authorize');
+
+    const invalidReceipts = [
+      receipt({ plan: `${PLAN}.other` }),
+      receipt({ task_index: 2 }),
+      receipt({ target: `${TARGET}.other` }),
+      receipt({ pre_red_head: '2'.repeat(40) }),
+      receipt({ exit_status: 0 }),
+      receipt({ signal: 'SIGTERM' }),
+      receipt({ timed_out: true }),
+      receipt({ error: true }),
+      receipt({ stdout_bytes: -1 }),
+      receipt({ stderr_bytes: 1.5 }),
+      receipt({ extra: true }),
+      '{',
+    ];
+    for (const value of invalidReceipts) {
+      assert.equal(evaluateRedEvidence(task(), trailer(), value, context).verdict, 'red_commit_not_failing');
+    }
+  });
+
+  test('reports observed zero exit as unexpected_pass', () => {
+    assert.equal(
+      evaluateRedEvidence(task(), trailer({ exit_status: 0 }), receipt({ exit_status: 0 }), context).verdict,
+      'unexpected_pass',
+    );
+  });
+
+  test('requires non-empty inert command text but never matches it to executable argv', () => {
+    assert.equal(evaluateRedEvidence(task(), trailer({ command: 'rm -rf ignored' }), receipt(), context).verdict, 'authorize');
+    assert.equal(evaluateRedEvidence(task(), trailer({ command: '' }), receipt(), context).verdict, 'red_commit_not_failing');
+  });
+
+  test('keeps bounded byte-count validation total under arbitrary safe integers', () => {
+    fc.assert(fc.property(
+      fc.integer({ min: 0, max: Number.MAX_SAFE_INTEGER }),
+      fc.integer({ min: 0, max: Number.MAX_SAFE_INTEGER }),
+      (stdoutBytes, stderrBytes) => {
+        const result = evaluateRedEvidence(
+          task(),
+          trailer(),
+          receipt({ stdout_bytes: stdoutBytes, stderr_bytes: stderrBytes }),
+          context,
+        );
+        assert.equal(result.verdict, 'authorize');
+      },
+    ), { numRuns: 500 });
   });
 });
