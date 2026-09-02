@@ -502,13 +502,18 @@ describe('#3771 generic revision pattern carries the same separation', () => {
       });
     });
 
-    test('a malformed open conflict record still blocks convergence', () => {
-      const malformed = '- [ ] REVISION_CONFLICT dependency/07 — conflicts with: D-1 | alternatives: a\n';
-      withReviews(reviewsArtifact(malformed), (f) => {
-        const r = runConflictGate(f);
-        assert.equal(r.exitCode, 0, `the owned block must remain parseable; stderr: ${r.stderr}`);
-        assert.equal(r.stdout, '1', 'schema drift must not turn an open marker into zero conflicts');
-      });
+    test('a recognizable malformed open conflict record still blocks convergence', () => {
+      for (const malformed of [
+        '- [ ] REVISION_CONFLICT dependency/07 — conflicts with: D-1 | alternatives: a\n',
+        '- [ ] REVISION_CONFLICT\tdependency/07 — conflicts with: D-1 | alternatives: a\n',
+        ' - [ ] REVISION_CONFLICT dependency/07 — conflicts with: D-1 | alternatives: a\n',
+      ]) {
+        withReviews(reviewsArtifact(malformed), (f) => {
+          const r = runConflictGate(f);
+          assert.equal(r.exitCode, 0, `the owned block must remain parseable; stderr: ${r.stderr}`);
+          assert.equal(r.stdout, '1', 'format drift must not turn an open marker into zero conflicts');
+        });
+      }
     });
 
     // The defect that started this: a section-scoped scan stops at the first `## ` it meets.
