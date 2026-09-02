@@ -6,6 +6,7 @@
  * from the prior hand-written .cjs; only types are added.
  */
 
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -50,6 +51,8 @@ interface RouteTaskCommandOptions {
   cwd: string;
   raw: boolean;
   execToolFn?: typeof execTool;
+  gitToolFn?: typeof execTool;
+  fsFn?: typeof fs;
 }
 
 interface PlanTaskLike {
@@ -74,6 +77,24 @@ interface ResolveContentDeps {
   loadCapabilities?: (cwd: string) => CapabilityLike[];
   resolveTaskContentFn?: typeof resolveTaskContent;
 }
+
+interface SelectedPlanTask {
+  projectRoot: string;
+  planPath: string;
+  relativePlan: string;
+  taskIndex: number;
+  task: PlanTaskLike;
+}
+
+interface ReceiptPaths {
+  finalPath: string;
+  temporaryPath: string;
+  claimedPath: string;
+}
+
+const RECEIPT_PREFIX = 'gsd-red-evidence-';
+const RECEIPT_LIMIT_BYTES = 16 * 1024;
+const RED_PROCESS_TIMEOUT_MS = 30_000;
 
 // ─── Implementation ───────────────────────────────────────────────────────────
 
@@ -132,6 +153,179 @@ function defaultLoadCapabilities(cwd: string): CapabilityLike[] {
     capabilities?: Record<string, CapabilityLike>;
   };
   return Object.values(registry.capabilities ?? {});
+}
+
+function canonicalTaskIndex(value: unknown): number | null {
+  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+function isContainedPath(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative !== '' && relative !== '..'
+    && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
+function normalizedRelativePath(root: string, candidate: string): string {
+  return path.relative(root, candidate).split(path.sep).join('/');
+}
+
+function selectPlanTask(
+  taskFile: unknown,
+  taskIndexText: unknown,
+  cwd: string,
+  fsImpl: typeof fs,
+): SelectedPlanTask | null {
+  if (typeof taskFile !== 'string' || taskFile.length === 0 || taskFile.includes('\0')) return null;
+  const taskIndex = canonicalTaskIndex(taskIndexText);
+  if (taskIndex === null) return null;
+
+  let projectRoot: string;
+  let planPath: string;
+  try {
+    projectRoot = fsImpl.realpathSync(path.resolve(cwd || process.cwd()));
+    planPath = fsImpl.realpathSync(path.resolve(projectRoot, taskFile));
+    if (!fsImpl.statSync(planPath).isFile() || !isContainedPath(projectRoot, planPath)) return null;
+  } catch {
+    return null;
+  }
+  try {
+    const source = fsImpl.readFileSync(planPath, 'utf8');
+    const plan = parsePlanDocument(source, planPath) as { tasks?: PlanTaskLike[] };
+    const task = (plan.tasks ?? []).find((candidate) => candidate.index === taskIndex);
+    if (!task || !['auto', 'tracer'].includes(task.kind) || typeof task.taskSource !== 'string') return null;
+    return {
+      projectRoot,
+      planPath,
+      relativePlan: normalizedRelativePath(projectRoot, planPath),
+      taskIndex,
+      task,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function safeGitText(result: ReturnType<typeof execTool>): string | null {
+  if (result.exitCode !== 0 || result.error || result.signal || result.timedOut
+    || typeof result.stdout !== 'string' || result.stdout.includes('\0')) return null;
+  return result.stdout.replace(/\r?\n$/, '');
+}
+
+function resolveGitDir(
+  projectRoot: string,
+  gitToolFn: typeof execTool,
+  fsImpl: typeof fs,
+): string | null {
+  let raw: string | null;
+  try {
+    raw = safeGitText(gitToolFn(
+      'git', ['rev-parse', '--path-format=absolute', '--git-dir'],
+      { cwd: projectRoot, timeout: RED_PROCESS_TIMEOUT_MS },
+    ));
+  } catch {
+    return null;
+  }
+  if (!raw || raw.includes('\n') || raw.includes('\r')) return null;
+  try {
+    const gitDir = fsImpl.realpathSync(path.resolve(projectRoot, raw));
+    return fsImpl.statSync(gitDir).isDirectory() ? gitDir : null;
+  } catch {
+    return null;
+  }
+}
+
+function receiptPaths(gitDir: string, selected: SelectedPlanTask, target: string): ReceiptPaths {
+  const id = crypto.createHash('sha256')
+    .update(`${selected.relativePlan}\0${selected.taskIndex}\0${target}`)
+    .digest('hex');
+  return {
+    finalPath: path.join(gitDir, `${RECEIPT_PREFIX}${id}.json`),
+    temporaryPath: path.join(gitDir, `${RECEIPT_PREFIX}${id}.tmp`),
+    claimedPath: path.join(gitDir, `${RECEIPT_PREFIX}${id}.claim`),
+  };
+}
+
+function failCapture(): never {
+  error('RED evidence capture failed closed', ERROR_REASON.UNKNOWN);
+  throw new Error('unreachable');
+}
+
+function existsNoFollow(filePath: string, fsImpl: typeof fs): boolean {
+  try {
+    fsImpl.lstatSync(filePath);
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') return false;
+    throw err;
+  }
+}
+
+function unlinkIfPresent(filePath: string, fsImpl: typeof fs): boolean {
+  try {
+    fsImpl.unlinkSync(filePath);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException)?.code === 'ENOENT';
+  }
+}
+
+function reserveReceipt(
+  paths: ReceiptPaths,
+  fsImpl: typeof fs,
+): number {
+  let fd: number | null = null;
+  let owned = false;
+  try {
+    if (existsNoFollow(paths.finalPath, fsImpl)
+      || existsNoFollow(paths.temporaryPath, fsImpl)
+      || existsNoFollow(paths.claimedPath, fsImpl)) throw new Error('receipt collision');
+    fd = fsImpl.openSync(paths.temporaryPath, 'wx', 0o600);
+    owned = true;
+    fsImpl.fchmodSync(fd, 0o600);
+    return fd;
+  } catch {
+    if (fd !== null) {
+      try { fsImpl.closeSync(fd); } catch { /* fail closed below */ }
+    }
+    if (owned) unlinkIfPresent(paths.temporaryPath, fsImpl);
+    failCapture();
+  }
+}
+
+function publishReceipt(
+  paths: ReceiptPaths,
+  receiptText: string,
+  fd: number,
+  fsImpl: typeof fs,
+): void {
+  let open = true;
+  try {
+    if (Buffer.byteLength(receiptText) > RECEIPT_LIMIT_BYTES) throw new Error('receipt too large');
+    const bytes = Buffer.from(receiptText, 'utf8');
+    if (fsImpl.writeSync(fd, bytes, 0, bytes.length, null) !== bytes.length) {
+      throw new Error('short receipt write');
+    }
+    fsImpl.fsyncSync(fd);
+    fsImpl.closeSync(fd);
+    open = false;
+    if (existsNoFollow(paths.finalPath, fsImpl)
+      || existsNoFollow(paths.claimedPath, fsImpl)) throw new Error('receipt collision');
+    fsImpl.renameSync(paths.temporaryPath, paths.finalPath);
+  } catch {
+    if (open) {
+      try { fsImpl.closeSync(fd); } catch { /* fail closed below */ }
+    }
+    unlinkIfPresent(paths.temporaryPath, fsImpl);
+    failCapture();
+  }
+}
+
+function abandonReservation(fd: number, paths: ReceiptPaths, fsImpl: typeof fs): never {
+  try { fsImpl.closeSync(fd); } catch { /* fail closed below */ }
+  unlinkIfPresent(paths.temporaryPath, fsImpl);
+  return failCapture();
 }
 
 function parseResolveContentArgs(args: string[]): { plan: string | null; taskId: string | null } {
@@ -228,200 +422,280 @@ function routeResolveContent(
   }
 }
 
-/**
- * `task red-evidence-verdict --task-file <path> --trailer <json> --pick verdict`
- * (#3770 Phase 3). Reads the task file and forwards its raw text, plus the
- * raw `--trailer` text, to `evaluateRedEvidence` — this arm does argument
- * parsing, the call and printing, nothing else (D-17); every JSON parse and
- * key-set check lives in the pure evaluator module.
- */
-function routeRedEvidenceVerdict({
-  args, cwd, raw, execToolFn,
+function routeRedEvidenceCapture({
+  args, cwd, raw, execToolFn, gitToolFn, fsFn,
 }: RouteTaskCommandOptions): void {
+  const separatorIndexes = args.flatMap((arg, index) => arg === '--' ? [index] : []);
+  if (separatorIndexes.length !== 1) failCapture();
+  const separator = separatorIndexes[0];
+  const prefix = args.slice(0, separator);
+  const vector = args.slice(separator + 1);
   const opts = parseNamedArgsOrExit(
-    args,
-    { valueFlags: ['task-file', 'task-index', 'trailer', 'changed-files'], positionals: 2 },
+    prefix,
+    { valueFlags: ['task-file', 'task-index'], positionals: 2 },
     error,
   );
-  const taskFile = opts['task-file'];
-  const trailer = opts['trailer'];
-  if (typeof taskFile !== 'string' || taskFile.length === 0) {
-    error('--task-file <path> is required for task red-evidence-verdict', ERROR_REASON.USAGE);
-    return;
-  }
-  if (typeof trailer !== 'string') {
-    error('--trailer <json> is required for task red-evidence-verdict', ERROR_REASON.USAGE);
-    return;
-  }
+  if (['task-file', 'task-index'].some((flag) =>
+    prefix.filter((arg) => arg === `--${flag}`).length !== 1)
+    || vector.length === 0
+    || vector.some((arg) => typeof arg !== 'string' || arg.includes('\0'))
+    || vector[0].length === 0) failCapture();
 
-  let projectRoot: string;
-  let realTaskPath: string;
+  const fsImpl = fsFn ?? fs;
+  const selected = selectPlanTask(opts['task-file'], opts['task-index'], cwd, fsImpl);
+  if (!selected) failCapture();
+  const contract = parseRedContract(selected.task.taskSource);
+  if (!contract.ok) failCapture();
+  if (vector.slice(1).filter((arg) => arg === contract.plan.target_test).length !== 1) failCapture();
+
+  const git = gitToolFn ?? execTool;
+  const gitDir = resolveGitDir(selected.projectRoot, git, fsImpl);
+  if (!gitDir) failCapture();
+  const paths = receiptPaths(gitDir, selected, contract.plan.target_test);
+  const receiptFd = reserveReceipt(paths, fsImpl);
+
+  let preRedHead: string | null;
   try {
-    projectRoot = fs.realpathSync(path.resolve(cwd || process.cwd()));
-    realTaskPath = fs.realpathSync(path.resolve(projectRoot, taskFile));
-    if (!fs.statSync(realTaskPath).isFile()) throw new Error('not a regular file');
+    preRedHead = safeGitText(git(
+      'git', ['rev-parse', 'HEAD'],
+      { cwd: selected.projectRoot, timeout: RED_PROCESS_TIMEOUT_MS },
+    ));
   } catch {
-    error(`Task file not found: ${taskFile}`, ERROR_REASON.USAGE);
-    return;
+    abandonReservation(receiptFd, paths, fsImpl);
   }
-  const rel = path.relative(projectRoot, realTaskPath);
-  if (rel === '' || rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
-    error(`Task file is outside project scope: ${taskFile}`, ERROR_REASON.USAGE);
-    return;
-  }
-  const taskContent = fs.readFileSync(realTaskPath, 'utf-8');
-
-  const securityFlags = ['task-file', 'task-index', 'trailer', 'changed-files'];
-  const duplicate = securityFlags.find((flag) => args.filter((arg) => arg === `--${flag}`).length !== 1);
-  if (duplicate) {
-    error(`--${duplicate} must occur exactly once for task red-evidence-verdict`, ERROR_REASON.USAGE);
-    return;
-  }
-  const taskIndexText = opts['task-index'];
-  if (typeof taskIndexText !== 'string' || !/^[1-9]\d*$/.test(taskIndexText)) {
-    error('--task-index must be one canonical positive task index', ERROR_REASON.USAGE);
-    return;
-  }
-  const changedFiles = opts['changed-files'];
-  if (typeof changedFiles !== 'string') {
-    error('--changed-files <newline-delimited paths> is required for task red-evidence-verdict', ERROR_REASON.USAGE);
-    return;
+  if (!preRedHead || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(preRedHead)) {
+    abandonReservation(receiptFd, paths, fsImpl);
   }
 
-  const plan = parsePlanDocument(taskContent, realTaskPath) as { tasks?: PlanTaskLike[] };
-  const selected = (plan.tasks ?? []).find((task) => task.index === Number(taskIndexText));
-  if (!selected || selected.kind !== 'auto' || typeof selected.taskSource !== 'string') {
-    error('--task-index must select one executable task in the plan', ERROR_REASON.USAGE);
-    return;
+  let spawned: ReturnType<typeof execTool>;
+  try {
+    spawned = (execToolFn ?? execTool)(
+      vector[0], vector.slice(1),
+      { cwd: selected.projectRoot, timeout: RED_PROCESS_TIMEOUT_MS },
+    );
+  } catch {
+    spawned = {
+      exitCode: 1,
+      stdout: '',
+      stderr: '',
+      signal: null,
+      error: new Error('red process failed'),
+      timedOut: false,
+    };
   }
-  const parsedContract = parseRedContract(selected.taskSource);
-  if (!parsedContract.ok) {
-    output({
-      verdict: 'red_commit_not_failing',
-      reason: parsedContract.reason,
-      observed_exit_status: null,
-      stderr_captured: false,
-    }, raw, undefined);
-    return;
-  }
-
-  const spawned = (execToolFn ?? execTool)(
-    parsedContract.plan.program,
-    parsedContract.plan.argv,
-    { cwd: projectRoot, timeout: 30_000 },
-  );
-  const observation = {
-    exit_status: Number.isInteger(spawned.exitCode) ? spawned.exitCode : null,
-    stderr_captured: typeof spawned.stderr === 'string',
-    spawn_error: spawned.error !== null && spawned.error !== undefined,
-    signal: spawned.signal ?? null,
+  const receipt = {
+    version: 1,
+    plan: selected.relativePlan,
+    task_index: selected.taskIndex,
+    target: contract.plan.target_test,
+    pre_red_head: preRedHead,
+    exit_status: Number.isSafeInteger(spawned.exitCode) ? spawned.exitCode : null,
+    signal: typeof spawned.signal === 'string' ? spawned.signal : null,
     timed_out: spawned.timedOut === true,
+    error: spawned.error !== null && spawned.error !== undefined,
+    stdout_bytes: typeof spawned.stdout === 'string' ? Buffer.byteLength(spawned.stdout) : 0,
+    stderr_bytes: typeof spawned.stderr === 'string' ? Buffer.byteLength(spawned.stderr) : 0,
   };
-  const result = evaluateRedEvidence(selected.taskSource, trailer, observation, parsedContract);
-  const publicResult = {
-    verdict: result.verdict,
-    reason: result.reason,
-    observed_exit_status: observation.exit_status,
-    stderr_captured: observation.stderr_captured,
-  };
-  if (result.verdict === 'authorize' && typeof result.declared_file === 'string'
-    && !changedFilesInclude(changedFiles, result.declared_file)) {
-    output({
-      verdict: 'red_commit_not_failing',
-      reason: `the commit's changed files do not include "${result.declared_file}"`,
-      observed_exit_status: observation.exit_status,
-      stderr_captured: observation.stderr_captured,
-    }, raw, undefined);
-    return;
-  }
-
-  output(publicResult, raw, undefined);
+  publishReceipt(paths, JSON.stringify(receipt), receiptFd, fsImpl);
+  output({
+    captured: true,
+    pre_red_head: preRedHead,
+    exit_status: receipt.exit_status,
+    signal: receipt.signal,
+    timed_out: receipt.timed_out,
+    error: receipt.error,
+    stdout_bytes: receipt.stdout_bytes,
+    stderr_bytes: receipt.stderr_bytes,
+  }, raw, undefined);
 }
 
-/**
- * Does `changedFilesText` (newline-delimited, as `git show --name-only`
- * emits) contain the file `declaredFile` names? Path-segment matching:
- * equality, or either side being a `/`-anchored suffix of the other, with
- * separators normalized first (#3770 D-1 revised; tightened for
- * gsd-core-vlh / WR-01).
- *
- * Matching is bidirectional because the declared path is authored by hand
- * and may be shorter OR longer than git's repo-relative output — both are
- * frozen as authorizing rows in `MEMBERSHIP_ROWS`
- * (`tests/executor-mvp-tdd-section.test.cjs:2733`): a bare basename
- * (`test_pricing.py`) is shorter, an absolute build path
- * (`/srv/build/tests/test_pricing.py`) is longer. Anchoring on `/` is what
- * makes it a path-segment rule rather than a string one, so
- * `tests/test_shipping.py` cannot match `tests/test_pricing.py`.
- *
- * Residual, deliberately accepted, and narrower than it first shipped: a
- * DECLARATION that is a bare basename still matches that basename at any
- * depth, because a bare basename does not identify a directory, and
- * `MEMBERSHIP_ROWS` freezes that form as authorizing. Nothing else is
- * accepted — a declaration carrying directory segments is matched on those
- * segments, whether the decoy sits in another directory (WR-01) or at the
- * repo root as a bare name (gsd-core-ifc).
- *
- * This deliberately does NOT reuse `locationsAgree`'s `path.win32.basename`
- * reduction, which it previously borrowed. The two comparisons have
- * different inputs and therefore need different rules: `locationsAgree`
- * compares a DECLARED path against an OBSERVED one reported by a test
- * runner, which legitimately differ by prefix (`tests/test_pricing.py` vs
- * `/srv/build/tests/test_pricing.py`), so it must reduce to a basename.
- * Here both sides are repo-relative paths emitted by git, so there is no
- * prefix skew to normalize away — and reducing to a basename lets any
- * same-named file elsewhere in the tree stand in for the declared one,
- * defeating the anti-decoy property this check exists to provide.
- *
- * Do not carry this rule back into `locationsAgree`. The `why` at
- * `tests/executor-mvp-tdd-section.test.cjs:1291-1304` records that exactly
- * this `endsWith` pair was proposed for that function in review and
- * rejected: there it is a strict narrowing of basename equality that blocks
- * `outside-in` and `fixture-is-the-behavior`, manufacturing the REGR-04
- * regression. It is safe HERE only because this check compares a
- * declaration against git's changed-file list, never a declared location
- * against a runner-observed one.
- */
+function terminalReceiptFailure(raw: boolean, reason: string): void {
+  output({
+    verdict: 'red_commit_not_failing',
+    reason,
+    observed_exit_status: null,
+    stderr_captured: false,
+  }, raw, undefined);
+}
+
+function consumeReceipt(filePath: string, fsImpl: typeof fs): boolean {
+  try {
+    fsImpl.unlinkSync(filePath);
+    return !existsNoFollow(filePath, fsImpl);
+  } catch {
+    return false;
+  }
+}
+
+function claimReceipt(paths: ReceiptPaths, fsImpl: typeof fs): string | null {
+  try {
+    if (existsNoFollow(paths.claimedPath, fsImpl)) return null;
+    fsImpl.renameSync(paths.finalPath, paths.claimedPath);
+    return paths.claimedPath;
+  } catch {
+    return null;
+  }
+}
+
+function readBoundedReceipt(filePath: string, gitDir: string, fsImpl: typeof fs): string | null {
+  try {
+    const stat = fsImpl.lstatSync(filePath);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > RECEIPT_LIMIT_BYTES) return null;
+    const resolved = fsImpl.realpathSync(filePath);
+    if (path.dirname(resolved) !== gitDir || resolved !== filePath) return null;
+    const receipt = fsImpl.readFileSync(filePath, 'utf8');
+    return Buffer.byteLength(receipt) <= RECEIPT_LIMIT_BYTES ? receipt : null;
+  } catch {
+    return null;
+  }
+}
+
+function routeRedEvidenceVerdict({
+  args, cwd, raw, gitToolFn, fsFn,
+}: RouteTaskCommandOptions): void {
+  const securityFlags = ['task-file', 'task-index', 'red-sha', 'trailer'];
+  const opts = parseNamedArgsOrExit(
+    args,
+    { valueFlags: securityFlags, positionals: 2 },
+    error,
+  );
+  if (securityFlags.some((flag) => args.filter((arg) => arg === `--${flag}`).length !== 1)) {
+    terminalReceiptFailure(raw, 'the verdict flags must occur exactly once');
+    return;
+  }
+  const fsImpl = fsFn ?? fs;
+  const selected = selectPlanTask(opts['task-file'], opts['task-index'], cwd, fsImpl);
+  const trailer = opts['trailer'];
+  const redSha = opts['red-sha'];
+  if (!selected) {
+    terminalReceiptFailure(raw, 'the selected task or verdict input is invalid');
+    return;
+  }
+  const contract = parseRedContract(selected.task.taskSource);
+  if (!contract.ok) {
+    terminalReceiptFailure(raw, contract.reason);
+    return;
+  }
+  const git = gitToolFn ?? execTool;
+  const gitDir = resolveGitDir(selected.projectRoot, git, fsImpl);
+  if (!gitDir) {
+    terminalReceiptFailure(raw, 'the worktree Git directory is unavailable');
+    return;
+  }
+  const paths = receiptPaths(gitDir, selected, contract.plan.target_test);
+  const claimedPath = claimReceipt(paths, fsImpl);
+  if (claimedPath === null) {
+    terminalReceiptFailure(raw, 'the bounded RED receipt is missing, colliding, or invalid');
+    return;
+  }
+  const receiptText = readBoundedReceipt(claimedPath, gitDir, fsImpl);
+  if (receiptText === null) {
+    const consumed = consumeReceipt(claimedPath, fsImpl);
+    terminalReceiptFailure(raw, consumed
+      ? 'the bounded RED receipt is missing or invalid'
+      : 'the RED receipt could not be consumed');
+    return;
+  }
+  if (typeof trailer !== 'string' || trailer.includes('\0')
+    || typeof redSha !== 'string' || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(redSha)) {
+    const consumed = consumeReceipt(claimedPath, fsImpl);
+    terminalReceiptFailure(raw, consumed
+      ? 'the selected task or verdict input is invalid'
+      : 'the RED receipt could not be consumed');
+    return;
+  }
+
+  let result: ReturnType<typeof evaluateRedEvidence> = {
+    verdict: 'red_commit_not_failing',
+    reason: 'Git metadata validation failed closed',
+  };
+  let observedExitStatus: number | null = null;
+  let stderrCaptured = false;
+  try {
+    const parentText = safeGitText(git(
+      'git', ['rev-list', '--parents', '-n', '1', redSha],
+      { cwd: selected.projectRoot, timeout: RED_PROCESS_TIMEOUT_MS },
+    ));
+    const parents = parentText?.split(' ') ?? [];
+    if (parents.length === 2 && parents[0] === redSha && parents[1] !== redSha
+      && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(parents[1])) {
+      const changed = git(
+        'git', ['diff-tree', '--no-commit-id', '--name-only', '-r', '--no-renames', '-z', redSha],
+        { cwd: selected.projectRoot, timeout: RED_PROCESS_TIMEOUT_MS },
+      );
+      if (changed.exitCode === 0 && !changed.error && !changed.signal && !changed.timedOut
+        && typeof changed.stdout === 'string') {
+        result = evaluateRedEvidence(
+          selected.task.taskSource,
+          trailer,
+          receiptText,
+          { plan: selected.relativePlan, task_index: selected.taskIndex, red_parent: parents[1] },
+          contract,
+        );
+        const receiptParsed = JSON.parse(receiptText) as { exit_status?: unknown; stderr_bytes?: unknown };
+        observedExitStatus = Number.isSafeInteger(receiptParsed.exit_status) ? receiptParsed.exit_status as number : null;
+        stderrCaptured = Number.isSafeInteger(receiptParsed.stderr_bytes);
+        if (result.verdict === 'authorize'
+          && !changedFilesInclude(changed.stdout, contract.plan.target_test)) {
+          result = {
+            verdict: 'red_commit_not_failing',
+            reason: `the commit's changed files do not include "${contract.plan.target_test}"`,
+          };
+        }
+      }
+    }
+  } catch {
+    result = { verdict: 'red_commit_not_failing', reason: 'Git metadata validation failed closed' };
+  }
+
+  if (!consumeReceipt(claimedPath, fsImpl)) {
+    result = { verdict: 'red_commit_not_failing', reason: 'the RED receipt could not be consumed' };
+  }
+  output({
+    verdict: result.verdict,
+    reason: result.reason,
+    observed_exit_status: observedExitStatus,
+    stderr_captured: stderrCaptured,
+  }, raw, undefined);
+}
+
+/** Exact membership in Git's required NUL-delimited changed-path output. */
 function changedFilesInclude(changedFilesText: string, declaredFile: string): boolean {
+  if (!changedFilesText.endsWith('\0')) return false;
   const norm = (p: string): string => p.replace(/\\/g, '/');
   const declaredPath = norm(declaredFile);
   return changedFilesText
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
+    .split('\0')
+    .filter((entry) => entry.length > 0)
     .map(norm)
-    .some((changed) => changed === declaredPath
-      || changed.endsWith(`/${declaredPath}`)
-      // The reverse direction is gated on `changed` carrying a directory
-      // segment. Without that guard a bare-basename changed file — any
-      // unrelated file living at the repo root — forges membership for a
-      // directory-qualified declaration, which is the WR-01 decoy mirrored
-      // onto the other side (gsd-core-ifc).
-      || (changed.includes('/') && declaredPath.endsWith(`/${changed}`)));
+    .some((changed) => changed === declaredPath);
 }
 
-function routeTaskCommand({ args, cwd, raw, execToolFn }: RouteTaskCommandOptions): void {
+function routeTaskCommand(options: RouteTaskCommandOptions): void {
+  const { args, cwd, raw } = options;
   const subcommand = args[1];
   if (subcommand === 'resolve-content') {
     routeResolveContent({ args, cwd, raw });
     return;
   }
+  if (subcommand === 'red-evidence-capture') {
+    routeRedEvidenceCapture(options);
+    return;
+  }
   if (subcommand === 'red-evidence-verdict') {
-    routeRedEvidenceVerdict({ args, cwd, raw, execToolFn });
+    routeRedEvidenceVerdict(options);
     return;
   }
   if (subcommand !== 'is-behavior-adding') {
     error(
       'Unknown task subcommand. Available: is-behavior-adding, resolve-content, '
-        + 'red-evidence-verdict',
+        + 'red-evidence-capture, red-evidence-verdict',
       ERROR_REASON.SDK_UNKNOWN_COMMAND,
     );
   }
 
   let content: string | null = null;
-  if (args[2] === '--task-content') {
-    content = args[3] || null;
-  } else if (args[2]) {
+  if (args[2] && args[2] !== '--task-content') {
     const requestedPath = args[2];
     // Resolve symlinks on BOTH sides before comparing (same rationale as
     // routeRedEvidenceVerdict above): `process.cwd()` is already OS-canonicalized,
@@ -441,11 +715,22 @@ function routeTaskCommand({ args, cwd, raw, execToolFn }: RouteTaskCommandOption
     if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
       error(`Task file is outside project scope: ${requestedPath}`, ERROR_REASON.USAGE);
     }
-    content = fs.readFileSync(resolvedTaskPath, 'utf-8');
+    const taskIndexFlag = args.indexOf('--task-index');
+    const selected = taskIndexFlag === -1 ? null : selectPlanTask(
+      requestedPath,
+      args[taskIndexFlag + 1],
+      cwd,
+      fs,
+    );
+    if (!selected || args.filter((arg) => arg === '--task-index').length !== 1) {
+      error('--task-index must select one executable task in the plan', ERROR_REASON.USAGE);
+      return;
+    }
+    content = selected.task.taskSource;
   }
 
   if (!content) {
-    error('Usage: task.is-behavior-adding <plan-file-path> | --task-content "<xml>"', ERROR_REASON.USAGE);
+    error('Usage: task.is-behavior-adding <plan-file-path> --task-index <positive-index>', ERROR_REASON.USAGE);
   }
 
   output(isBehaviorAddingTaskContent(content as string), raw, undefined);
@@ -455,5 +740,6 @@ export = {
   isBehaviorAddingTaskContent,
   routeTaskCommand,
   routeResolveContent,
+  routeRedEvidenceCapture,
   routeRedEvidenceVerdict,
 };

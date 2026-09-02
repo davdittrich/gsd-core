@@ -24,8 +24,7 @@ import { safeJsonParse } from './security.cjs';
 
 interface RedContractPlan {
   target_test: string;
-  program: string;
-  argv: string[];
+  implementation_target: string;
   expected_failure: {
     phase: string;
     class_or_mode: string;
@@ -33,12 +32,24 @@ interface RedContractPlan {
   };
 }
 
-interface RedEvidenceObservation {
+interface RedEvidenceContext {
+  plan: string;
+  task_index: number;
+  red_parent: string;
+}
+
+interface RedEvidenceReceipt {
+  version: number;
+  plan: string;
+  task_index: number;
+  target: string;
+  pre_red_head: string;
   exit_status: number | null;
-  stderr_captured: boolean;
-  spawn_error: boolean;
   signal: string | null;
   timed_out: boolean;
+  error: boolean;
+  stdout_bytes: number;
+  stderr_bytes: number;
 }
 
 type RedEvidenceVerdict = 'authorize' | 'red_commit_not_failing' | 'unexpected_pass';
@@ -56,13 +67,17 @@ const TOP_LEVEL_KEYS = [
 const LOCATION_KEYS = ['declared', 'observed'].sort();
 const LOCATION_POINT_KEYS = ['file', 'line'].sort();
 const TRIPLE_KEYS = ['class_or_mode', 'phase', 'subject'].sort();
+const RECEIPT_KEYS = [
+  'error', 'exit_status', 'plan', 'pre_red_head', 'signal', 'stderr_bytes',
+  'stdout_bytes', 'target', 'task_index', 'timed_out', 'version',
+].sort();
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
 function isNonEmptyString(v: unknown): v is string {
-  return typeof v === 'string' && v.trim().length > 0;
+  return typeof v === 'string' && v.trim().length > 0 && !v.includes('\0');
 }
 
 function keysEqual(obj: unknown, expectedSortedKeys: readonly string[]): boolean {
@@ -91,9 +106,10 @@ function countTags(block: string, tag: string): number {
 }
 
 function extractRedContractBlock(taskSource: string): string | null {
-  const matches = [...taskSource.matchAll(/<red_contract>/g)];
-  if (matches.length !== 1) return null;
-  const start = matches[0].index ?? -1;
+  const opens = [...taskSource.matchAll(/<red_contract>/g)];
+  const closes = [...taskSource.matchAll(/<\/red_contract>/g)];
+  if (opens.length !== 1 || closes.length !== 1) return null;
+  const start = opens[0].index ?? -1;
   const end = taskSource.indexOf('</red_contract>', start);
   return start === -1 || end === -1 ? null : taskSource.slice(start, end + '</red_contract>'.length);
 }
@@ -101,6 +117,12 @@ function extractRedContractBlock(taskSource: string): string | null {
 function extractTag(block: string, tag: string): string {
   const match = block.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`));
   return match ? match[1].trim() : '';
+}
+
+function extractExactTag(block: string, tag: string): string | null {
+  if (countTags(block, tag) !== 1
+    || [...block.matchAll(new RegExp(`</${tag}>`, 'g'))].length !== 1) return null;
+  return extractTag(block, tag);
 }
 
 function parseRedContract(taskSource: string):
@@ -113,46 +135,47 @@ function parseRedContract(taskSource: string):
       reason: 'the selected task must carry exactly one well-formed <red_contract> declaration',
     };
   }
-  const required = ['target_test', 'program', 'argv_json'];
-  if (required.some((tag) => countTags(block, tag) !== 1)) {
+  if (countTags(block, 'program') !== 0 || countTags(block, 'argv_json') !== 0) {
     return {
       ok: false,
-      reason: 'the selected <red_contract> must declare exactly one <target_test>, <program>, and <argv_json>',
+      reason: 'the selected <red_contract> must not declare executable program or argv_json text',
     };
   }
-
-  const target_test = extractTag(block, 'target_test');
-  const program = extractTag(block, 'program');
-  const argvParsed = safeJsonParse(extractTag(block, 'argv_json'), { label: 'red_contract argv_json' });
-  if (!isNonEmptyString(target_test) || !isNonEmptyString(program)
-    || !argvParsed.ok || !Array.isArray(argvParsed.value)
-    || !argvParsed.value.every((value) => typeof value === 'string')) {
+  const target_test = extractExactTag(block, 'target_test');
+  const implementation_target = extractExactTag(block, 'implementation_target');
+  const failureBlock = extractExactTag(block, 'expected_failure');
+  if (!isNonEmptyString(target_test) || !isNonEmptyString(implementation_target)
+    || !isNonEmptyString(failureBlock)) {
     return {
       ok: false,
-      reason: 'the selected <red_contract> must declare non-empty program, target_test, and argv_json string array',
+      reason: 'the selected <red_contract> must declare exactly one non-empty target_test, implementation_target, and expected_failure',
     };
   }
-  const argv = argvParsed.value;
-  if (!argv.includes(target_test)) {
-    return {
-      ok: false,
-      reason: 'the selected <red_contract> target_test must equal one complete argv_json element',
-    };
-  }
-
-  const failureBlock = extractTag(block, 'expected_failure');
   const expected_failure = {
-    phase: extractTag(failureBlock, 'phase'),
-    class_or_mode: extractTag(failureBlock, 'class_or_mode'),
-    subject: extractTag(failureBlock, 'subject'),
+    phase: extractExactTag(failureBlock, 'phase'),
+    class_or_mode: extractExactTag(failureBlock, 'class_or_mode'),
+    subject: extractExactTag(failureBlock, 'subject'),
   };
-  if (![expected_failure.phase, expected_failure.class_or_mode, expected_failure.subject].every(isNonEmptyString)) {
+  if (!isNonEmptyString(expected_failure.phase)
+    || !isNonEmptyString(expected_failure.class_or_mode)
+    || !isNonEmptyString(expected_failure.subject)) {
     return {
       ok: false,
       reason: 'the selected <red_contract> expected_failure must declare non-empty phase, class_or_mode, and subject',
     };
   }
-  return { ok: true, plan: { target_test, program, argv, expected_failure } };
+  return {
+    ok: true,
+    plan: {
+      target_test,
+      implementation_target,
+      expected_failure: {
+        phase: expected_failure.phase,
+        class_or_mode: expected_failure.class_or_mode,
+        subject: expected_failure.subject,
+      },
+    },
+  };
 }
 
 function extractTrailerJson(trailerText: string): string {
@@ -164,18 +187,50 @@ function extractTrailerJson(trailerText: string): string {
 function evaluateRedEvidence(
   taskSource: string,
   trailerText: string,
-  observation?: RedEvidenceObservation,
+  receiptText: string,
+  context: RedEvidenceContext,
   parsedContract = parseRedContract(taskSource),
 ): RedEvidenceResult {
   if (!parsedContract.ok) {
     return { verdict: 'red_commit_not_failing', reason: parsedContract.reason };
   }
   const plan = parsedContract.plan;
+  const parsedReceipt = safeJsonParse(receiptText, { label: 'red-evidence receipt' });
+  if (!parsedReceipt.ok || !keysEqual(parsedReceipt.value, RECEIPT_KEYS)) {
+    return {
+      verdict: 'red_commit_not_failing',
+      reason: 'the red-evidence receipt must be JSON with the exact required key set',
+    };
+  }
+  const receipt = parsedReceipt.value as RedEvidenceReceipt;
+  const receiptShapeValid = receipt.version === 1
+    && isNonEmptyString(receipt.plan)
+    && Number.isSafeInteger(receipt.task_index) && receipt.task_index > 0
+    && isNonEmptyString(receipt.target)
+    && isNonEmptyString(receipt.pre_red_head)
+    && (receipt.exit_status === null || Number.isSafeInteger(receipt.exit_status))
+    && (receipt.signal === null || isNonEmptyString(receipt.signal))
+    && typeof receipt.timed_out === 'boolean'
+    && typeof receipt.error === 'boolean'
+    && Number.isSafeInteger(receipt.stdout_bytes) && receipt.stdout_bytes >= 0
+    && Number.isSafeInteger(receipt.stderr_bytes) && receipt.stderr_bytes >= 0;
+  if (!receiptShapeValid) {
+    return { verdict: 'red_commit_not_failing', reason: 'the red-evidence receipt values are invalid' };
+  }
+  if (!isNonEmptyString(context?.plan)
+    || !Number.isSafeInteger(context?.task_index) || context.task_index <= 0
+    || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(context?.red_parent ?? '')
+    || receipt.plan !== context.plan
+    || receipt.task_index !== context.task_index
+    || receipt.target !== plan.target_test
+    || receipt.pre_red_head !== context.red_parent) {
+    return { verdict: 'red_commit_not_failing', reason: 'the receipt is stale or bound to another plan, task, target, or RED parent' };
+  }
   const parsed = safeJsonParse(extractTrailerJson(trailerText), { label: 'red-evidence trailer' });
   if (!parsed.ok || !keysEqual(parsed.value, TOP_LEVEL_KEYS)) {
     return {
       verdict: 'red_commit_not_failing',
-      reason: parsed.error || 'the red-evidence trailer must be JSON with the exact required key set',
+      reason: 'the red-evidence trailer must be JSON with the exact required key set',
     };
   }
   const trailer = parsed.value as Record<string, unknown>;
@@ -195,20 +250,17 @@ function evaluateRedEvidence(
   }
 
   const exitStatus = trailer['exit_status'];
-  if (!Number.isInteger(exitStatus)) {
+  if (!Number.isSafeInteger(exitStatus) || receipt.exit_status !== exitStatus) {
     return { verdict: 'red_commit_not_failing', reason: 'the trailer exit_status must be an integer' };
   }
+  if (receipt.error || receipt.signal !== null || receipt.timed_out || receipt.exit_status === null) {
+    return { verdict: 'red_commit_not_failing', reason: 'the captured RED process did not terminate normally' };
+  }
   if (exitStatus === 0) {
-    return { verdict: 'unexpected_pass', reason: 'the declared RED invocation exited 0' };
+    return { verdict: 'unexpected_pass', reason: 'the captured RED invocation exited 0' };
   }
-  if (trailer['command'] !== JSON.stringify([plan.program, ...plan.argv])) {
-    return { verdict: 'red_commit_not_failing', reason: 'the trailer command is not the selected canonical invocation display' };
-  }
-  if (!isPlainObject(observation) || !Number.isInteger(observation.exit_status)
-    || observation.exit_status === 0 || observation.stderr_captured !== true
-    || observation.spawn_error !== false || observation.signal !== null || observation.timed_out !== false
-    || observation.exit_status !== exitStatus) {
-    return { verdict: 'red_commit_not_failing', reason: 'the selected invocation was not observed to exit with the declared non-zero status and captured stderr' };
+  if (!isNonEmptyString(trailer['command'])) {
+    return { verdict: 'red_commit_not_failing', reason: 'the trailer command must be non-empty inert display text' };
   }
 
   if (!keysEqual(trailer['expected'], TRIPLE_KEYS) || !keysEqual(trailer['actual'], TRIPLE_KEYS)) {

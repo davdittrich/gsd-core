@@ -4,9 +4,8 @@ const { describe, test, mock } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
 
-const { runNode } = require('./helpers/process-seam.cjs');
+const { runNode, runGit } = require('./helpers/process-seam.cjs');
 const { createTempDir, cleanup } = require('./helpers.cjs');
 const { routeTaskCommand } = require('../gsd-core/bin/lib/task-command-router.cjs');
 const { ExitError } = require('../gsd-core/bin/lib/cli-exit.cjs');
@@ -73,7 +72,9 @@ function result(exitCode = 0, overrides = {}) {
 
 function gitSeam(root, target, options = {}) {
   const parent = options.parent ?? BASE;
-  const changed = options.changed ?? 'src/task-command-router.cts';
+  const parentLine = options.parentLine ?? `${RED} ${parent}`;
+  const changed = options.changed ?? target;
+  const changedOutput = options.changedOutput ?? `${changed}\0`;
   const failures = options.failures ?? [];
   return (program, argv, execOptions) => {
     assert.equal(program, 'git');
@@ -85,8 +86,8 @@ function gitSeam(root, target, options = {}) {
       return result(0, { stdout: `${path.join(root, '.git')}\n` });
     }
     if (argv[0] === 'rev-parse' && argv[1] === 'HEAD') return result(0, { stdout: `${BASE}\n` });
-    if (argv[0] === 'rev-list') return result(0, { stdout: `${RED} ${parent}\n` });
-    if (argv[0] === 'diff-tree') return result(0, { stdout: `${changed}\0` });
+    if (argv[0] === 'rev-list') return result(0, { stdout: `${parentLine}\n` });
+    if (argv[0] === 'diff-tree') return result(0, { stdout: changedOutput });
     throw new Error(`unexpected git argv: ${JSON.stringify(argv)}`);
   };
 }
@@ -133,6 +134,11 @@ function routeVerdict(project, exitStatus = 1, extra = {}) {
 }
 
 function receiptFiles(root) {
+  return fs.readdirSync(path.join(root, '.git'))
+    .filter((name) => name.startsWith('gsd-red-evidence-') && name.endsWith('.json'));
+}
+
+function receiptArtifacts(root) {
   return fs.readdirSync(path.join(root, '.git')).filter((name) => name.startsWith('gsd-red-evidence-'));
 }
 
@@ -161,6 +167,9 @@ describe('task red-evidence-capture — explicit vector and bounded receipt', ()
     assert.equal(stored.stdout_bytes, Buffer.byteLength('stdout-secret'));
     assert.equal(stored.stderr_bytes, Buffer.byteLength('stderr-secret'));
     assert.doesNotMatch(JSON.stringify(stored), /stdout-secret|stderr-secret|--test|argv|env/);
+    if (process.platform !== 'win32') {
+      assert.equal(fs.statSync(path.join(project.root, '.git', files[0])).mode & 0o777, 0o600);
+    }
   });
 
   test('sets restrictive mode before atomic publication inside the worktree git-dir', (t) => {
@@ -205,6 +214,17 @@ describe('task red-evidence-capture — explicit vector and bounded receipt', ()
       assert.ok(out.thrown instanceof ExitError, `${JSON.stringify(args)} should fail`);
       assert.equal(calls, 0);
     }
+
+    const programTarget = createProject(t, 'node');
+    const programOnly = captureOutput(() => routeTaskCommand({
+      args: ['task', 'red-evidence-capture', '--task-file', programTarget.plan, '--task-index', '3', '--',
+        'node', '--test', 'tests/other.test.cjs'],
+      cwd: programTarget.root,
+      raw: true,
+      execToolFn: () => { throw new Error('target-as-program must not execute'); },
+      gitToolFn: gitSeam(programTarget.root, programTarget.target),
+    }));
+    assert.ok(programOnly.thrown instanceof ExitError);
   });
 });
 
@@ -255,6 +275,7 @@ describe('task red-evidence-verdict — consume without rerun', () => {
       (stored) => ({ ...stored, target: 'tests/other.test.cjs' }),
       (stored) => ({ ...stored, unexpected: true }),
       () => '{',
+      () => 'SECRET_TOKEN_not_json',
     ];
     for (const [index, mutate] of mutations.entries()) {
       const project = createProject(t, `tests/tamper-${index}.test.cjs`);
@@ -274,6 +295,25 @@ describe('task red-evidence-verdict — consume without rerun', () => {
     });
     assert.equal(JSON.parse(failed.stdout).verdict, 'red_commit_not_failing');
     assert.doesNotMatch(failed.stdout + failed.stderr, /sensitive git fault/);
+    assert.equal(receiptFiles(gitFault.root).length, 0);
+
+    const invalidGitRows = [
+      { parentLine: RED },
+      { parentLine: `${RED} ${BASE} ${'3'.repeat(40)}` },
+      { parentLine: `${RED} ${RED}` },
+      { parentLine: `${'4'.repeat(40)} ${BASE}` },
+      { changed: 'tests/decoy.test.cjs' },
+      { changedOutput: 'tests/not-nul-delimited.test.cjs' },
+    ];
+    for (const [index, options] of invalidGitRows.entries()) {
+      const project = createProject(t, `tests/git-shape-${index}.test.cjs`);
+      routeCapture(project, () => result(1));
+      const rejected = routeVerdict(project, 1, {
+        gitToolFn: gitSeam(project.root, project.target, options),
+      });
+      assert.equal(JSON.parse(rejected.stdout).verdict, 'red_commit_not_failing');
+      assert.equal(receiptFiles(project.root).length, 0);
+    }
 
     const absent = createProject(t, 'tests/absent.test.cjs');
     assert.equal(JSON.parse(routeVerdict(absent).stdout).verdict, 'red_commit_not_failing');
@@ -289,9 +329,10 @@ describe('task red-evidence-verdict — consume without rerun', () => {
     fs.symlinkSync(outside, receiptPath);
     assert.equal(JSON.parse(routeVerdict(project).stdout).verdict, 'red_commit_not_failing');
     assert.equal(fs.readFileSync(outside, 'utf8'), '{}');
-    fs.unlinkSync(receiptPath);
+    assert.throws(() => fs.lstatSync(receiptPath), { code: 'ENOENT' });
     fs.symlinkSync(path.join(project.root, 'missing.json'), receiptPath);
     assert.equal(JSON.parse(routeVerdict(project).stdout).verdict, 'red_commit_not_failing');
+    assert.throws(() => fs.lstatSync(receiptPath), { code: 'ENOENT' });
 
     const unlink = createProject(t, 'tests/unlink.test.cjs');
     routeCapture(unlink, () => result(1));
@@ -300,6 +341,17 @@ describe('task red-evidence-verdict — consume without rerun', () => {
     const unlinkFailure = routeVerdict(unlink, 1, { fsFn });
     assert.equal(JSON.parse(unlinkFailure.stdout).verdict, 'red_commit_not_failing');
     assert.doesNotMatch(unlinkFailure.stdout + unlinkFailure.stderr, /secret unlink/);
+
+    const deleted = createProject(t, 'tests/deleted-after-claim.test.cjs');
+    routeCapture(deleted, () => result(1));
+    const deletingFs = Object.create(fs);
+    deletingFs.readFileSync = (filePath, ...args) => {
+      const value = fs.readFileSync(filePath, ...args);
+      if (path.basename(filePath).endsWith('.claim')) fs.unlinkSync(filePath);
+      return value;
+    };
+    const deletedVerdict = routeVerdict(deleted, 1, { fsFn: deletingFs });
+    assert.equal(JSON.parse(deletedVerdict.stdout).verdict, 'red_commit_not_failing');
   });
 });
 
@@ -321,6 +373,7 @@ describe('receipt filesystem faults', () => {
       assert.ok(captured.thrown instanceof ExitError, `${method} must fail closed`);
       assert.doesNotMatch(captured.stdout + captured.stderr, /secret|--test|argv|env/);
       assert.equal(receiptFiles(project.root).length, 0);
+      if (method !== 'openSync') assert.equal(receiptArtifacts(project.root).length, 1);
     }
 
     const collision = createProject(t, 'tests/collision.test.cjs');
@@ -329,17 +382,30 @@ describe('receipt filesystem faults', () => {
     const second = routeCapture(collision, () => { calls++; return result(1); });
     assert.ok(second.thrown instanceof ExitError);
     assert.equal(calls, 0);
+
+    const readFault = createProject(t, 'tests/read-fault.test.cjs');
+    routeCapture(readFault, () => result(1));
+    const fsFn = Object.create(fs);
+    fsFn.readFileSync = (filePath, ...args) => {
+      if (path.basename(filePath).startsWith('gsd-red-evidence-')) {
+        throw new Error('secret receipt read');
+      }
+      return fs.readFileSync(filePath, ...args);
+    };
+    const failedRead = routeVerdict(readFault, 1, { fsFn });
+    assert.equal(JSON.parse(failedRead.stdout).verdict, 'red_commit_not_failing');
+    assert.doesNotMatch(failedRead.stdout + failedRead.stderr, /secret receipt read/);
+    assert.equal(receiptFiles(readFault.root).length, 0);
   });
 });
 
 describe('public CLI receipt lifecycle', () => {
   function git(root, args) {
-    const out = spawnSync('git', args, {
+    const out = runGit(args, {
       cwd: root,
-      encoding: 'utf8',
       env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null' },
     });
-    assert.equal(out.status, 0, out.stderr);
+    assert.equal(out.exitCode, 0, out.stderr);
     return out.stdout.trim();
   }
 
