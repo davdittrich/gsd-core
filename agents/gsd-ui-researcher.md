@@ -392,9 +392,8 @@ not spend a revision iteration on it.
 ```
 
 **Every field is one line of plain text.** No newlines inside a cell, and never begin a field with
-`#`, `-`, `|` or a code fence. These fields are appended to a shared markdown file that a later
-reader scans by heading; a field that starts a heading truncates that scan and hides conflicts
-below it.
+`#`, `-`, `|` or a code fence. The fields enter a writer-owned delimiter block; unsanitized
+text could forge another conflict record or delimiter and corrupt blocking state.
 
 ## UI-SPEC Blocked
 

@@ -96,13 +96,13 @@ const AGENT_DOCS = read('docs', 'AGENTS.md');
  * Every one of those passed the text assertions that existed at the time. So this block gets
  * executed against fixtures instead of read.
  *
- * Located by content (the fence containing the OPEN_CONFLICTS assignment), not by line number,
+ * Located by content (the fence containing the CONFLICT_SCAN assignment), not by line number,
  * so re-ordering the document cannot silently point this at the wrong block.
  */
 function extractConflictGate() {
   const fences = CONVERGENCE.split(/```/);
-  const block = fences.find((f) => /^bash\r?\n/.test(f) && /OPEN_CONFLICTS=\$\(awk/.test(f));
-  assert.ok(block, 'could not find the bash fence containing the OPEN_CONFLICTS gate');
+  const block = fences.find((f) => /^bash\r?\n/.test(f) && /CONFLICT_SCAN=\$\(awk/.test(f));
+  assert.ok(block, 'could not find the bash fence containing the conflict-state gate');
   return block.replace(/^bash\r?\n/, '');
 }
 
@@ -397,8 +397,8 @@ describe('#3771 generic revision pattern carries the same separation', () => {
     assert.ok(section.length > 0, 'the pattern must define a conflict return');
     assert.match(section, /has not failed and has not stalled/);
     assert.match(flat(section), /Do NOT increment the iteration counter and do NOT update `prev_issue_count`/);
-    assert.match(flat(REVISION_LOOP), /The increment is step g, AFTER the producing agent returns/,
-      'the canonical flow must place the increment on the return path, or the rule above is unreachable');
+    assert.match(flat(REVISION_LOOP), /The baseline update and increment are step f, AFTER a non-conflict producing-agent return/,
+      'the canonical flow must place both mutations on the normal return path');
     assert.ok(flow.indexOf('Re-spawn') < flow.indexOf('prev_issue_count = issue_count'),
       'the stall baseline must update only after a non-conflict producer return');
     assert.ok(section.indexOf('Re-spawn') < section.indexOf('Close'),
@@ -443,7 +443,7 @@ describe('#3771 generic revision pattern carries the same separation', () => {
       'the gate must require a regular file before trusting a count of zero');
     assert.match(flat(CONVERGENCE), /Refusing to declare convergence on an unverifiable gate/,
       'an unreadable or malformed gate input must block, not pass');
-    assert.match(CONVERGENCE, /OPEN_CONFLICTS=\$\(awk/,
+    assert.match(CONVERGENCE, /CONFLICT_SCAN=\$\(awk/,
       'the executable reader must parse the owned slot');
     assert.match(CONVERGENCE, /awk_status=\$\?/,
       'a parser failure must remain distinguishable from a legitimate zero');
@@ -598,7 +598,7 @@ describe('#3771 every revision orchestrator routes conflicts instead of retrying
   test('plan-phase delegates the shared protocol rather than duplicating it', () => {
     assert.ok(importsShared(PLAN_PHASE), 'plan-phase must @-import the reference it defers to');
     assert.ok(plannerLoadsRevision, 'gsd-planner must load planner-revision.md for <revision_context>');
-    assert.match(flat(PLAN_PHASE), /follow the shared Conflict Return protocol in `gsd-core\/references\/revision-loop\.md`/,
+    assert.match(flat(PLAN_PHASE), /follow the shared Conflict Return protocol/,
       'the delegation must be explicit, or the bindings have no protocol to bind to');
   });
 
@@ -644,7 +644,7 @@ describe('#3771 every revision orchestrator routes conflicts instead of retrying
         new RegExp(`- Increment \`${counter}\` - Re-spawn`),
         `${name} must not increment ${counter} before the reviser is dispatched`
       );
-      assert.match(loaded, new RegExp(`(returns|return) [^.]*increment \`?${counter}\`?|increment \`?${counter}\`?, then re-spawn|Counter not spent: \`${counter}\`|increment is step g, AFTER the producing agent returns`, 'i'),
+      assert.match(loaded, new RegExp(`(returns|return) [^.]*increment \`?${counter}\`?|increment \`?${counter}\`?, then re-spawn|Counter not spent: \`${counter}\`|increment is step g, AFTER the producing agent returns|baseline update and increment are step f, AFTER a non-conflict producing-agent return`, 'i'),
         `${name} must increment ${counter} only once the reviser has returned`);
     });
 
@@ -692,7 +692,7 @@ describe('#3771 every revision orchestrator routes conflicts instead of retrying
     );
     assert.match(
       handler,
-      /\*\*Otherwise \(planner returned revised plans, not `## REVISION_CONFLICT`\):\*\* set `prev_issue_count = issue_count`.*close.*spawn checker again \(step 10\), then increment `iteration_count`\./,
+      /\*\*Otherwise \(planner returned revised plans, not `## REVISION_CONFLICT`\):\*\* set `prev_issue_count = issue_count`.*close.*checker \(step 10\), then increment `iteration_count`\./,
       'the normal checker path must be disjoint from the conflict re-entry path'
     );
     assert.doesNotMatch(handler, /\nAfter planner returns ->/,
@@ -721,21 +721,21 @@ describe('#3771 every revision orchestrator routes conflicts instead of retrying
       'a second glob lookup can select a different review artifact');
     assert.doesNotMatch(flat(PLAN_PHASE), /CONVERGENCE_ENABLED.*true.*\[ ! -f "\$\{REVIEWS_FILE\}" \].*exit 1/i,
       'an absent review artifact must not replace required user conflict routing with a hard exit');
-    assert.match(flat(PLAN_PHASE), /when `CONVERGENCE_ENABLED` is `true` and `\$REVIEWS_FILE` is an existing regular file/,
+    assert.match(flat(PLAN_PHASE), /when `CONVERGENCE_ENABLED` is `true` and `\$REVIEWS_FILE` is an existing regular file/i,
       'persistence must remain conditional on an existing regular review artifact');
-    assert.match(flat(PLAN_PHASE), /Otherwise skip recording and continue to Resolve/,
+    assert.match(flat(PLAN_PHASE), /record; else skip. Re-spawn with line open/,
       'missing persistence must still reach the shared user-choice route');
-    assert.match(flat(PLAN_PHASE), /plan-phase wrote the line, so plan-phase closes it/,
-      'closure must have exactly one named owner, or a line can be orphaned open');
+    assert.match(flat(PLAN_PHASE), /close confirmed pending lines/,
+      'plan-phase must close the exact records it owns after confirmed application');
     assert.match(flat(REVISION_LOOP), /never invokes `\/gsd:plan-review-convergence`/,
       'plan-phase runs inside that loop; invoking it would be a cycle');
     // A markdown table cannot be counted by any simple filter — its header and separator rows
     // look like data. The recorded shape must be one the reader can match exactly.
     assert.match(flat(REVISION_LOOP), /A checkbox, not a table row/,
       'the recorded conflict must be countable without parsing a table');
-    assert.match(REVISION_LOOP, /- \[ \] REVISION_CONFLICT \{dimension\}\/\{plan\} — required_property:/,
+    assert.match(REVISION_LOOP, /- \[ \] REVISION_CONFLICT \{issue_identity\} — required_property:/,
       'the shared protocol must define the open form the convergence gate matches');
-    assert.match(flat(REVISION_LOOP), /owns flipping it to `- \[x\]`/,
+    assert.match(flat(REVISION_LOOP), /workflow that wrote the exact line flips it to `- \[x\]`/,
       'the close step must produce the resolved form the gate excludes');
   });
 
@@ -745,9 +745,10 @@ describe('#3771 every revision orchestrator routes conflicts instead of retrying
     assert.match(CONVERGENCE, /OPEN_CONFLICTS=/,
       'the count must be read from REVIEWS.md — CYCLE_SUMMARY does not carry it');
     // The counter and writer must agree on both marker and ownership boundary.
-    assert.ok(CONVERGENCE.split('\n').some((line) =>
-      line.includes('in_owned &&') && line.includes('REVISION_CONFLICT([[:space:]]|$)')),
-      'the gate must count every open conflict marker only while inside the owned slot');
+    assert.match(CONVERGENCE, /in_owned && \/REVISION_CONFLICT\//,
+      'reserved conflict tokens must be interpreted only inside the owned slot');
+    assert.match(CONVERGENCE, /REVISION_CONFLICT\(\[\[:space:\]\]\|\$\)/,
+      'open and resolved record grammars must accept POSIX whitespace');
     assert.match(CONVERGENCE, /gsd:plan-revision-conflicts:begin/);
     assert.match(CONVERGENCE, /gsd:plan-revision-conflicts:end/);
     assert.doesNotMatch(CONVERGENCE, /grep -c/,
@@ -761,7 +762,7 @@ describe('#3771 every revision orchestrator routes conflicts instead of retrying
     );
     // Ordering is the whole finding: the gate placed after `state planned-phase` would write
     // and announce convergence over a conflict nobody resolved.
-    const gateAt = CONVERGENCE.indexOf('OPEN_CONFLICTS=$(awk');
+    const gateAt = CONVERGENCE.indexOf('CONFLICT_SCAN=$(awk');
     const writeAt = CONVERGENCE.indexOf('gsd_run state planned-phase');
     const bannerAt = CONVERGENCE.indexOf('GSD ► CONVERGENCE COMPLETE');
     assert.ok(gateAt > 0 && writeAt > 0 && bannerAt > 0, 'all three anchors must exist');
@@ -931,7 +932,7 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
 
   test('a config query failure blocks persistence instead of reading as disabled', () => {
     assert.doesNotMatch(PLAN_PHASE, /config-get workflow\.plan_review_convergence 2>\/dev\/null \|\| echo "false"/);
-    assert.match(flat(PLAN_PHASE), /set `CONVERGENCE_ENABLED` from `workflow\.plan_review_convergence`; block on query failure/i);
+    assert.match(flat(PLAN_PHASE), /read `CONVERGENCE_ENABLED` from `workflow\.plan_review_convergence`; block errors/i);
   });
 
   test('the gate reads a literal-backslash POSIX filename without rewriting it',

@@ -147,20 +147,22 @@ configured, also records it for the convergence gate; it does not count as a fai
 
 | Issue | required_property | Conflicts with | Why the hint cannot be applied |
 |-------|-------------------|----------------|-------------------------------|
-| {dimension}/{plan} | {property} | {locked decision D-nn / CLAUDE.md rule / plan constraint} | {one line} |
+| {issue_identity} | {property} | {locked decision D-nn / CLAUDE.md rule / plan constraint} | {one line} |
 
 ### Alternatives Considered
 
 | Issue | Alternative | Satisfies required_property? | Cost of adopting |
 |-------|-------------|------------------------------|------------------|
-| {dimension}/{plan} | {smaller or different mechanism} | {yes / partially — how} | {what it changes} |
+| {issue_identity} | {smaller or different mechanism} | {yes / partially — how} | {what it changes} |
 
 ### Changes Made
 
 {table of the non-conflicting issues you DID address, same shape as REVISION COMPLETE}
 ```
 
+**Issue identity:** use `{dimension}/{plan}` for scalar `plan`; otherwise join sorted `plans`
+with `+`, or use `{dimension}/phase` when neither exists.
+
 **Every field is one line of plain text.** No newlines inside a cell, and never begin a field with
-`#`, `-`, `|` or a code fence. These fields are appended to a shared markdown file that a later
-reader scans by heading; a field that starts a heading truncates that scan and hides conflicts
-below it.
+`#`, `-`, `|` or a code fence. The fields enter a writer-owned delimiter block; unsanitized
+text could forge another conflict record or delimiter and corrupt blocking state.

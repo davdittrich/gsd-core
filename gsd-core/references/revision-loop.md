@@ -30,21 +30,20 @@ LOOP:
      b. Parse issue count from checker output
      c. If issue_count >= prev_issue_count:
         -> Escalate to user: "Revision loop stalled (issue count not decreasing)"
-     d. prev_issue_count = issue_count
-     e. Re-spawn the producing agent with checker feedback appended
-     f. If the agent returns REVISION_CONFLICT:
+     d. Re-spawn the producing agent with checker feedback appended
+     e. If the agent returns REVISION_CONFLICT:
         -> conflict_return_count += 1
         -> If conflict_return_count >= 3:
              escalate through the iteration-cap gate
         -> If it names the same required_property as the previous conflict:
              escalate as a stall (the resolution did not take)
            Else: previous_conflict_property = current required_property
-             resolve it (see "Conflict Return" below) and go to step e.
-             Do NOT increment iteration -- the conflict was not a failed attempt.
-     g. iteration += 1
-     h. After revision completes, go to LOOP
+             resolve it (see "Conflict Return" below) and go to step d.
+             Do NOT update prev_issue_count or increment iteration -- the conflict was not a failed attempt.
+     f. Otherwise: prev_issue_count = issue_count; iteration += 1
+     g. After revision completes, go to LOOP
 
-The increment is step g, AFTER the producing agent returns.
+The baseline update and increment are step f, AFTER a non-conflict producing-agent return.
 ```
 
 ### Issue Count Tracking
@@ -118,7 +117,7 @@ so they restate the operative rules inline; this section is the authority they m
    `## Plan-Revision Conflicts` inside that slot:
 
 ```markdown
-- [ ] REVISION_CONFLICT {dimension}/{plan} — required_property: {property} | conflicts with: {locked decision D-nn / CLAUDE.md rule / plan constraint} | alternatives: {the agent's alternatives}
+- [ ] REVISION_CONFLICT {issue_identity} — required_property: {property} | conflicts with: {locked decision D-nn / CLAUDE.md rule / plan constraint} | alternatives: {the agent's alternatives}
 ```
 
    A checkbox, not a table row: `- [ ] REVISION_CONFLICT` is open and `- [x] REVISION_CONFLICT`
@@ -140,12 +139,13 @@ so they restate the operative rules inline; this section is the authority they m
    named constraint and apply the hint / amend the constraint itself. Each option resolves the
    conflict. Accepting the output with the blocker still open is NOT offered here — the blocking
    `required_property` still fails, and that choice belongs to the cap escalation.
-4. **Close** — the workflow that wrote the line owns flipping it to `- [x]` once the resolution
-   has been applied, appending ` | resolved: {chosen resolution}`. Readers only read. A line left
-   open is a live blocker, never a stale artifact.
-5. **Re-spawn** with the chosen resolution, then re-evaluate the return from the top of this
-   handler — never fall through to the checker spawn. A second conflict is still a conflict, not
-   a revised output, and handing it to the checker would check the conflict message.
+4. **Re-spawn** with the chosen resolution while keeping the recorded line open — never fall
+   through to the checker spawn. A second conflict is still a conflict, not a revised output, and
+   handing it to the checker would check the conflict message.
+5. **Close after application** — only after the producing agent confirms it applied the chosen
+   resolution, the workflow that wrote the exact line flips it to `- [x]` and appends
+   ` | resolved: {chosen resolution}`. Then re-evaluate the return from the top of this handler. A line left open is a live blocker, never a stale artifact; failure or abandonment
+   before confirmation must leave it open.
 
 **Bounded — two ways, because one is evadable.** Not incrementing must not make this path
 unbounded:

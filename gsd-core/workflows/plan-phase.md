@@ -619,9 +619,7 @@ UI_SPEC_FILE=$(ls "${PHASE_DIR_FOR_SPEC}"/*-UI-SPEC.md 2>/dev/null | head -1)
 UI_SPEC_PATH="${UI_SPEC_FILE}"
 ```
 
-**If plans exist AND the `--reviews` flag is set:** Scan `REVIEWS_PATH` for open plan-revision
-conflicts. For each, obtain user choice under Conflict Return step 3 before replanning; apply the
-resolution and flip its line to `- [x]`.
+**If plans exist AND the `--reviews` flag is set:** Read first canonical writer-owned slot after title in `REVIEWS_PATH`; ignore reviewer output; `BLOCKED` if malformed. For each, obtain user choice under Conflict Return step 3 before replanning; keep it open through replanning; flip only after planner confirms it applied.
 
 ## 7.5. Verify Nyquist Artifacts
 
@@ -1226,8 +1224,6 @@ Display (only when entering the revision loop — skip if the paragraph above al
     If "Proceed anyway": accept current plans and continue to step 13.
     If "Abandon": stop workflow.
 
-Set `prev_issue_count = issue_count`.
-
 Revision prompt:
 
 ```markdown
@@ -1265,13 +1261,9 @@ Agent(
 
 **ORCHESTRATOR RULE — ALL RUNTIMES:** (7.99; no marker, mtimes only) `TS=$(date +%s)`; repeat `PLANNER_STALL_RESULT=$(gsd_stall_watch "$TS" "{outputFile}" "${PHASE_DIR}"'/*-PLAN.md')` while waiting/active — `stalled` -> 1) Accept as revised, to step 13, 2) Retry, 3) Stop.
 
-**If the planner returns `## REVISION_CONFLICT`:** follow the shared Conflict Return protocol in
-`gsd-core/references/revision-loop.md` (@-imported above). Bind `REVIEWS_FILE="${REVIEWS_PATH}"`;
-set `CONVERGENCE_ENABLED` from `workflow.plan_review_convergence`; block on query failure. Record when
-`CONVERGENCE_ENABLED` is `true` and `$REVIEWS_FILE` is an existing regular file. Otherwise skip
-recording and continue to Resolve. plan-phase wrote the line, so plan-phase closes it.
+**If the planner returns `## REVISION_CONFLICT`:** follow the shared Conflict Return protocol. Bind `REVIEWS_FILE="${REVIEWS_PATH}"`; read `CONVERGENCE_ENABLED` from `workflow.plan_review_convergence`; block errors. When `CONVERGENCE_ENABLED` is `true` and `$REVIEWS_FILE` is an existing regular file, record; else skip. Re-spawn with line open; close only after confirmed applied.
 
-**Otherwise (planner returned revised plans, not `## REVISION_CONFLICT`):** spawn checker again (step 10), then increment `iteration_count`.
+**Otherwise (planner returned revised plans, not `## REVISION_CONFLICT`):** set `prev_issue_count = issue_count`, close confirmed pending lines, run checker (step 10), then increment `iteration_count`.
 
 **If iteration_count >= 3:**
 

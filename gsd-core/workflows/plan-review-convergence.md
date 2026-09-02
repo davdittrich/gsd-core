@@ -411,7 +411,7 @@ if [ ! -f "${REVIEWS_FILE}" ]; then
   echo "BLOCKED: cannot read REVIEWS.md ('${REVIEWS_FILE}') to check for open plan-revision conflicts. Refusing to declare convergence on an unverifiable gate." >&2
   exit 1
 fi
-if OPEN_CONFLICTS=$(awk '
+if CONFLICT_SCAN=$(awk '
   BEGIN { saw_title = 0; in_owned = 0; saw_heading = 0; done = 0; count = 0 }
   { sub(/\r$/, "") }
   !saw_title && /^# Cross-AI Plan Review — Phase / { saw_title = 1; next }
@@ -427,12 +427,21 @@ if OPEN_CONFLICTS=$(awk '
     done = 1
     in_owned = 0
     print count
+    for (i = 1; i <= count; i++) print open[i]
     exit
   }
-  in_owned && /^[[:space:]]*- \[ \] REVISION_CONFLICT([[:space:]]|$)/ { count++ }
+  in_owned && /REVISION_CONFLICT/ {
+    if ($0 ~ /^[[:space:]]*-[[:space:]]+\[[[:space:]]\][[:space:]]+REVISION_CONFLICT([[:space:]]|$)/) {
+      open[++count] = $0
+      next
+    }
+    if ($0 ~ /^[[:space:]]*-[[:space:]]+\[[xX]\][[:space:]]+REVISION_CONFLICT([[:space:]]|$)/) next
+    exit 2
+  }
   END { if (!done) exit 2 }
 ' "${REVIEWS_FILE}"); then
-  :
+  OPEN_CONFLICTS=$(printf '%s\n' "$CONFLICT_SCAN" | sed -n '1p')
+  OPEN_CONFLICT_LINES=$(printf '%s\n' "$CONFLICT_SCAN" | sed '1d')
 else
   awk_status=$?
   echo "BLOCKED: could not parse the writer-owned plan-revision conflict block in '${REVIEWS_FILE}' (awk exit ${awk_status}). Refusing to declare convergence on an unverifiable gate." >&2
@@ -482,7 +491,7 @@ Exit — convergence achieved.
 
 ### 5c. Stall Detection + Escalation Check
 
-Display: `◆ Cycle {cycle}/{MAX_CYCLES} — {HIGH_COUNT} HIGH, {ACTIONABLE_COUNT} actionable non-HIGH review concerns found`
+Display: `◆ Cycle {cycle}/{MAX_CYCLES} — {HIGH_COUNT} HIGH, {ACTIONABLE_COUNT} actionable non-HIGH, {OPEN_CONFLICTS} open plan-revision conflicts found`
 
 **Stall detection:** If `UNRESOLVED_COUNT >= prev_unresolved_count`:
 ```text
@@ -495,11 +504,14 @@ Display: `◆ Cycle {cycle}/{MAX_CYCLES} — {HIGH_COUNT} HIGH, {ACTIONABLE_COUN
 If `TEXT_MODE` is true, present as plain-text numbered list:
 ```text
 Plan convergence did not complete after {MAX_CYCLES} cycles.
-{HIGH_COUNT} HIGH concerns and {ACTIONABLE_COUNT} actionable non-HIGH concerns remain:
+{HIGH_COUNT} HIGH concerns, {ACTIONABLE_COUNT} actionable non-HIGH concerns, and
+{OPEN_CONFLICTS} open plan-revision conflicts remain:
 
 {HIGH_LINES}
 
 {ACTIONABLE_LINES}
+
+{OPEN_CONFLICT_LINES}
 
 How would you like to proceed?
 
@@ -513,7 +525,7 @@ Otherwise use AskUserQuestion:
 ```js
 AskUserQuestion([
   {
-    question: "Plan convergence did not complete after {MAX_CYCLES} cycles. {HIGH_COUNT} HIGH concerns and {ACTIONABLE_COUNT} actionable non-HIGH concerns remain:\n\n{HIGH_LINES}\n\n{ACTIONABLE_LINES}\n\nHow would you like to proceed?",
+    question: "Plan convergence did not complete after {MAX_CYCLES} cycles. {HIGH_COUNT} HIGH concerns, {ACTIONABLE_COUNT} actionable non-HIGH concerns, and {OPEN_CONFLICTS} open plan-revision conflicts remain:\n\n{HIGH_LINES}\n\n{ACTIONABLE_LINES}\n\n{OPEN_CONFLICT_LINES}\n\nHow would you like to proceed?",
     header: "Convergence",
     multiSelect: false,
     options: [
