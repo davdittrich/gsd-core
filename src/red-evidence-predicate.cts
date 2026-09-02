@@ -132,7 +132,7 @@ function parseRedContract(taskSource: string):
       reason: 'the selected <red_contract> must declare non-empty program, target_test, and argv_json string array',
     };
   }
-  const argv = argvParsed.value as string[];
+  const argv = argvParsed.value;
   if (!argv.includes(target_test)) {
     return {
       ok: false,
@@ -216,8 +216,8 @@ function evaluateRedEvidence(
   }
   const expectedTriple = trailer['expected'] as Record<string, unknown>;
   const actualTriple = trailer['actual'] as Record<string, unknown>;
-  const declaredPoint = { file: declared['file'] as string, line: declared['line'] as number };
-  const observedPoint = { file: observed['file'] as string, line: observed['line'] as number };
+  const declaredPoint = { file: declared['file'], line: declared['line'] as number };
+  const observedPoint = { file: observed['file'], line: observed['line'] as number };
   const checks: Array<[string, boolean]> = [
     ['trailer.expected == plan.expected_failure', sameTriple(expectedTriple, plan.expected_failure)],
     ['actual.phase == expected.phase', actualTriple['phase'] === expectedTriple['phase']],
