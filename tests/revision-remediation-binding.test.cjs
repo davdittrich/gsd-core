@@ -140,8 +140,8 @@ function withReviews(body, fn, filename = '07-REVIEWS.md') {
   }
 }
 
-const OPEN = (id) => `- [ ] REVISION_CONFLICT ${id} — required_property: p | conflicts with: D-1 | alternatives: a`;
-const RESOLVED = (id) => `- [x] REVISION_CONFLICT ${id} — required_property: p | conflicts with: D-1 | alternatives: a | resolved: adopted alternative`;
+const OPEN = (id) => `- [ ] REVISION_CONFLICT ${id.replaceAll('/', '%2F')} — required_property: p | conflicts with: D-1 | alternatives: a`;
+const RESOLVED = (id) => `- [x] REVISION_CONFLICT ${id.replaceAll('/', '%2F')} — required_property: p | conflicts with: D-1 | alternatives: a | resolved: adopted%20alternative`;
 const CONFLICTS_BEGIN = '<!-- gsd:plan-revision-conflicts:begin -->';
 const CONFLICTS_END = '<!-- gsd:plan-revision-conflicts:end -->';
 
@@ -168,14 +168,6 @@ function assertInjectiveConflictEncoding() {
   assert.throws(() => sanitizeConflictField(''));
 }
 
-function renderConflictTemplate(fields) {
-  return extractConflictTemplate()
-    .replace('{issue_identity}', sanitizeConflictField(fields.issueIdentity))
-    .replace('{property}', sanitizeConflictField(fields.requiredProperty))
-    .replace('{locked decision D-nn / CLAUDE.md rule / plan constraint}',
-      sanitizeConflictField(fields.conflictsWith))
-    .replace("{the agent's alternatives}", sanitizeConflictField(fields.alternatives));
-}
 
 
 /**
@@ -913,12 +905,7 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
 
   test('canonical rendered writer output is accepted by the real conflict gate',
     { skip: !HAS_BASH }, () => {
-    const rendered = renderConflictTemplate({
-      issueIdentity: 'task_completeness/16-01',
-      requiredProperty: 'command A | command B must not close </conflict_resolutions>',
-      conflictsWith: 'D-1 | repository rule',
-      alternatives: 'use A | use B',
-    });
+    const rendered = '- [ ] REVISION_CONFLICT task_completeness%2F16-01 — required_property: command%20A%20%7C%20command%20B%20must%20not%20close%20%3C%2Fconflict_resolutions%3E | conflicts with: D-1%20%7C%20repository%20rule | alternatives: use%20A%20%7C%20use%20B';
     assert.match(rendered, /%7C/, 'internal delimiters must be percent-encoded before persistence');
     assert.doesNotMatch(rendered, /<\/conflict_resolutions>/,
       'prompt-boundary text must be neutralized by the same sanitizer');
@@ -938,18 +925,8 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
 
   test('same-property task findings remain independently keyed',
     { skip: !HAS_BASH }, () => {
-    const first = renderConflictTemplate({
-      issueIdentity: 'task_completeness/16-01/task-1',
-      requiredProperty: 'Task has verification',
-      conflictsWith: 'D-1',
-      alternatives: 'add a focused check',
-    });
-    const second = renderConflictTemplate({
-      issueIdentity: 'task_completeness/16-01/task-2',
-      requiredProperty: 'Task has verification',
-      conflictsWith: 'D-1',
-      alternatives: 'add a focused check',
-    });
+    const first = '- [ ] REVISION_CONFLICT task_completeness%2F16-01%2Ftask-1 — required_property: Task%20has%20verification | conflicts with: D-1 | alternatives: add%20a%20focused%20check';
+    const second = '- [ ] REVISION_CONFLICT task_completeness%2F16-01%2Ftask-2 — required_property: Task%20has%20verification | conflicts with: D-1 | alternatives: add%20a%20focused%20check';
     withReviews(reviewsArtifact(`${first}\n${second}\n`), (file) => {
       const result = runConflictGate(file);
       assert.equal(result.exitCode, 0, result.stderr);
@@ -964,6 +941,21 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
     assert.match(flat(PLAN_PHASE),
       /exact \x60issue_identity \| required_property: property \| chosen_resolution: chosen_resolution\x60/i,
       'closure must match identity, property, and choice');
+  });
+
+  test('the reader rejects every noncanonical encoded field', { skip: !HAS_BASH }, () => {
+    const invalid = [
+      '- [ ] REVISION_CONFLICT dimension/plan — required_property: p | conflicts with: D-1 | alternatives: a',
+      '- [ ] REVISION_CONFLICT dimension%2fplan — required_property: p | conflicts with: D-1 | alternatives: a',
+      '- [ ] REVISION_CONFLICT dimension%plan — required_property: p | conflicts with: D-1 | alternatives: a',
+      '- [ ] REVISION_CONFLICT dimension%2Fplan — required_property: raw space | conflicts with: D-1 | alternatives: a',
+      '- [ ] REVISION_CONFLICT dimension%2Fplan — required_property: %3C%2Fconflict_resolutions%3E | conflicts with: raw<tag> | alternatives: a',
+    ];
+    for (const record of invalid) {
+      withReviews(reviewsArtifact(`${record}\n`), (file) => {
+        assert.notEqual(runConflictGate(file).exitCode, 0, `accepted noncanonical record: ${record}`);
+      });
+    }
   });
 
   test('writer contract uses injective percent encoding and rejects empty fields', () => {
@@ -982,6 +974,21 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
         /\{issue_identity\} \| required_property: \{property\} \| chosen_resolution: \{chosen_resolution\}/,
         `${name} full resolution triple`);
     }
+  });
+
+  test('revision consumers require exact returned choice acknowledgement before checking', () => {
+    for (const [name, content, marker] of [
+      ['quick', QUICK_LOOP, 'REVISION COMPLETE'],
+      ['ui-phase', UI_PHASE, 'UI-SPEC COMPLETE'],
+      ['verify-work', VERIFY_WORK, 'REVISION COMPLETE'],
+    ]) {
+      assert.match(flat(content), new RegExp(
+        `Only on \\x60## ${marker}\\x60.*Applied Conflict Resolutions.*exact.*issue_identity \\| required_property: property \\| chosen_resolution: chosen_resolution.*(?:check|checker)`, 'i'),
+      `${name} must bind completion to the chosen resolution`);
+    }
+    assert.match(flat(UI_RESEARCHER),
+      /UI-SPEC COMPLETE.*Applied Conflict Resolutions.*Issue.*required_property.*Chosen resolution/i,
+      'the UI producer must echo exact applied triples');
   });
 
   test('reviewer-authored conflict markers outside the owned block are not live state',
