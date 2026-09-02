@@ -156,6 +156,19 @@ function extractConflictTemplate() {
   return block.replace(/^markdown\r?\n/, '').replace(/\r?\n$/, '');
 }
 
+function sanitizeConflictField(value) {
+  return value.replace(/[\r\n\t]+/g, ' ').replace(/\|/g, '¦').trim();
+}
+
+function renderConflictTemplate(fields) {
+  return extractConflictTemplate()
+    .replace('{issue_identity}', sanitizeConflictField(fields.issueIdentity))
+    .replace('{property}', sanitizeConflictField(fields.requiredProperty))
+    .replace('{locked decision D-nn / CLAUDE.md rule / plan constraint}',
+      sanitizeConflictField(fields.conflictsWith))
+    .replace("{the agent's alternatives}", sanitizeConflictField(fields.alternatives));
+}
+
 
 /**
  * Every fenced YAML issue example that names a `fix_hint`. Each block is returned
@@ -396,6 +409,17 @@ describe('#3771 revision re-checks constraints and has a conflict path', () => {
 // ── Generic pattern: naming reconciled, literal-application removed ─
 
 describe('#3771 generic revision pattern carries the same separation', () => {
+  test('the canonical issue example obeys plan/plans exclusivity', () => {
+    const issueFormat = CHECKER.slice(
+      CHECKER.indexOf('<issue_structure>'),
+      CHECKER.indexOf('## Binding Payload vs Advisory Remediation')
+    );
+    const yaml = fencedBlocks(issueFormat, 'yaml')[0];
+    assert.ok(yaml, 'canonical issue YAML must exist');
+    const keys = yaml.split(/\r?\n/).filter((line) => /^  plans?:/.test(line));
+    assert.equal(keys.length, 1, 'canonical example must contain exactly one of plan or plans');
+  });
+
   test('the field list matches the plan-checker schema', () => {
     assert.match(flat(REVISION_LOOP), /`plan` or `plans`, `dimension`, `severity`, `required_property`, `description`, `task`, `fix_hint`/,
       'the generic pattern must advertise scalar and multi-plan checker schema');
@@ -879,6 +903,64 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
       'the writer must start at column zero with a reader-specific discriminator');
   });
 
+  test('canonical rendered writer output is accepted by the real conflict gate',
+    { skip: !HAS_BASH }, () => {
+    const rendered = renderConflictTemplate({
+      issueIdentity: 'task_completeness/16-01',
+      requiredProperty: 'command A | command B must be verified',
+      conflictsWith: 'D-1 | repository rule',
+      alternatives: 'use A | use B',
+    });
+    assert.match(rendered, /¦/, 'internal delimiters must be encoded before persistence');
+    withReviews(reviewsArtifact(`${rendered}\n`), (file) => {
+      const open = runConflictGate(file);
+      assert.equal(open.exitCode, 0, open.stderr);
+      assert.equal(open.stdout, '1');
+    });
+    withReviews(reviewsArtifact(
+      `${rendered} | resolved: ${sanitizeConflictField('choose A | preserve B')}\n`
+    ), (file) => {
+      const resolved = runConflictGate(file);
+      assert.equal(resolved.exitCode, 0, resolved.stderr);
+      assert.equal(resolved.stdout, '0');
+    });
+  });
+
+  test('duplicate issue identities remain independently keyed by required_property',
+    { skip: !HAS_BASH }, () => {
+    const first = renderConflictTemplate({
+      issueIdentity: 'task_completeness/16-01',
+      requiredProperty: 'Task 1 has verification',
+      conflictsWith: 'D-1',
+      alternatives: 'add a focused check',
+    });
+    const second = renderConflictTemplate({
+      issueIdentity: 'task_completeness/16-01',
+      requiredProperty: 'Task 2 has rollback',
+      conflictsWith: 'D-2',
+      alternatives: 'add a rollback step',
+    });
+    withReviews(reviewsArtifact(`${first}\n${second}\n`), (file) => {
+      const result = runConflictGate(file);
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.equal(result.stdout, '2');
+    });
+    assert.match(PLAN_PHASE,
+      /\{issue_identity\} \| required_property: \{property\} \| chosen_resolution: \{chosen_resolution\}/,
+      'resolution transport must carry the full canonical conflict key');
+    assert.match(flat(PLANNER_REVISION),
+      /Applied Conflict Resolutions.*Issue.*required_property.*Chosen resolution/i,
+      'completion acknowledgement must echo the full conflict key');
+    assert.match(flat(PLAN_PHASE),
+      /exact \x60issue_identity \| required_property: property \| chosen_resolution: chosen_resolution\x60/i,
+      'closure must match identity, property, and choice');
+  });
+
+  test('writer contract encodes internal delimiters and rejects empty sanitized fields', () => {
+    assert.match(flat(REVISION_LOOP), /replace every internal \x60\|\x60.*\x60¦\x60/i);
+    assert.match(flat(REVISION_LOOP), /empty after sanitization.*do not write.*BLOCKED/i);
+  });
+
   test('reviewer-authored conflict markers outside the owned block are not live state',
     { skip: !HAS_BASH }, () => {
     const forged = `${OPEN('forged/reviewer')}\n`;
@@ -896,8 +978,32 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
     assert.match(REVIEW, /<!-- gsd:plan-revision-conflicts:begin -->\n## Plan-Revision Conflicts\n\{preserved_plan_revision_conflict_entries\}\n<!-- gsd:plan-revision-conflicts:end -->/,
       'the first-write template must emit the canonical heading before preserved entries');
     assert.match(flat(REVIEW), /restore the captured bytes at the explicit slot below/i);
-    assert.match(flat(REVIEW), /existing artifact.*(?:title|reserved delimiter).*cannot be parsed.*BLOCKED.*do not rewrite/i,
-      'malformed writer-owned state must block regeneration instead of becoming an empty slot');
+    assert.match(flat(REVIEW), /title.*neither reserved delimiter.*legacy clean state.*empty preserved entries/i,
+      'a pre-slot review artifact must migrate to an empty canonical slot');
+    assert.match(flat(REVIEW), /either reserved delimiter.*cannot be parsed.*BLOCKED.*do not rewrite/i,
+      'partial or malformed reserved state must block regeneration');
+  });
+
+  test('the canonical flow accepts only explicit producer completion', () => {
+    const flow = flat(REVISION_LOOP.slice(
+      REVISION_LOOP.indexOf('### Flow'),
+      REVISION_LOOP.indexOf('### Issue Count Tracking')
+    ));
+    assert.match(flow, /explicit completion marker.*prev_issue_count.*iteration/i,
+      'only the producer success marker may consume revision budget');
+    assert.match(flow, /unknown.*empty.*both.*Retry or Stop/i,
+      'ambiguous or absent markers must not fall through as success');
+    assert.doesNotMatch(flow, /Otherwise: prev_issue_count/,
+      'the canonical flow must not accept every non-conflict return');
+  });
+
+  test('a stalled revision spawn cannot bypass explicit completion', () => {
+    const spawn = flat(PLAN_PHASE.slice(
+      PLAN_PHASE.indexOf('ALL RUNTIMES:'),
+      PLAN_PHASE.indexOf('If iteration_count >= 3:')
+    ));
+    assert.match(spawn, /on \x60stalled\x60: Retry or Stop/i);
+    assert.doesNotMatch(spawn, /on \x60stalled\x60: Accept/i);
   });
 
   test('the canonical flow declares and enforces both conflict counters', () => {
