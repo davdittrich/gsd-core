@@ -41,10 +41,11 @@ LOOP:
            Else: previous_conflict_keys = current_conflict_keys
              resolve it (see "Conflict Return" below) and go to step d.
              Do NOT update prev_issue_count or increment iteration -- the conflict was not a failed attempt.
-     f. Otherwise: prev_issue_count = issue_count; iteration += 1
-     g. After revision completes, go to LOOP
+     f. If the agent returns its explicit completion marker:
+        -> prev_issue_count = issue_count; iteration += 1; go to LOOP
+     g. Otherwise (unknown, empty, or both markers): offer Retry or Stop.
 
-The baseline update and increment are step f, AFTER a non-conflict producing-agent return.
+The baseline update and increment are step f, only after explicit producer completion.
 ```
 
 ### Issue Count Tracking
@@ -130,21 +131,24 @@ so they restate the operative rules inline; this section is the authority they m
    Before appending, reuse the existing open line instead of appending a duplicate when its
    sanitized fields identify the same conflict. This makes persisted conflict state idempotent.
 
-   **Sanitize before writing — the conflict text is agent-authored.** Every field comes from the
-   producing agent. Before appending, for EACH field: collapse every newline and tab to a single
-   space, and strip any leading `#`, `-`, `|` or backtick-fence run. Otherwise an embedded
-   newline can forge an extra conflict-shaped record inside the owned slot. One conflict is exactly
-   one line beginning `- [ ]`. Never append agent text verbatim, and never append a fenced block.
+   **Sanitize before writing — the conflict text is agent-authored.** For EACH field: collapse
+   newlines/tabs to one space; replace every internal `|` with `¦` and `<`/`>` with
+   `‹`/`›`; strip any leading `#`, `-`, `¦` or backtick-fence run; trim. If any field is
+   empty after sanitization, do not write it: report `BLOCKED`. One conflict is exactly one line
+   beginning `- [ ]`. Use this same transform for the chosen resolution before prompt transport
+   or closure; never append agent text verbatim or a fenced block.
 3. **Resolve** — present the conflict and its alternatives to the user and ask which to take
    (pattern: `gsd-core/references/gate-prompts.md`): adopt a named alternative / override the
    named constraint and apply the hint / amend the constraint itself. Each option resolves the
    conflict. Accepting the output with the blocker still open is NOT offered here — the blocking
    `required_property` still fails, and that choice belongs to the cap escalation.
-4. **Re-spawn** with sanitized `{issue_identity}: {chosen_resolution}` pairs in the revision
-   prompt while keeping recorded lines open; re-evaluate its return from the top of this handler.
-5. **Close after application** — `## REVISION COMPLETE` must acknowledge each applied pair under
-   `### Applied Conflict Resolutions`. Only an exact identity/choice match lets the writer flip that
-   line to `- [x]` and append ` | resolved: {chosen resolution}`. Unknown, empty, ambiguous, failed,
+4. **Re-spawn** with every sanitized
+   `{issue_identity} | required_property: {property} | chosen_resolution: {chosen_resolution}`
+   triple in the revision prompt, keeping recorded lines open; re-evaluate its return from the top of this handler.
+5. **Close after application** — `## REVISION COMPLETE` must echo each applied triple under
+   `### Applied Conflict Resolutions`. Only an exact identity/property/choice match lets the writer
+   flip that line to `- [x]` and append ` | resolved: {chosen resolution}`. Unknown, empty,
+   ambiguous, failed,
    or abandoned returns leave it open.
 
 **Bounded — two ways, because one is evadable.** Not incrementing must not make this path

@@ -121,9 +121,9 @@ gsd_run query commit "fix($PHASE): revise plans based on checker feedback" --fil
 
 ### Applied Conflict Resolutions
 
-| Issue | Chosen resolution |
-|-------|-------------------|
-| {issue_identity} | {exact chosen_resolution from prompt} |
+| Issue | required_property | Chosen resolution |
+|-------|-------------------|-------------------|
+| {issue_identity} | {exact property from prompt} | {exact chosen_resolution from prompt} |
 
 Omit this section when the prompt has no conflict resolutions.
 
@@ -169,8 +169,9 @@ configured, also records it for the convergence gate; it does not count as a fai
 ```
 
 **Issue identity:** use `{dimension}/{plan}` for scalar `plan`; otherwise join sorted `plans`
-with `+`, or use `{dimension}/phase` when neither exists.
+with `+`, or use `{dimension}/phase` when neither exists. The canonical conflict key is this
+identity plus `required_property`; never acknowledge identity alone.
 
-**Every field is one line of plain text.** No newlines inside a cell, and never begin a field with
-`#`, `-`, `|` or a code fence. The fields enter a writer-owned delimiter block; unsanitized
-text could forge another conflict record or delimiter and corrupt blocking state.
+**Every field uses the shared Conflict Return sanitizer.** It makes one non-empty line, encodes
+`|` as `¦` and angle brackets as `‹`/`›`, and strips record-leading syntax. Echo the exact
+sanitized prompt values; raw text could forge a record, delimiter, or prompt boundary.

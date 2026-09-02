@@ -907,8 +907,7 @@ Severities: `blocker` (must fix), `warning` (should fix), `info` (suggestions).
 
 ```yaml
 issue:
-  plan: "16-01"              # Single; omit for multi
-  plans: ["02", "03"]          # Multi; omit for single
+  plan: "16-01"              # Single; use `plans` for multi
   dimension: "task_completeness"  # Which dimension failed
   severity: "blocker"        # blocker | warning | info
   required_property: "..."   # BINDING — the invariant that must hold

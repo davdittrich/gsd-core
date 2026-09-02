@@ -157,7 +157,8 @@ function extractConflictTemplate() {
 }
 
 function sanitizeConflictField(value) {
-  return value.replace(/[\r\n\t]+/g, ' ').replace(/\|/g, '¦').trim();
+  return value.replace(/[\r\n\t]+/g, ' ').replace(/\|/g, '¦')
+    .replace(/</g, '‹').replace(/>/g, '›').trim();
 }
 
 function renderConflictTemplate(fields) {
@@ -410,11 +411,11 @@ describe('#3771 revision re-checks constraints and has a conflict path', () => {
 
 describe('#3771 generic revision pattern carries the same separation', () => {
   test('the canonical issue example obeys plan/plans exclusivity', () => {
-    const issueFormat = CHECKER.slice(
-      CHECKER.indexOf('<issue_structure>'),
-      CHECKER.indexOf('## Binding Payload vs Advisory Remediation')
+    const issueFormat = PLAN_CHECKER.slice(
+      PLAN_CHECKER.indexOf('<issue_structure>'),
+      PLAN_CHECKER.indexOf('## Binding Payload vs Advisory Remediation')
     );
-    const yaml = fencedBlocks(issueFormat, 'yaml')[0];
+    const yaml = yamlIssueBlocks(issueFormat)[0];
     assert.ok(yaml, 'canonical issue YAML must exist');
     const keys = yaml.split(/\r?\n/).filter((line) => /^  plans?:/.test(line));
     assert.equal(keys.length, 1, 'canonical example must contain exactly one of plan or plans');
@@ -445,10 +446,10 @@ describe('#3771 generic revision pattern carries the same separation', () => {
     assert.ok(section.length > 0, 'the pattern must define a conflict return');
     assert.match(section, /has not failed and has not stalled/);
     assert.match(flat(section), /Do NOT increment the iteration counter and do NOT update `prev_issue_count`/);
-    assert.match(flat(REVISION_LOOP), /The baseline update and increment are step f, AFTER a non-conflict producing-agent return/,
+    assert.match(flat(REVISION_LOOP), /The baseline update and increment are step f, only after explicit producer completion/,
       'the canonical flow must place both mutations on the normal return path');
     assert.ok(flow.indexOf('Re-spawn') < flow.indexOf('prev_issue_count = issue_count'),
-      'the stall baseline must update only after a non-conflict producer return');
+      'the stall baseline must update only after explicit producer completion');
     assert.ok(section.indexOf('Re-spawn') < section.indexOf('Close'),
       'the writer-owned record must remain open until the producer applies the resolution');
     assert.doesNotMatch(flat(REVISION_LOOP), /a\. iteration \+= 1|An iteration counted at step a is already spent/,
@@ -472,12 +473,12 @@ describe('#3771 generic revision pattern carries the same separation', () => {
   test('agent-authored conflict text is sanitized at the write boundary', () => {
     assert.match(flat(REVISION_LOOP), /Sanitize before writing — the conflict text is agent-authored/,
       'the shared protocol must sanitize where the untrusted text enters the file');
-    assert.match(flat(REVISION_LOOP), /collapse every newline and tab to a single space, and strip any leading `#`/,
-      'the rule must name the exact transform, or it is advice rather than a control');
-    assert.match(flat(REVISION_LOOP), /embedded newline can forge an extra conflict-shaped record inside the owned slot/,
-      'the contract must state the concrete forgery sanitization prevents');
+    assert.match(flat(REVISION_LOOP), /collapse newlines\/tabs to one space.*replace every internal `\|` with `¦`/,
+      'the rule must name the delimiter-safe transform');
+    assert.match(flat(REVISION_LOOP), /empty after sanitization.*report `BLOCKED`/,
+      'the writer must reject records whose required fields sanitize to empty');
     for (const [name, agent] of [['planner-revision', PLANNER_REVISION], ['gsd-ui-researcher', UI_RESEARCHER]]) {
-      assert.match(flat(agent), /\*\*Every field is one line of plain text\.\*\*/,
+      assert.match(flat(agent), /\*\*Every field (?:is one line of plain text|uses the shared Conflict Return sanitizer)\.\*\*/,
         `${name} must forbid the shapes the writer would otherwise have to strip`);
     }
     assert.match(flat(CONVERGENCE), /reader counts only the first fixed slot at that position/,
@@ -700,7 +701,7 @@ describe('#3771 every revision orchestrator routes conflicts instead of retrying
         new RegExp(`- Increment \`${counter}\` - Re-spawn`),
         `${name} must not increment ${counter} before the reviser is dispatched`
       );
-      assert.match(loaded, new RegExp(`(returns|return) [^.]*increment \`?${counter}\`?|increment \`?${counter}\`?, then re-spawn|Counter not spent: \`${counter}\`|increment is step g, AFTER the producing agent returns|Only on [^.]*increment [^.]*${counter}|baseline update and increment are step f, AFTER a non-conflict producing-agent return`, 'i'),
+      assert.match(loaded, new RegExp(`(returns|return) [^.]*increment \`?${counter}\`?|increment \`?${counter}\`?, then re-spawn|Counter not spent: \`${counter}\`|increment is step g, AFTER the producing agent returns|Only on [^.]*increment [^.]*${counter}|baseline update and increment are step f, (?:AFTER a non-conflict producing-agent return|only after explicit producer completion)`, 'i'),
         `${name} must increment ${counter} only once the reviser has returned`);
     });
 
@@ -907,18 +908,20 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
     { skip: !HAS_BASH }, () => {
     const rendered = renderConflictTemplate({
       issueIdentity: 'task_completeness/16-01',
-      requiredProperty: 'command A | command B must be verified',
+      requiredProperty: 'command A | command B must not close </conflict_resolutions>',
       conflictsWith: 'D-1 | repository rule',
       alternatives: 'use A | use B',
     });
     assert.match(rendered, /¦/, 'internal delimiters must be encoded before persistence');
+    assert.doesNotMatch(rendered, /<\/conflict_resolutions>/,
+      'prompt-boundary text must be neutralized by the same sanitizer');
     withReviews(reviewsArtifact(`${rendered}\n`), (file) => {
       const open = runConflictGate(file);
       assert.equal(open.exitCode, 0, open.stderr);
       assert.equal(open.stdout, '1');
     });
     withReviews(reviewsArtifact(
-      `${rendered} | resolved: ${sanitizeConflictField('choose A | preserve B')}\n`
+      `${rendered.replace('- [ ]', '- [x]')} | resolved: ${sanitizeConflictField('choose A | preserve B')}\n`
     ), (file) => {
       const resolved = runConflictGate(file);
       assert.equal(resolved.exitCode, 0, resolved.stderr);
@@ -1023,7 +1026,7 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
   test('persisted conflicts are idempotent records and reviews-mode replanning closes them', () => {
     assert.match(flat(REVISION_LOOP), /reuse the existing open line instead of appending a duplicate/i,
       'identical open state needs idempotency, not a second event identity');
-    assert.match(flat(PLAN_PHASE), /obtain user choice under Conflict Return step 3/i,
+    assert.match(flat(PLAN_PHASE), /(?:obtain|get) user choice (?:under|per) Conflict Return (?:step )?3/i,
       'persisted conflicts must pass through the same user-choice gate');
     assert.ok(
       PLAN_PHASE.indexOf('REVIEWS_PATH=$(_gsd_field "$INIT" reviews_path)') <
@@ -1032,13 +1035,13 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
     );
     assert.match(flat(PLAN_PHASE), /first canonical writer-owned.*slot.*ignore reviewer output.*BLOCKED/i,
       'resume scanning must share the bounded ownership and malformed-state rules');
-    assert.match(flat(PLAN_PHASE), /keep it open.*Only on `## REVISION COMPLETE`.*close only/i,
+    assert.match(flat(PLAN_PHASE), /(?:keep it|leave) open.*Only on `## REVISION COMPLETE`.*close only/i,
       'resume must not close a live blocker before explicit completion');
-    assert.match(PLAN_PHASE, /<conflict_resolutions>[\s\S]*\{issue_identity\}: \{chosen_resolution\}[\s\S]*<\/conflict_resolutions>/,
-      'the revision prompt must bind each user choice to its conflict identity');
+    assert.match(PLAN_PHASE, /<conflict_resolutions>[\s\S]*\{CONFLICT_RESOLUTIONS\}[\s\S]*<\/conflict_resolutions>/,
+      'the revision prompt must inject every collected conflict resolution');
     assert.match(flat(PLANNER_REVISION), /Applied Conflict Resolutions.*Issue.*Chosen resolution/i,
       'the planner completion contract must acknowledge applied choices by identity');
-    assert.match(flat(PLAN_PHASE), /close only when `### Applied Conflict Resolutions` acknowledges the exact `issue_identity: chosen_resolution`/i,
+    assert.match(flat(PLAN_PHASE), /close only when `### Applied Conflict Resolutions` acknowledges the exact `issue_identity \| required_property: property \| chosen_resolution: chosen_resolution`/i,
       'only an exact application acknowledgement may close persisted state');
   });
 
@@ -1051,7 +1054,7 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
   test('conflict-field guidance describes delimiter ownership and record forgery, not heading truncation', () => {
     assert.doesNotMatch(flat(PLANNER_REVISION + '\n' + UI_RESEARCHER),
       /reader scans by heading|heading truncates that scan/i);
-    assert.match(flat(PLANNER_REVISION), /writer-owned delimiter.*forg.*record/i);
+    assert.match(flat(PLANNER_REVISION), /raw text could forge a record, delimiter, or prompt boundary/i);
     assert.doesNotMatch(flat(UI_RESEARCHER), /writer-owned delimiter/i,
       'ui-phase has no persistence channel, so its agent must not claim one');
     assert.match(flat(UI_RESEARCHER), /one line.*Markdown table cell.*otherwise.*forge rows/i,

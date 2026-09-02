@@ -619,7 +619,7 @@ UI_SPEC_FILE=$(ls "${PHASE_DIR_FOR_SPEC}"/*-UI-SPEC.md 2>/dev/null | head -1)
 UI_SPEC_PATH="${UI_SPEC_FILE}"
 ```
 
-**With plans and `--reviews`:** read the first canonical writer-owned `REVIEWS_PATH` slot; ignore reviewer output; malformed is `BLOCKED`. For each open entry, obtain user choice under Conflict Return step 3 and add sanitized `{issue_identity}: {chosen_resolution}` to `CONFLICT_RESOLUTIONS`; keep it open.
+**With plans and `--reviews`:** parse the first canonical writer-owned slot at `REVIEWS_PATH`; malformed is `BLOCKED`. Ignore reviewer output. Each open line: get user choice per Conflict Return 3; append sanitized `{issue_identity} | required_property: {property} | chosen_resolution: {chosen_resolution}` to `CONFLICT_RESOLUTIONS`; leave open.
 
 ## 7.5. Verify Nyquist Artifacts
 
@@ -1240,8 +1240,9 @@ ${AGENT_SKILLS_PLANNER}
 
 **Checker issues:** {structured_issues_from_checker}
 
+{When nonempty:}
 <conflict_resolutions>
-{issue_identity}: {chosen_resolution}
+{CONFLICT_RESOLUTIONS}
 </conflict_resolutions>
 </revision_context>
 
@@ -1263,11 +1264,11 @@ Agent(
 )
 ```
 
-**ALL RUNTIMES:** set `TS=$(date +%s)`; while active, run `gsd_stall_watch "$TS" "{outputFile}" "${PHASE_DIR}"'/*-PLAN.md'`; on `stalled`: Accept, Retry, or Stop.
+**ALL RUNTIMES:** set `TS=$(date +%s)`; while active, run `gsd_stall_watch "$TS" "{outputFile}" "${PHASE_DIR}"'/*-PLAN.md'`; on `stalled`: Retry or Stop.
 
 **On `## REVISION_CONFLICT`:** follow shared Conflict Return with `REVIEWS_FILE="${REVIEWS_PATH}"`; fail closed reading `workflow.plan_review_convergence`. Record only when enabled and the path is a regular file.
 
-**Only on `## REVISION COMPLETE`:** close only when `### Applied Conflict Resolutions` acknowledges the exact `issue_identity: chosen_resolution`; then set `prev_issue_count`, check, and increment.
+**Only on `## REVISION COMPLETE`:** close only when `### Applied Conflict Resolutions` acknowledges the exact `issue_identity | required_property: property | chosen_resolution: chosen_resolution`; then set `prev_issue_count`, check, and increment.
 
 **Otherwise (unknown, empty, or both markers):** leave lines open; offer Retry or Stop. Do not check, increment, or update the baseline.
 
