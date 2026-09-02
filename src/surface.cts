@@ -86,6 +86,8 @@ interface AgentCtx {
    *  runtime-artifact-install-plan.cts's identically-named field — see its
    *  doc comment. */
   targetDir?: string | null;
+  /** Project/config discovery root, distinct from global artifact destinations. */
+  projectDir?: string | null;
 }
 
 interface ArtifactKind {
@@ -110,6 +112,7 @@ interface ApplySurfaceOptions {
   resolveAttribution?: (runtime: string) => string | null | undefined;
   homedir?: () => string;
   platform?: string;
+  projectDir?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -411,7 +414,13 @@ function applySurface(runtimeConfigDir: string, layout: Layout, manifest: Map<st
   const _pathPrefix = runtimeArtifactConversion._computePathPrefix({ isGlobal: _isGlobal, isOpencode: _isOpencode, isWindowsHost: _isWindowsHost, resolvedTarget: _resolvedTarget, homeDir: _homeDir });
   const _attribution = opts?.resolveAttribution ? opts.resolveAttribution(layout.runtime) : undefined;
   // #2875 Part 2 (row I1): layout.configDir is this call's install root.
-  const agentCtx: AgentCtx = { runtime: layout.runtime, pathPrefix: _pathPrefix, attribution: _attribution, targetDir: layout.configDir };
+  const agentCtx: AgentCtx = {
+    runtime: layout.runtime,
+    pathPrefix: _pathPrefix,
+    attribution: _attribution,
+    targetDir: layout.configDir,
+    projectDir: opts?.projectDir ?? (_isGlobal ? process.cwd() : layout.configDir),
+  };
 
   const tempDirsToClean: string[] = [];
   // #1575: When the surface has no state modifications AND the base profile is
@@ -433,7 +442,7 @@ function applySurface(runtimeConfigDir: string, layout: Layout, manifest: Map<st
   try {
     for (const kind of layout.kinds) {
       let staged: string;
-      if (kind.kind === 'agents') {
+      if (kind.kind === 'agents' || kind.kind === 'kimi-agents') {
         const agentProfile = _isUnmodifiedFull ? { ...resolved, skills: '*' as const } : resolved;
         staged = kind.stage(agentProfile, agentCtx);
       } else {
@@ -638,6 +647,19 @@ function _syncGsdDir(stagedDir: string, destDir: string, kind: ArtifactKind | st
     // Prune GSD-owned dirs that are no longer in the staged set.
     // pruneSkillDirs() is the single point of truth for this logic.
     pruneSkillDirs(destDir, stagedDirs, kindPrefix, manifest);
+  } else if (kindName === 'kimi-agents') {
+    for (const fileName of ['gsd.yaml', 'gsd.md']) {
+      fs.rmSync(path.join(destDir, fileName), { force: true });
+    }
+    const subagentsDir = path.join(destDir, 'subagents');
+    if (fs.existsSync(subagentsDir)) {
+      for (const entry of fs.readdirSync(subagentsDir, { withFileTypes: true })) {
+        if (!entry.isFile() || !entry.name.startsWith('gsd-')) continue;
+        if (!entry.name.endsWith('.yaml') && !entry.name.endsWith('.md')) continue;
+        fs.rmSync(path.join(subagentsDir, entry.name), { force: true });
+      }
+    }
+    fs.cpSync(stagedDir, destDir, { recursive: true });
   } else {
     // commands / agents kind: mirror installRuntimeArtifacts (_copyStaged /
     // _removeGsdEntries in bin/install.js) so surface produces the SAME files as a
