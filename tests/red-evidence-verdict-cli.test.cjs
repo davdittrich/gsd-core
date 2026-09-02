@@ -195,7 +195,6 @@ describe('task red-evidence-capture — explicit vector and bounded receipt', ()
       'node', '--test', project.target];
     const invalid = [
       base.filter((arg) => arg !== '--'),
-      [...base.slice(0, 6), '--', ...base.slice(6)],
       base.slice(0, 7),
       [...base, project.target],
       base.map((arg) => arg === project.target ? `${arg}\0x` : arg),
@@ -441,5 +440,64 @@ describe('public CLI receipt lifecycle', () => {
     assert.equal(verdict.exitCode, 0, verdict.stderr);
     assert.equal(JSON.parse(verdict.stdout).verdict, 'authorize');
     assert.equal(fs.existsSync(path.join(root, 'never-executed-trailer-command')), false);
+  });
+
+  test('public capture preserves every post-sentinel child argv element', (t) => {
+    const spellings = [
+      { command: ['task', 'red-evidence-capture'], project: 'spaced', pick: true },
+      { command: ['task.red-evidence-capture'], project: 'dotted', pick: false },
+    ];
+
+    for (const { command, project, pick } of spellings) {
+      const root = createTempDir(`red-receipt-${project}-`);
+      t.after(() => cleanup(root));
+      fs.mkdirSync(path.join(root, '.planning'));
+      git(root, ['init', '-q']);
+
+      const target = 'tests/sentinel receipt Ω.test.cjs';
+      const plan = '.planning/02 sentinel plan.md';
+      const recorder = path.join(root, 'record-child-argv.cjs');
+      const observed = path.join(root, 'observed-child-argv.json');
+      fs.writeFileSync(path.join(root, plan), contract(target));
+      fs.writeFileSync(
+        recorder,
+        "'use strict';require('node:fs').writeFileSync(process.argv[2], JSON.stringify(process.argv.slice(2)));process.exit(1);\n",
+      );
+      git(root, ['add', '--', plan]);
+      git(root, ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'baseline']);
+
+      const childArgs = [
+        observed,
+        target,
+        '--json-errors',
+        '--exit-contract=typed',
+        '--cwd',
+        '--project-dir',
+        '--raw',
+        '--pick',
+        '--default',
+        '--help',
+        '',
+        '  spaces  ',
+        '雪',
+        '--',
+      ];
+      const publicPrefix = pick
+        ? ['--pick', 'exit_status', 'query', ...command]
+        : ['query', ...command];
+      const captured = runNode([
+        GSD_TOOLS, ...publicPrefix, '--project-dir', root,
+        '--task-file', plan, '--task-index', '1', '--',
+        process.execPath, recorder, ...childArgs,
+      ], { cwd: root });
+
+      assert.equal(captured.exitCode, 0, captured.stderr);
+      assert.deepEqual(JSON.parse(fs.readFileSync(observed, 'utf8')), childArgs);
+      if (pick) {
+        assert.equal(captured.stdout, '1');
+      } else {
+        assert.equal(JSON.parse(captured.stdout).exit_status, 1);
+      }
+    }
   });
 });
