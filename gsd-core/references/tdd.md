@@ -63,8 +63,6 @@ Output: [Working, tested feature]
     Cases: input → expected output
   </behavior>
   <red_contract>
-    <program>[Executable name, never a shell command]</program>
-    <argv_json>[JSON string array including target_test exactly]</argv_json>
     <target_test>[Runner-native id of the test that must fail]</target_test>
     <implementation_target>[Production module or symbol GREEN will create]</implementation_target>
     <expected_failure>
@@ -140,8 +138,6 @@ run, and the RED commit records what was actually observed.
 
 ```xml
 <red_contract>
-  <program>pytest</program>
-  <argv_json>["tests/test_pricing.py::test_discount_reduces_total","-q"]</argv_json>
   <target_test>tests/test_pricing.py::test_discount_reduces_total</target_test>
   <implementation_target>pricing.apply_discount</implementation_target>
   <expected_failure>
@@ -154,8 +150,6 @@ run, and the RED commit records what was actually observed.
 
 | Field | Meaning |
 |---|---|
-| `program` | The non-empty executable selected by the contract. It is passed as one argv element through the existing execution seam; shell strings are never accepted. |
-| `argv_json` | A JSON array of strings selected by the contract. It contains `target_test` exactly once, so the observed local invocation cannot be substituted by caller argv. |
 | `target_test` | The runner-native id of the test that must fail. The observed `actual.subject` must equal it exactly. For an outside-in missing-target declaration, declare it at the granularity the runner reports the missing target against — for a compile-time or collection-time failure that is the test FILE, since a module that never imports collects no tests and so offers no single test id to select — and record `expected_failure.subject`, `target_test` and the observed `actual.subject` at that same granularity, each excluding any position suffix (line, column) the runner appends, because a position is not part of the node's identity and moves as edits leave the declaration correct. |
 | `implementation_target` | The production module or symbol GREEN will create or change. Always present, so an outside-in failure that never reaches the test body is still bound to a declared production intent. Recorded for audit only: the predicate reads no field of it. |
 | `expected_failure.phase` | The runner-native lifecycle phase the failure occurs in. **Open vocabulary, not an enum.** pytest's `collection`/`setup`/`call`/`teardown` are one runner's examples; a compiled language has no collection phase at all and declares `build`. The contract compares declared against observed and never validates the value against a list. |
@@ -175,7 +169,7 @@ red-evidence: {"command":"[\"pytest\",\"tests/test_pricing.py::test_discount_red
 
 | Field | Meaning |
 |---|---|
-| `command` | Canonical JSON display of the selected `program` plus `argv_json`; callers do not supply executable argv. |
+| `command` | Inert JSON display for audit. The actual RED command argv is supplied only to `task.red-evidence-capture` after `--`; it is not selected from the plan or executed by the verdict. |
 
 The runtime observes the selected local process's exit status and whether stderr was captured, but withholds child output. `phase`, `class_or_mode`, and `subject` remain declared semantic fields; this cooperative local observation is not hosted, adversarial, signed, or independently attested provenance.
 | `exit_status` | That command's process exit status, as a JSON number — never a quoted string. A bash-assembled trailer that interpolates `"$?"` inside quotes produces a string and fails the guard; interpolate it unquoted. |
@@ -492,7 +486,7 @@ TAB=$(printf '\t')
 # selects the newest candidate that is plan-scoped by SUBJECT alone — the
 # trailer field is not part of selection, only of the verdict judged below.
 RED_RECORD=$(git log --format='%H%x09%(trailers:key=red-evidence,valueonly,separator=%x20)%x09%s' \
-  | grep -m1 -E "^[0-9a-f]+${TAB}[^${TAB}]*${TAB}test\(${PHASE}-${PLAN}-${TASK_INDEX}\):" || true)
+  | grep -m1 -F "${TAB}test(${PHASE}-${PLAN}-${TASK_INDEX}):" || true)
 RED_SHA=$(printf '%s' "$RED_RECORD" | cut -d"$TAB" -f1 || true)
 if [ -z "$RED_SHA" ]; then
   echo "missing_red_commit"
@@ -531,7 +525,7 @@ exit "$STATUS"
 
 Every search matches the commit **subject**, never the message body: a commit that quotes a `test(...)` subject in its body would otherwise match, and since git logs newest-first the decoy would be selected over the real RED commit.
 
-**This block is illustrative, and it does not check membership at all.** Whether the RED commit actually touches the file its evidence declares is decided in exactly one place: `task.red-evidence-verdict` (`changedFilesInclude`, `src/task-command-router.cts`), which the task-scoped gate in `execute-phase.md` calls. Read this block for the shape of the gate, never as a second specification of what membership admits.
+**This block is illustrative, and it does not check membership at all.** Whether the RED commit actually touches the file its evidence declares is decided in exactly one place: `task.red-evidence-verdict` (`changedFilesInclude`, `src/task-command-router.cts`), which the task-scoped gate in `execute-phase.md` calls with the selected RED SHA. Read this block for the shape of the gate, never as a second specification of what membership admits.
 
 The two RED failures are distinct. No commit whose subject matches `test({phase}-{plan}-{task-index}):` is `missing_red_commit` — there is nothing to read. A matching commit whose `red-evidence:` trailer value comes back empty is a missing RED gate — the commit exists but was made without evidence. Judging the trailer's contents against the RED Predicate **is** mechanised: the gate passes the trailer to `gsd_run query task.red-evidence-verdict` and proceeds only on verdict `authorize`. Any other verdict — `red_commit_not_failing`, `unexpected_pass` — trips the gate under the verdict's own name. Existence of a subject-matching commit authorizes nothing on its own. The predicate is in **RED Contract** above.
 

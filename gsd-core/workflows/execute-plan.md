@@ -98,7 +98,7 @@ HUMAN_VERIFY_MODE=$(gsd_run query config-get workflow.human_verify_mode --defaul
 grep -n "type=\"checkpoint" .planning/phases/XX-name/{phase}-{plan}-PLAN.md
 ```
 
-For a selected task, carry the original `PLAN_PATH` and its parser-owned one-based `TASK_INDEX` through every runtime query. Do not slice `<task>` text into a transient file or pass caller command argv; `task.red-evidence-verdict` loads the selected contract itself.
+For a selected task, carry the original `PLAN_PATH` and its parser-owned one-based `TASK_INDEX` through every runtime query. Do not slice `<task>` text into a transient file. Only `task.red-evidence-capture` receives the actual RED command argv after `--`; `task.red-evidence-verdict` receives no execution argv and loads the selected contract itself.
 
 **Primary routing: task count threshold (#1979)**
 
@@ -294,7 +294,7 @@ End with: **Total deviations:** N auto-fixed (breakdown). **Impact:** assessment
 For `type: tdd` plans — RED-GREEN-REFACTOR:
 
 1. **Infrastructure** (first TDD plan only): detect project, install framework, config, verify empty suite
-2. **RED:** Read `<behavior>` and the task's `<red_contract>` → failing test(s) → run until the failure satisfies the RED contract in `~/.claude/gsd-core/references/tdd.md` → commit with its `red-evidence:` trailer, carrying no credential value in `command`: `test({phase}-{plan}-{task-index}): add failing test for [feature]`. A `tdd="true"` task carrying no `<red_contract>` halts; do not invent one.
+2. **RED:** Read `<behavior>` and the task's `<red_contract>` → failing test(s) → run the actual command exactly once through `gsd_run query task.red-evidence-capture --task-file "$PLAN_PATH" --task-index "$TASK_INDEX" -- [actual RED command argv]` until the failure satisfies the RED contract in `~/.claude/gsd-core/references/tdd.md` → commit with its `red-evidence:` trailer, carrying no credential value in `command`: `test({phase}-{plan}-{task-index}): add failing test for [feature]`. Capture replaces the normal RED test invocation; never rerun the same command separately. Preserve the original argv elements on every platform. A `tdd="true"` task carrying no `<red_contract>` halts; do not invent one.
 3. **GREEN:** Read `<implementation>` → minimal code → run (MUST pass) → commit: `feat({phase}-{plan}): implement [feature]`
 4. **REFACTOR:** Clean up → tests MUST pass → commit: `refactor({phase}-{plan}): clean up [feature]`
 

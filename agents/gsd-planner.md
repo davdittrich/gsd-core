@@ -239,8 +239,6 @@ See @~/.claude/gsd-core/references/planner-guidance.md for Task Types table, Tas
     - Test 2: [edge case]
   </behavior>
   <red_contract>
-    <program>[Executable name, never a shell command]</program>
-    <argv_json>[JSON string array whose exact members include target_test]</argv_json>
     <target_test>[Runner-native id of the test that must fail]</target_test>
     <implementation_target>[Production module or symbol GREEN will create]</implementation_target>
     <expected_failure>
@@ -517,7 +515,7 @@ For checkpoint writing guidelines (DO/DON'T), anti-patterns, specificity compari
 
 Plan shape, the RED-GREEN-REFACTOR cycle and the commit pattern: `~/.claude/gsd-core/references/tdd.md`. That file is canonical; do not restate it here.
 
-Every `tdd="true"` task carries a `<red_contract>` element as a **sibling** of `<behavior>`, declaring which failure counts as RED. Every behavior-adding contract declares a non-empty `program`, a JSON string-array `argv_json`, and one `target_test` that occurs exactly in `argv_json`; shape and validation are canonical in the same path.
+Every `tdd="true"` task carries a `<red_contract>` element as a **sibling** of `<behavior>`, declaring which failure counts as RED. Every behavior-adding contract declares the runner-native `target_test`, the production `implementation_target`, and the expected failure's phase, class or mode, and subject. The executor supplies the actual RED command only at capture time; executable argv is not plan data. Shape and validation are canonical in the same path.
 
 ## Context Budget for TDD
 

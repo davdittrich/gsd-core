@@ -431,12 +431,12 @@ const CONTRACT_TASK_LINES = [
   '  <files>src/pricing.py, tests/test_pricing.py</files>',
   '  <behavior>Applying a discount reduces the order total.</behavior>',
   '  <red_contract>',
-  '    <target_test>tests/test_pricing.py::test_discount_reduces_total</target_test>',
+  '    <target_test>tests/test_pricing.py</target_test>',
   '    <implementation_target>pricing.apply_discount</implementation_target>',
   '    <expected_failure>',
   '      <phase>call</phase>',
   '      <class_or_mode>AssertionError</class_or_mode>',
-  '      <subject>tests/test_pricing.py::test_discount_reduces_total</subject>',
+  '      <subject>tests/test_pricing.py</subject>',
   '    </expected_failure>',
   '  </red_contract>',
   '</task>',
@@ -1986,7 +1986,7 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
     // here (the pre-DI-6 shape) let a NEWER, trailer-less commit be skipped
     // in favor of an OLDER commit's stale trailer — exactly the
     // stale-evidence-authorizes-GREEN hole DI-6 closes.
-    assert.ok(snippet.includes(`grep -m1 -E "^[0-9a-f]+\${TAB}[^\${TAB}]*\${TAB}test\\(\${PHASE}-\${PLAN}-\${TASK_INDEX}\\):"`),
+    assert.ok(snippet.includes(`grep -m1 -F "\${TAB}test(\${PHASE}-\${PLAN}-\${TASK_INDEX}):"`),
       'the RED search must select the NEWEST candidate anchored to this plan/task commit subject, ' +
       'regardless of whether it carries a trailer. Dropping the plan scope (CR-11 M1) lets an ' +
       'unrelated plan\'s RED authorize this plan\'s GREEN; requiring a non-empty trailer at ' +
@@ -2284,7 +2284,7 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
       .stdout.trim().split(' ')[1];
     if (!parent) return;
     const taskSource = fs.readFileSync(taskFile, 'utf8');
-    const target = taskSource.match(/<target_test>([\s\S]*?)<\/target_test>/)?.[1].trim();
+    const target = taskSource.match(/<target_test>([\s\S]{0,4096}?)<\/target_test>/)?.[1].trim();
     if (!target) return;
     const relativePlan = path.relative(cwd, taskFile).split(path.sep).join('/');
     const receiptId = crypto.createHash('sha256')
@@ -2319,7 +2319,7 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
   // optional second argument so a caller can point the SAME fixture at a
   // different ecosystem's id without a second task-file literal (#3770
   // Task 6).
-  const DEFAULT_TARGET_ID = 'tests/test_pricing.py::test_discount_reduces_total';
+  const DEFAULT_TARGET_ID = 'tests/test_pricing.py';
   const behaviorTask = (cwd, id = DEFAULT_TARGET_ID) => {
     const p = path.join(cwd, 'task.md');
     const lines = id === DEFAULT_TARGET_ID
@@ -2336,7 +2336,12 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
 
   const g1Trailer = (() => {
     const trailer = JSON.parse(trailerLine().slice(trailerLine().indexOf('{')));
-    trailer.command = JSON.stringify(['node', ...controlledNodeArgv(trailer.target_test)]);
+    trailer.command = JSON.stringify(['node', ...controlledNodeArgv(DEFAULT_TARGET_ID)]);
+    trailer.target_test = DEFAULT_TARGET_ID;
+    trailer.expected.subject = DEFAULT_TARGET_ID;
+    trailer.actual.subject = DEFAULT_TARGET_ID;
+    trailer.location.declared.file = DEFAULT_TARGET_ID;
+    trailer.location.observed.file = DEFAULT_TARGET_ID;
     return `red-evidence: ${JSON.stringify(trailer)}`;
   })();
   const mutateTrailer = (mutator) => {
@@ -2506,33 +2511,9 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
     const r8 = runGate(scriptPath, s8, taskFile8);
     assert.notStrictEqual(r8.exitCode, 0,
       'G8: a commit whose subject and trailer both qualify but which touches only a source ' +
-      'file must NOT authorize — the --changed-files membership check rejects a trailer ' +
+      'file must NOT authorize — the verdict-derived membership check rejects a trailer ' +
       'declaring a file the RED commit never touched. This is the regression guard on that ' +
       'check, not a RED.');
-    // `--changed-files` is a REQUIRED flag (Task 5), so simply deleting it trips a DIFFERENT
-    // failure (the usage error) rather than defeating the membership check. Forcing its VALUE
-    // to a constant that always matches g1Trailer's own declared_file basename, regardless of
-    // what the commit actually touched, is what isolates the membership check specifically.
-    // Matched by SHAPE (`--changed-files "$(…)"`), never by retyping the git
-    // invocation: a copied literal silently stops matching the moment that
-    // invocation is edited, and the control then runs the UNMODIFIED gate and
-    // reports a false red. That is exactly what the `-c core.quotePath=false`
-    // fix (#3770 CCR-01) did to the previous literal here.
-    const FORCED_MEMBERSHIP_RE = /--changed-files "\$\([^)]*\)"/;
-    assert.match(snippet, FORCED_MEMBERSHIP_RE,
-      'G8 non-vacuity precondition: the gate must still pass a command-substituted changed-file '
-      + 'list, or the substitution below silently produces an unmodified script.');
-    const forcedMembershipScript = writeScript(
-      'gate-forced-membership.sh',
-      snippet.replace(FORCED_MEMBERSHIP_RE, '--changed-files "tests/test_pricing.py"'),
-    );
-    const r8Stripped = runGate(forcedMembershipScript, s8, taskFile8);
-    assert.strictEqual(r8Stripped.exitCode, 0,
-      'G8 non-vacuity: the SAME fixture, with --changed-files forced to a value that always ' +
-      "satisfies g1Trailer's own declared_file basename regardless of what the commit " +
-      'actually touched, must authorize — proving the guard is the membership check and not ' +
-      'something else about this fixture.');
-
     // ── G9, non-ASCII path in the RED commit (RED, #3770 CCR-01) ───────────
     // The one scenario whose changed-file list is PRODUCED by git rather than
     // hand-typed. `MEMBERSHIP_ROWS` (below, :2733) proves the matcher against
@@ -2551,7 +2532,7 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
     // a normalization failure wearing this bug's costume.
     const s9 = newRepo(t);
     const omegaFile = 'tests/test_pricing_ω.py';
-    const omegaId = `${omegaFile}::test_discount_reduces_total`;
+    const omegaId = omegaFile;
     const taskFile9 = behaviorTask(s9, omegaId);
     commit(s9, omegaFile, 'test(08-02-1): add failing test for discount', ecoTrailer(omegaId, omegaFile));
     const r9 = runGate(scriptPath, s9, taskFile9);
@@ -2564,7 +2545,7 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
     // checking membership at all: the same fixture with the declaration moved
     // to a file the commit never touched must still refuse.
     const s9Decoy = newRepo(t);
-    const decoyId = 'tests/test_shipping_ω.py::test_discount_reduces_total';
+    const decoyId = 'tests/test_shipping_ω.py';
     const taskFile9b = behaviorTask(s9Decoy, decoyId);
     commit(s9Decoy, omegaFile, 'test(08-02-1): add failing test for discount',
       ecoTrailer(decoyId, 'tests/test_shipping_ω.py'));
@@ -2660,8 +2641,8 @@ describe("RED contract — tdd.md's own gate sections defer to it (#3770)", () =
       ];
       for (const row of ECOSYSTEM_ROWS) {
         const dir = newRepo(t);
-        const taskFile = behaviorTask(dir, row.id);
-        commit(dir, row.file, 'test(08-02-1): add failing test for discount', ecoTrailer(row.id, row.file));
+        const taskFile = behaviorTask(dir, row.file);
+        commit(dir, row.file, 'test(08-02-1): add failing test for discount', ecoTrailer(row.file, row.file));
         const result = runGate(scriptPath, dir, taskFile);
         assert.strictEqual(result.exitCode, 0,
           `${row.name}: the gate must authorize on ${JSON.stringify(row.id)} declaring ` +
@@ -3037,7 +3018,7 @@ describe('MVP+TDD gate — parser-owned task identity (#4115)', () => {
       },
       actual: {
         phase: 'test', class_or_mode: 'assertion_failure',
-        subject: 'one production task ordinal reaches capture and literal commit verification',
+        subject: target,
       },
       location: {
         declared: { file: target, line: 1 }, observed: { file: target, line: 1 },

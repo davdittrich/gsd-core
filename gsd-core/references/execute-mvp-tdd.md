@@ -14,8 +14,8 @@ If any of these is false, the gate is inactive — execution proceeds normally.
 
 For each task gated by TDD, the executor MUST verify (before running the implementation step):
 
-1. **A failing-test commit exists.** Select the parser-owned one-based task index once, then search git log on the current branch for `test({phase}-{plan}-{task-index})`; a sibling task's identical contract cannot satisfy this task.
-2. **The failing-test commit carries its evidence, and that evidence authorizes.** The commit carries a `red-evidence:` trailer; the executor reads that trailer and reports it. A matching commit whose trailer value comes back empty is `missing_red_evidence` — the commit exists but was made without evidence. Judging the recorded run against the RED predicate in `~/.claude/gsd-core/references/tdd.md` **is** mechanised: the gate passes the plan path, parser-owned task index, trailer, and commit's changed files (`git show --name-only`) to `gsd_run query task.red-evidence-verdict` and proceeds only when the verdict is `authorize`. That call also decides membership — whether the commit actually touches the file its evidence declares — via `changedFilesInclude` (`src/task-command-router.cts`), not a filename-extension or directory-glob heuristic. Any other verdict — `red_commit_not_failing`, `unexpected_pass` — trips the gate under that verdict's own name. Existence of a subject-matching commit authorizes nothing on its own.
+1. **A failing-test commit exists.** Initialize one document-order task index immediately before iteration and increment it once before every task branch. Search git log for the literal tab-delimited subject prefix `test({phase}-{plan}-{task-index}):`; a sibling task's identical contract or a regex-like decimal phase cannot satisfy this task.
+2. **The failing-test commit carries captured evidence, and that evidence authorizes.** The executor runs the actual RED argv once through `task.red-evidence-capture` before the RED commit; capture replaces the normal test invocation and binds a private receipt to the original plan path and task index. The commit carries a `red-evidence:` trailer; an empty trailer is `missing_red_evidence`. Following the RED predicate in `~/.claude/gsd-core/references/tdd.md`, the gate passes only the same plan path, task index, selected RED SHA, and trailer to `task.red-evidence-verdict`. Verdict consumes that task's receipt and derives parent and changed-file membership from Git; it receives no execution argv or caller-supplied changed files. Any verdict other than `authorize` trips the gate. Existence of a subject-matching commit authorizes nothing on its own.
 3. **No implementation commit yet.** No `feat({phase}-{plan})` commit may exist for the same plan ID before the failing-test commit.
 
 If any check fails, the gate trips.
@@ -84,7 +84,7 @@ The `--force-mvp-gate` flag is documented but not introduced by this plan — it
 
 - It does not enforce REFACTOR commits. REFACTOR remains optional (per `gsd-core/references/tdd.md`).
 - It does not check test quality (the test could be trivially passing). That's the planner's job.
-- It does not run tests. The executor only inspects git log + file system. Running tests is the implementation step's job.
+- The verdict does not run tests. The executor's capture call is the one RED execution; the later verdict consumes its receipt without rerunning argv.
 - It does not gate config-only or doc-only tasks (see "behavior-adding task" definition).
 
 ## Compatibility with existing TDD discipline

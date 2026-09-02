@@ -215,7 +215,7 @@ if [ "$TDD_MODE" = "true" ]; then
 TAB=$(printf '\t')
     # One pass, bounded to RED_RANGE: SHA<TAB>trailer<TAB>subject; newest subject wins, trailer judged after.
     RED_RECORD=$(git log "$RED_RANGE" --format='%H%x09%(trailers:key=red-evidence,valueonly,separator=%x20)%x09%s' \
-      | grep -m1 -E "^[0-9a-f]+${TAB}[^${TAB}]*${TAB}test\(${PHASE_NUMBER}-${PLAN_ID}-${TASK_INDEX}\):" || true)
+      | grep -m1 -F "${TAB}test(${PHASE_NUMBER}-${PLAN_ID}-${TASK_INDEX}):" || true)
     RED_SHA=$(printf '%s' "$RED_RECORD" | cut -d"$TAB" -f1)
     if [ -z "$RED_SHA" ]; then
       gsd_run query state.update last_gate_trip "${PLAN_ID}/${TASK_ID}" || true
@@ -228,8 +228,7 @@ TAB=$(printf '\t')
       echo "TDD GATE TRIPPED: missing_red_evidence for ${PLAN_ID}/${TASK_ID}"
       exit 1
     fi
-    # quotePath=false escapes non-ASCII paths
-    RED_VERDICT=$(gsd_run query task.red-evidence-verdict --task-file "$PLAN_PATH" --task-index "$TASK_INDEX" --trailer "$RED_TRAILER" --changed-files "$(git -c core.quotePath=false show --name-only --format= "$RED_SHA")" --pick verdict) || exit 1
+    RED_VERDICT=$(gsd_run query task.red-evidence-verdict --task-file "$PLAN_PATH" --task-index "$TASK_INDEX" --red-sha "$RED_SHA" --trailer "$RED_TRAILER" --pick verdict) || exit 1
     if [ "$RED_VERDICT" != "authorize" ]; then
       gsd_run query state.update last_gate_trip "${PLAN_ID}/${TASK_ID}" || true
       echo "TDD GATE TRIPPED: ${RED_VERDICT} for ${PLAN_ID}/${TASK_ID}"

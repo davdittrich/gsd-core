@@ -144,7 +144,10 @@ At execution decision points, apply structured reasoning:
 **iOS app scaffolding:** If this plan creates an iOS app target, follow ios-scaffold guidance:
 @~/.claude/gsd-core/references/ios-scaffold.md
 
+TASK_INDEX=0
+
 For each task:
+TASK_INDEX=$((TASK_INDEX + 1))
 
 0. **Precondition check (before any other task work):** If the task carries a `<precondition>` element, evaluate that single prose line first — it names a runnable/checkable fact the task assumes (env var set, prior-phase artifact present, server responding to `/health`, `user_setup` step done). Verify with **read-only checks only** — file existence, env var presence (no value output), idempotent `GET /health`-style pings. Do NOT run commands with side effects (writes, network POSTs, secret emission) as the check; if a side-effecting check seems required, halt and surface via checkpoint instead.
    - **Met OR absent:** continue with no visible change to execution flow. The precondition is a no-op for the rest of the task loop.
@@ -399,7 +402,7 @@ When executing task with `tdd="true"`:
 
 **1. Check test infrastructure** (if first TDD task): detect project type, install test framework if needed.
 
-**2. RED:** Read `<behavior>` and the task's `<red_contract>`, create test file, write failing tests, run until the failure satisfies the RED contract in `~/.claude/gsd-core/references/tdd.md`, commit with that contract's `red-evidence:` trailer: `test({phase}-{plan}-{task-index}): add failing test for [feature]`. The one-based `{task-index}` is the parser-selected index; do not create a task fragment. Record no credential value in the trailer's `command` — it lands in permanent published history. A `tdd="true"` task carrying no `<red_contract>` halts; do not invent one.
+**2. RED:** Read `<behavior>` and the task's `<red_contract>`, create test file, and write failing tests. Run the actual RED command exactly once through `gsd_run query task.red-evidence-capture --task-file "$PLAN_PATH" --task-index "$TASK_INDEX" -- [actual RED command argv]`. This replaces the normal RED test invocation; do not run the command separately. Confirm the observed failure satisfies the RED contract in `~/.claude/gsd-core/references/tdd.md`, then commit with that contract's `red-evidence:` trailer: `test({phase}-{plan}-{task-index}): add failing test for [feature]`. The one-based `{task-index}` is the document-order index selected from the original plan; do not create a task fragment. Preserve argv elements exactly (including on Windows), and record no credential value in the trailer's `command` — it lands in permanent published history. A `tdd="true"` task carrying no `<red_contract>` halts; do not invent one.
 
 **3. GREEN:** Read `<implementation>`, write minimal code to pass, run (MUST pass), commit: `feat({phase}-{plan}): implement [feature]`
 
