@@ -546,12 +546,11 @@ describe('#3771 generic revision pattern carries the same separation', () => {
       }
     });
 
-    // The defect that started this: a section-scoped scan stops at the first `## ` it meets.
-    test('an injected heading cannot hide a conflict beneath it', () => {
+    test('an injected heading corrupts the owned slot and fails CLOSED', () => {
       withReviews(reviewsArtifact(`${RESOLVED('a/1')}\n## Injected By Agent Text\n${OPEN('b/2')}\n`), (f) => {
         const r = runConflictGate(f);
-        assert.equal(r.exitCode, 0, `gate should succeed; stderr: ${r.stderr}`);
-        assert.equal(r.stdout, '1', 'the conflict below the injected heading must still count');
+        assert.notEqual(r.exitCode, 0, 'an injected heading must not be accepted as conflict state');
+        assert.match(r.stderr, /BLOCKED/);
       });
     });
 
