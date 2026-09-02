@@ -619,11 +619,9 @@ UI_SPEC_FILE=$(ls "${PHASE_DIR_FOR_SPEC}"/*-UI-SPEC.md 2>/dev/null | head -1)
 UI_SPEC_PATH="${UI_SPEC_FILE}"
 ```
 
-**If plans exist AND the `--reviews` flag is set:** Before replanning from `--reviews`, scan
-`REVIEWS_PATH` for open plan-revision conflicts inside the writer-owned delimiter pair. Go
-straight to replanning with those records included, and flip the matching line to `- [x]` once
-the chosen resolution is applied. The purpose of `--reviews` is to replan with review feedback,
-not orphan blocking state.
+**If plans exist AND the `--reviews` flag is set:** Scan `REVIEWS_PATH` for open plan-revision
+conflicts. For each, obtain user choice under Conflict Return step 3 before replanning; apply the
+resolution and flip its line to `- [x]`.
 
 ## 7.5. Verify Nyquist Artifacts
 
@@ -1248,17 +1246,9 @@ ${AGENT_SKILLS_PLANNER}
 </revision_context>
 
 <instructions>
-Make targeted updates to address checker issues.
-
-`required_property` + evidence + severity BIND. `fix_hint` is ONE non-binding example route: a
-smaller or different mechanism reaching the same property addresses the issue in full — say which
-you used. Re-check locked decisions in CONTEXT.md, capability guidance (CLAUDE.md, project skills) and the
-constraints these plans already encode BEFORE editing; if a hint would contradict one, or the
-property is unreachable without breaking one, return `## REVISION_CONFLICT` with the conflict and
-the alternatives rather than applying or working around it. Full contract:
-`gsd-core/references/planner-revision.md`, which you load in revision mode.
-
-Do NOT replan from scratch unless issues are fundamental.
+Make targeted updates under `gsd-core/references/planner-revision.md`, loaded in revision mode.
+Honor binding properties and constraints; hints are examples. Do NOT replan from scratch unless
+issues are fundamental.
 Return what changed.
 </instructions>
 ```
@@ -1276,30 +1266,10 @@ Agent(
 **ORCHESTRATOR RULE — ALL RUNTIMES:** (7.99; no marker, mtimes only) `TS=$(date +%s)`; repeat `PLANNER_STALL_RESULT=$(gsd_stall_watch "$TS" "{outputFile}" "${PHASE_DIR}"'/*-PLAN.md')` while waiting/active — `stalled` -> 1) Accept as revised, to step 13, 2) Retry, 3) Stop.
 
 **If the planner returns `## REVISION_CONFLICT`:** follow the shared Conflict Return protocol in
-`gsd-core/references/revision-loop.md` (@-imported above), with this workflow's bindings:
-
-```bash
-if ! CONVERGENCE_ENABLED=$(gsd_run query config-get workflow.plan_review_convergence --raw 2>/dev/null); then
-  echo "BLOCKED: cannot read workflow.plan_review_convergence; refusing to drop persisted conflict state." >&2
-  exit 1
-fi
-REVIEWS_FILE="${REVIEWS_PATH}"
-if [ "${CONVERGENCE_ENABLED}" = "true" ] && [ ! -f "${REVIEWS_FILE}" ]; then
-  echo "BLOCKED: cannot persist plan-revision conflict because REVIEWS_PATH is not a regular file: ${REVIEWS_FILE}" >&2
-  exit 1
-fi
-```
-
-- Counter not spent: `iteration_count`, and `prev_issue_count` is left unchanged.
-- Record channel: the writer-owned delimiter pair in `$REVIEWS_FILE`, under
-  `## Plan-Revision Conflicts`, when `CONVERGENCE_ENABLED` is `true` and `$REVIEWS_FILE` is
-  non-empty. plan-phase wrote the line, so plan-phase closes it.
-- After re-spawning, re-evaluate the return here — do not fall through to the checker spawn below.
-- Escalation uses the same gate as the iteration cap below — on a repeated `required_property`,
-  and on the THIRD conflict return of this loop whatever property it names.
-- Sanitize each agent-authored field before appending: newlines and tabs to spaces, strip a
-  leading `#`/`-`/`|`/fence. One conflict is one line. The reader counts only inside the
-  first writer-owned delimiter pair immediately after the artifact title.
+`gsd-core/references/revision-loop.md` (@-imported above). Bind `REVIEWS_FILE="${REVIEWS_PATH}"`;
+set `CONVERGENCE_ENABLED` from `workflow.plan_review_convergence`; block on query failure. Record when
+`CONVERGENCE_ENABLED` is `true` and `$REVIEWS_FILE` is an existing regular file. Otherwise skip
+recording and continue to Resolve. plan-phase wrote the line, so plan-phase closes it.
 
 **Otherwise (planner returned revised plans, not `## REVISION_CONFLICT`):** spawn checker again (step 10), then increment `iteration_count`.
 

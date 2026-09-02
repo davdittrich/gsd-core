@@ -58,6 +58,12 @@ non-conflicting issue normally, and return.
 A hint that merely proposes a *bigger* mechanism than needed is not a conflict. Take the
 smaller route under Step 2 and report it as addressed.
 
+**Worked example — smaller mechanism:** If `required_property` asks for proof that target bindings
+are distinct while `fix_hint` proposes exhaustive dynamic verification, active capability guidance
+may allow static identity proof plus one distinct-behavior execution. When that smaller proof makes
+the `required_property` hold, use it and report the issue addressed; it is not a
+`REVISION_CONFLICT` merely because it differs from the hint.
+
 ### Step 3: Revision Strategy
 
 | Dimension | Strategy |
@@ -131,8 +137,8 @@ gsd_run query commit "fix($PHASE): revise plans based on checker feedback" --fil
 
 Emit this INSTEAD OF `## REVISION COMPLETE` when at least one issue could not be addressed
 without contradicting a constraint. Non-conflicting issues you already fixed stay listed under
-`### Changes Made` so the work is not lost. The orchestrator routes this to the user or to the
-configured plan-review convergence loop; it does not count as a failed revision iteration.
+`### Changes Made` so the work is not lost. The orchestrator routes this to the user and, when
+configured, also records it for the convergence gate; it does not count as a failed revision iteration.
 
 ```markdown
 ## REVISION_CONFLICT
