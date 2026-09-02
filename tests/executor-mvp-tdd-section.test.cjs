@@ -2858,6 +2858,22 @@ describe('MVP+TDD gate — the plan\'s two test-verified prohibitions (#3770)', 
   });
 });
 
+
+describe('MVP+TDD gate — parser-owned task identity (#4115)', () => {
+  test('the executor-loaded gate routes one plan path and one task index to every RED query', () => {
+    const gate = extractGateSnippet(EXECUTE_PHASE_SRC);
+
+    assert.match(gate,
+      /task\.is-behavior-adding "\$PLAN_PATH" --task-index "\$TASK_INDEX"/,
+      'behavior detection must select the same parser-owned task that the gate will authorize.');
+    assert.match(gate,
+      /task\.red-evidence-verdict --task-file "\$PLAN_PATH" --task-index "\$TASK_INDEX"/,
+      'RED evidence must be selected from the same plan/index identity, never a task fragment.');
+    assert.ok(!gate.includes('TASK_FILE'),
+      'the execution gate must not depend on TASK_FILE: no workflow producer establishes it.');
+  });
+});
+
 describe('task red-evidence-verdict — evidence file membership (#3770 D-1 revised)', () => {
   const REPO_ROOT = path.join(__dirname, '..');
 
