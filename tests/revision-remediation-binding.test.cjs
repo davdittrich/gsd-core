@@ -390,11 +390,19 @@ describe('#3771 generic revision pattern carries the same separation', () => {
 
   test('the conflict return is handled before the iteration counter and stall check', () => {
     const section = REVISION_LOOP.slice(REVISION_LOOP.indexOf('### Conflict Return'));
+    const flow = REVISION_LOOP.slice(
+      REVISION_LOOP.indexOf('### Flow'),
+      REVISION_LOOP.indexOf('### Issue Count Tracking')
+    );
     assert.ok(section.length > 0, 'the pattern must define a conflict return');
     assert.match(section, /has not failed and has not stalled/);
     assert.match(flat(section), /Do NOT increment the iteration counter and do NOT update `prev_issue_count`/);
     assert.match(flat(REVISION_LOOP), /The increment is step g, AFTER the producing agent returns/,
       'the canonical flow must place the increment on the return path, or the rule above is unreachable');
+    assert.ok(flow.indexOf('Re-spawn') < flow.indexOf('prev_issue_count = issue_count'),
+      'the stall baseline must update only after a non-conflict producer return');
+    assert.ok(section.indexOf('Re-spawn') < section.indexOf('Close'),
+      'the writer-owned record must remain open until the producer applies the resolution');
     assert.doesNotMatch(flat(REVISION_LOOP), /a\. iteration \+= 1|An iteration counted at step a is already spent/,
       'the canonical flow must not claim a revision was spent before the conflict return');
     assert.match(flat(section), /Accepting the output with the blocker still open is NOT offered here/,
@@ -507,6 +515,7 @@ describe('#3771 generic revision pattern carries the same separation', () => {
         '- [ ] REVISION_CONFLICT dependency/07 — conflicts with: D-1 | alternatives: a\n',
         '- [ ] REVISION_CONFLICT\tdependency/07 — conflicts with: D-1 | alternatives: a\n',
         ' - [ ] REVISION_CONFLICT dependency/07 — conflicts with: D-1 | alternatives: a\n',
+        '-  [ ] REVISION_CONFLICT dependency/07 — conflicts with: D-1 | alternatives: a\n',
       ]) {
         withReviews(reviewsArtifact(malformed), (f) => {
           const r = runConflictGate(f);
@@ -514,6 +523,14 @@ describe('#3771 generic revision pattern carries the same separation', () => {
           assert.equal(r.stdout, '1', 'format drift must not turn an open marker into zero conflicts');
         });
       }
+    });
+
+    test('an unrecognized reserved conflict record fails CLOSED', () => {
+      withReviews(reviewsArtifact('- [?] REVISION_CONFLICT dependency/07\n'), (f) => {
+        const r = runConflictGate(f);
+        assert.notEqual(r.exitCode, 0, 'an unknown checkbox state must not disappear');
+        assert.match(r.stderr, /BLOCKED/);
+      });
     });
 
     // The defect that started this: a section-scoped scan stops at the first `## ` it meets.
@@ -675,7 +692,7 @@ describe('#3771 every revision orchestrator routes conflicts instead of retrying
     );
     assert.match(
       handler,
-      /\*\*Otherwise \(planner returned revised plans, not `## REVISION_CONFLICT`\):\*\* spawn checker again \(step 10\), then increment `iteration_count`\./,
+      /\*\*Otherwise \(planner returned revised plans, not `## REVISION_CONFLICT`\):\*\* set `prev_issue_count = issue_count`.*close.*spawn checker again \(step 10\), then increment `iteration_count`\./,
       'the normal checker path must be disjoint from the conflict re-entry path'
     );
     assert.doesNotMatch(handler, /\nAfter planner returns ->/,
@@ -879,7 +896,29 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
         PLAN_PHASE.indexOf('**If plans exist AND the `--reviews` flag is set:**'),
       'REVIEWS_PATH must be initialized before reviews-mode scans it'
     );
-    assert.match(flat(PLAN_PHASE), /apply the resolution and flip its line to `- \[x\]`/i);
+    assert.match(flat(PLAN_PHASE), /first canonical writer-owned slot.*ignore.*reviewer output.*BLOCKED/i,
+      'resume scanning must share the bounded ownership and malformed-state rules');
+    assert.match(flat(PLAN_PHASE), /keep.*open.*replanning.*flip.*only after.*confirms.*applied/i,
+      'resume must not close a live blocker before the producer applies the chosen resolution');
+  });
+
+  test('conflict identity supports scalar, multi-plan, and phase-level checker issues', () => {
+    assert.match(flat(PLANNER_REVISION), /issue identity.*`plan`.*sorted `plans`.*phase/i);
+    assert.match(PLANNER_REVISION, /\{issue_identity\}/);
+    assert.match(REVISION_LOOP, /\{issue_identity\}/);
+  });
+
+  test('conflict-field guidance describes delimiter ownership and record forgery, not heading truncation', () => {
+    assert.doesNotMatch(flat(PLANNER_REVISION + '\n' + UI_RESEARCHER),
+      /reader scans by heading|heading truncates that scan/i);
+    assert.match(flat(PLANNER_REVISION), /writer-owned delimiter.*forg.*record/i);
+    assert.match(flat(UI_RESEARCHER), /writer-owned delimiter.*forg.*record/i);
+  });
+
+  test('cap escalation discloses open conflict count and details in both prompt variants', () => {
+    assert.match(flat(CONVERGENCE), /OPEN_CONFLICTS.*open plan-revision conflicts.*OPEN_CONFLICT_LINES/i);
+    assert.ok((CONVERGENCE.match(/\{OPEN_CONFLICT_LINES\}/g) || []).length >= 2,
+      'text and AskUserQuestion prompts must both disclose conflict details');
   });
 
   test('REVIEWS_FILE is a quoted direct path and must be a regular file', () => {
