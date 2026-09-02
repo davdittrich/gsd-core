@@ -377,8 +377,12 @@ describe('#3771 revision re-checks constraints and has a conflict path', () => {
 
 describe('#3771 generic revision pattern carries the same separation', () => {
   test('the field list matches the plan-checker schema', () => {
-    assert.match(flat(REVISION_LOOP), /`plan`, `dimension`, `severity`, `required_property`, `description`, `task`, `fix_hint`/,
-      'the generic pattern must advertise exactly the plan-checker schema');
+    assert.match(flat(REVISION_LOOP), /`plan` or `plans`, `dimension`, `severity`, `required_property`, `description`, `task`, `fix_hint`/,
+      'the generic pattern must advertise scalar and multi-plan checker schema');
+    assert.match(flat(PLAN_CHECKER), /`plan` and `plans` are mutually exclusive; omit both for phase-level issues/,
+      'the canonical schema must define scalar, multi-plan, and phase-level identity');
+    assert.match(PLAN_CHECKER, /plans: \["02", "03"\]/,
+      'the documented multi-plan schema must cover the checker examples it emits');
   });
 
   test('BLOCKERs are satisfied by property, not by literal application of the hint', () => {
@@ -525,12 +529,21 @@ describe('#3771 generic revision pattern carries the same separation', () => {
       }
     });
 
-    test('an unrecognized reserved conflict record fails CLOSED', () => {
-      withReviews(reviewsArtifact('- [?] REVISION_CONFLICT dependency/07\n'), (f) => {
-        const r = runConflictGate(f);
-        assert.notEqual(r.exitCode, 0, 'an unknown checkbox state must not disappear');
-        assert.match(r.stderr, /BLOCKED/);
-      });
+    test('every non-canonical record in the owned slot fails CLOSED', () => {
+      for (const malformed of [
+        '- [?] REVISION_CONFLICT dependency/07\n',
+        '- [ ] REVISION-CONFLICT dependency/07\n',
+        '- [x] REVISION_CONFLICT\n',
+        '- [ ] revision_conflict dependency/07\n',
+        '## Injected By Agent Text\n',
+        'corrupted conflict state\n',
+      ]) {
+        withReviews(reviewsArtifact(malformed), (f) => {
+          const r = runConflictGate(f);
+          assert.notEqual(r.exitCode, 0, `malformed state must not disappear: ${malformed}`);
+          assert.match(r.stderr, /BLOCKED/);
+        });
+      }
     });
 
     // The defect that started this: a section-scoped scan stops at the first `## ` it meets.
