@@ -444,15 +444,15 @@ describe('public CLI receipt lifecycle', () => {
 
   test('public capture preserves every post-sentinel child argv element', (t) => {
     const spellings = [
-      { leading: [], command: ['task', 'red-evidence-capture'], project: 'spaced', pick: true },
-      { leading: [], command: ['task.red-evidence-capture'], project: 'dotted', pick: false },
-      { leading: ['--json-errors'], command: ['task', 'red-evidence-capture'], project: 'leading-json-spaced', pick: false },
-      { leading: ['--json-errors'], command: ['task.red-evidence-capture'], project: 'leading-json-dotted', pick: false },
-      { leading: ['--exit-contract=v2'], command: ['task', 'red-evidence-capture'], project: 'leading-exit-spaced', pick: false },
-      { leading: ['--exit-contract=v2'], command: ['task.red-evidence-capture'], project: 'leading-exit-dotted', pick: false },
+      { leading: [], command: ['task', 'red-evidence-capture'], project: 'spaced', pick: true, expectedExit: 0 },
+      { leading: [], command: ['task.red-evidence-capture'], project: 'dotted', pick: false, expectedExit: 0 },
+      { leading: ['--json-errors'], command: ['task', 'red-evidence-capture'], project: 'leading-json-spaced', pick: false, expectedExit: 0 },
+      { leading: ['--json-errors'], command: ['task.red-evidence-capture'], project: 'leading-json-dotted', pick: false, expectedExit: 0 },
+      { leading: ['--exit-contract=v2'], command: ['task', 'red-evidence-capture'], project: 'leading-exit-spaced', pick: false, expectedExit: 80 },
+      { leading: ['--exit-contract=v2'], command: ['task.red-evidence-capture'], project: 'leading-exit-dotted', pick: false, expectedExit: 80 },
     ];
 
-    for (const { leading, command, project, pick } of spellings) {
+    for (const { leading, command, project, pick, expectedExit } of spellings) {
       const root = createTempDir(`red-receipt-${project}-`);
       t.after(() => cleanup(root));
       fs.mkdirSync(path.join(root, '.planning'));
@@ -494,7 +494,7 @@ describe('public CLI receipt lifecycle', () => {
         process.execPath, recorder, ...childArgs,
       ], { cwd: root });
 
-      assert.equal(captured.exitCode, 0, captured.stderr);
+      assert.equal(captured.exitCode, expectedExit, captured.stderr);
       assert.deepEqual(JSON.parse(fs.readFileSync(observed, 'utf8')), childArgs);
       if (pick) {
         assert.equal(captured.stdout, '1');

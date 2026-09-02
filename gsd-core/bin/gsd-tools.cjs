@@ -4554,15 +4554,18 @@ async function main() {
   // Isolate that tail before position-independent global parsing so child flags
   // remain opaque, then restore it only after command/global validation.
   let captureTail = null;
-  const captureArgs = args[0] === 'query' ? args.slice(1) : args;
+  const captureSeparator = args.indexOf('--');
+  const capturePrefix = captureSeparator === -1 ? args : args.slice(0, captureSeparator);
+  const captureDetectionArgs = capturePrefix.filter(arg =>
+    arg !== '--json-errors' && !arg.startsWith('--exit-contract='));
+  const captureArgs = captureDetectionArgs[0] === 'query'
+    ? captureDetectionArgs.slice(1)
+    : captureDetectionArgs;
   const isRedEvidenceCapture = captureArgs[0] === 'task.red-evidence-capture'
     || (captureArgs[0] === 'task' && captureArgs[1] === 'red-evidence-capture');
-  if (isRedEvidenceCapture) {
-    const separator = args.indexOf('--');
-    if (separator !== -1) {
-      captureTail = args.slice(separator);
-      args = args.slice(0, separator);
-    }
+  if (isRedEvidenceCapture && captureSeparator !== -1) {
+    captureTail = args.slice(captureSeparator);
+    args = args.slice(0, captureSeparator);
   }
 
   // These two global-flag blocks (--json-errors, --exit-contract) MUST run
