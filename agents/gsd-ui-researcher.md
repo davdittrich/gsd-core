@@ -398,8 +398,15 @@ not spend a revision iteration on it.
 | {exact issue_identity} | {smaller or different mechanism} | {yes / partially — how} | {what it changes} |
 ```
 
-**Issue identity:** use `{dimension}/{plan}` for scalar `plan`; otherwise join sorted `plans` with `+`,\nor use `{dimension}/phase` when neither exists. When `task` is present, append `/task-{task}`.\nUse the exact sanitized `issue_identity` received from the checker in both tables.\n\n**Every field is one line safe for a Markdown table cell:** reject empty input; percent-encode
-UTF-8 bytes with uppercase `%HH`, leaving only RFC 3986 unreserved bytes, otherwise text can forge rows.
+**Issue identity:** for a new conflict, derive the raw `issue_identity` from the checker fields:
+use `{dimension}/{plan}` for scalar `plan`; otherwise join sorted `plans` with `+`, or use
+`{dimension}/phase` when neither exists. When `task` is present, append `/task-{task}`.
+Encode each raw field exactly once. When acknowledging supplied encoded resolution triples, echo
+their fields byte-for-byte; do not encode again.
+
+**Every field is one line safe for a Markdown table cell:** for newly derived fields, reject empty
+input and percent-encode UTF-8 bytes with uppercase `%HH`, leaving only RFC 3986 unreserved bytes;
+otherwise text can forge rows.
 
 ## UI-SPEC Blocked
 
