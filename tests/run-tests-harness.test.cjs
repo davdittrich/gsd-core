@@ -1179,6 +1179,17 @@ test('#3916 sweep-protection traversal terminates outside the run root', () => {
 
   assert.deepEqual([...protectedPaths], []);
   assert.equal(driveRootCalls, 1, 'a self-parenting drive root must be inspected only once');
+
+  const windowsKey = (value) => value.toLowerCase();
+  const selected = 'C:\\USERS\\RUNNERADMIN\\AppData\\Local\\Temp\\gsd-test-run-probe\\suite';
+  const mixedCaseProtected = collectSweepProtectedPaths(
+    [selected],
+    'c:\\users\\runneradmin\\AppData\\Local\\Temp\\gsd-test-run-probe',
+    path.win32.dirname,
+    windowsKey,
+  );
+  assert.equal(mixedCaseProtected.has(windowsKey(selected)), true,
+    'Windows containment and protection keys must ignore path casing');
 });
 
 describe('selectShard round-robin partition (#1212)', () => {
