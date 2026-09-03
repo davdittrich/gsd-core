@@ -37,7 +37,7 @@
  * files whole, including on a checkout that produced CRLF.
  */
 
-const { describe, test } = require('node:test');
+const { before, describe, test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
@@ -53,6 +53,7 @@ const RUN_POSIX_GATE = canRunPosixGate(process.platform);
 
 const ROOT = path.join(__dirname, '..');
 
+// allow-test-rule: source-text-is-the-product (#3771)
 const read = (...parts) => fs.readFileSync(path.join(ROOT, ...parts), 'utf-8');
 
 /**
@@ -86,25 +87,47 @@ const assertPrecedes = (content, firstAnchor, secondAnchor, message) => {
   assert.ok(first < second, message);
 };
 
-const PLAN_CHECKER = read('agents', 'gsd-plan-checker.md');
-const UI_CHECKER = read('agents', 'gsd-ui-checker.md');
-const PLANNER_REVISION = read('gsd-core', 'references', 'planner-revision.md');
-const PLANNER_REVIEWS = read('gsd-core', 'references', 'planner-reviews.md');
-const REVISION_LOOP = read('gsd-core', 'references', 'revision-loop.md');
-const FEW_SHOT = read('gsd-core', 'references', 'few-shot-examples', 'plan-checker.md');
-const PLAN_PHASE = read('gsd-core', 'workflows', 'plan-phase.md');
-const QUICK_LOOP = read('gsd-core', 'workflows', 'quick', 'steps', 'plan-checker-loop.md');
-const UI_PHASE = read('gsd-core', 'workflows', 'ui-phase.md');
-const DIAGNOSE = read('gsd-core', 'workflows', 'diagnose-issues.md');
-const CONVERGENCE = read('gsd-core', 'workflows', 'plan-review-convergence.md');
-const VERIFY_WORK = read('gsd-core', 'workflows', 'verify-work.md');
-const PLANNER = read('agents', 'gsd-planner.md');
-const UI_RESEARCHER = read('agents', 'gsd-ui-researcher.md');
-const CONTRACTS = read('gsd-core', 'references', 'agent-contracts.md');
-const REVIEW = read('gsd-core', 'workflows', 'review.md');
-const COMMANDS = read('docs', 'COMMANDS.md');
-const AGENT_DOCS = read('docs', 'AGENTS.md');
-const CHANGESET = read('.changeset', 'quiet-otters-listen.md');
+let PLAN_CHECKER;
+let UI_CHECKER;
+let PLANNER_REVISION;
+let PLANNER_REVIEWS;
+let REVISION_LOOP;
+let FEW_SHOT;
+let PLAN_PHASE;
+let QUICK_LOOP;
+let UI_PHASE;
+let DIAGNOSE;
+let CONVERGENCE;
+let VERIFY_WORK;
+let PLANNER;
+let UI_RESEARCHER;
+let CONTRACTS;
+let REVIEW;
+let COMMANDS;
+let AGENT_DOCS;
+let CHANGESET;
+
+before(() => {
+  PLAN_CHECKER = read('agents', 'gsd-plan-checker.md');
+  UI_CHECKER = read('agents', 'gsd-ui-checker.md');
+  PLANNER_REVISION = read('gsd-core', 'references', 'planner-revision.md');
+  PLANNER_REVIEWS = read('gsd-core', 'references', 'planner-reviews.md');
+  REVISION_LOOP = read('gsd-core', 'references', 'revision-loop.md');
+  FEW_SHOT = read('gsd-core', 'references', 'few-shot-examples', 'plan-checker.md');
+  PLAN_PHASE = read('gsd-core', 'workflows', 'plan-phase.md');
+  QUICK_LOOP = read('gsd-core', 'workflows', 'quick', 'steps', 'plan-checker-loop.md');
+  UI_PHASE = read('gsd-core', 'workflows', 'ui-phase.md');
+  DIAGNOSE = read('gsd-core', 'workflows', 'diagnose-issues.md');
+  CONVERGENCE = read('gsd-core', 'workflows', 'plan-review-convergence.md');
+  VERIFY_WORK = read('gsd-core', 'workflows', 'verify-work.md');
+  PLANNER = read('agents', 'gsd-planner.md');
+  UI_RESEARCHER = read('agents', 'gsd-ui-researcher.md');
+  CONTRACTS = read('gsd-core', 'references', 'agent-contracts.md');
+  REVIEW = read('gsd-core', 'workflows', 'review.md');
+  COMMANDS = read('docs', 'COMMANDS.md');
+  AGENT_DOCS = read('docs', 'AGENTS.md');
+  CHANGESET = read('.changeset', 'quiet-otters-listen.md');
+});
 
 // ── Helpers ────────────────────────────────────────────────────────
 
