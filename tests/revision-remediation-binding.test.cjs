@@ -255,6 +255,8 @@ test('#3916 conflict transport has one encoder per field', () => {
       `${name} must treat returned identity/property fields as opaque encoded tokens`);
     assert.match(contract, /percent-encode.*raw chosen_resolution.*exactly once/i,
       `${name} must own encoding of the new user resolution`);
+    assert.match(contract, /nonempty.*unreserved.*uppercase `%HH`.*invalid.*do not (?:write|persist).*(?:unknown|BLOCKED)/i,
+      `${name} must reject noncanonical returned tokens before state or prompt transport`);
   }
 });
 
