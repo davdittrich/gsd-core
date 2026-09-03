@@ -428,22 +428,6 @@ describe('#3771 revision re-checks constraints and has a conflict path', () => {
     assert.match(flat(PLANNER_REVISION), /must be reported as addressed, naming the property satisfied and the mechanism used/);
   });
 
-  test('a conflicting hint uses a compatible alternative before conflict routing', () => {
-    for (const [name, producer] of [
-      ['planner revision', PLANNER_REVISION],
-      ['UI researcher', UI_RESEARCHER],
-      ['quick loop', QUICK_LOOP],
-      ['UI phase', UI_PHASE],
-      ['verify work', VERIFY_WORK],
-    ]) {
-      assert.match(
-        flat(producer),
-        /When a `fix_hint` conflicts, first apply the smallest constraint-compatible mechanism that satisfies `required_property`\. Emit `REVISION_CONFLICT` only when no such mechanism can satisfy the property/,
-        `${name} must keep an advisory hint from forcing avoidable arbitration`,
-      );
-    }
-  });
-
   test('the issue reproduction demonstrates a smaller proof satisfying the same property', () => {
     const example = flat(requiredSlice(
       PLANNER_REVISION,

@@ -444,6 +444,36 @@ if CONFLICT_SCAN=$(awk '
 ' "${REVIEWS_FILE}"); then
   OPEN_CONFLICTS=$(printf '%s\n' "$CONFLICT_SCAN" | sed -n '1p')
   OPEN_CONFLICT_LINES=$(printf '%s\n' "$CONFLICT_SCAN" | sed '1d')
+  if ! printf '%s\n' "$OPEN_CONFLICT_LINES" | node -e '
+const fs = require("fs");
+const encode = (value) => Array.from(Buffer.from(value, "utf8"), (byte) => {
+  const char = String.fromCharCode(byte);
+  return /[A-Za-z0-9._~-]/.test(char)
+    ? char
+    : "%" + byte.toString(16).toUpperCase().padStart(2, "0");
+}).join("");
+const splitOnce = (value, separator) => {
+  const at = value.indexOf(separator);
+  if (at < 0) throw new Error("missing conflict separator");
+  return [value.slice(0, at), value.slice(at + separator.length)];
+};
+try {
+  for (const line of fs.readFileSync(0, "utf8").split(/\r?\n/).filter(Boolean)) {
+    let rest = line.slice(line.indexOf("REVISION_CONFLICT ") + "REVISION_CONFLICT ".length);
+    const [identity, afterIdentity] = splitOnce(rest, " — required_property: ");
+    const [property, afterProperty] = splitOnce(afterIdentity, " | conflicts with: ");
+    const [conflict, alternatives] = splitOnce(afterProperty, " | alternatives: ");
+    for (const token of [identity, property, conflict, alternatives]) {
+      if (!token || encode(decodeURIComponent(token)) !== token) process.exit(1);
+    }
+  }
+} catch {
+  process.exit(1);
+}
+'; then
+    echo "BLOCKED: plan-revision conflict fields are not canonical UTF-8 percent encodings." >&2
+    exit 1
+  fi
 else
   awk_status=$?
   echo "BLOCKED: could not parse the writer-owned plan-revision conflict block in '${REVIEWS_FILE}' (awk exit ${awk_status}). Refusing to declare convergence on an unverifiable gate." >&2
@@ -457,10 +487,10 @@ between `<!-- gsd:plan-revision-conflicts:begin -->` and
 `<!-- gsd:plan-revision-conflicts:end -->`. Inside that slot, `/gsd:plan-phase` records each
 conflict as a `- [ ] REVISION_CONFLICT` checklist line and flips it to
 `- [x] REVISION_CONFLICT` when resolved. The reader counts only the first fixed slot at that
-position, and stops at its explicit end delimiter. The reader treats encoded fields as opaque
-delimiter-safe ASCII tokens and does not decode them; raw delimiters, whitespace, malformed `%`
-escapes, and lowercase escapes fail the convergence gate closed. The writer alone guarantees
-canonical UTF-8 percent encoding. Reviewer output is rendered after the slot, so
+position, and stops at its explicit end delimiter. The reader strictly decodes and canonically
+re-encodes every open-record field; aliases, invalid UTF-8, raw delimiters, whitespace, malformed
+`%` escapes, and lowercase escapes fail the convergence gate closed. Decoded copies are display-only;
+encoded originals remain authoritative for keys, persistence, and prompt transport. Reviewer output is rendered after the slot, so
 raw reviewer text containing either the heading or an exact conflict-shaped checklist line cannot
 forge blocking state. There is deliberately no fallback to the prior global line-shape scan: that
 shape never merged to `next`, and accepting both grammars would recreate the reviewer collision.
