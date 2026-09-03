@@ -340,6 +340,11 @@ describe('task red-evidence-verdict — consume without rerun', () => {
     const unlinkFailure = routeVerdict(unlink, 1, { fsFn });
     assert.equal(JSON.parse(unlinkFailure.stdout).verdict, 'red_commit_not_failing');
     assert.doesNotMatch(unlinkFailure.stdout + unlinkFailure.stderr, /secret unlink/);
+    assert.equal(
+      fs.readdirSync(path.join(unlink.root, '.git')).filter((name) => name.endsWith('.claim')).length,
+      1,
+      'failed consumption must leave the claimed artifact rather than report successful deletion',
+    );
 
     const deleted = createProject(t, 'tests/deleted-after-claim.test.cjs');
     routeCapture(deleted, () => result(1));
