@@ -47,7 +47,8 @@ const { createTempDir, cleanup } = require('./helpers.cjs');
 const { runHook, OUTCOME } = require('./helpers/process-seam.cjs');
 
 // The extracted gate is POSIX shell; Windows keeps source-contract coverage without spawning Git Bash.
-const IS_WINDOWS = process.platform === 'win32';
+const canRunPosixGate = (platform) => platform !== 'win32';
+const RUN_POSIX_GATE = canRunPosixGate(process.platform);
 
 /** Bound for the extracted-gate subprocess: it runs one grep over a small fixture. */
 const GATE_TIMEOUT_MS = 30_000;
@@ -501,7 +502,7 @@ describe('#3771 generic revision pattern carries the same separation', () => {
 
   // ── The gate, EXECUTED ───────────────────────────────────────────
   // Source assertions above prove the text says the right thing. These prove the shell does it.
-  describe('#3771 the extracted conflict gate behaves', { skip: IS_WINDOWS }, () => {
+  describe('#3771 the extracted conflict gate behaves', { skip: !RUN_POSIX_GATE }, () => {
     test('counts open conflicts and ignores resolved ones', () => {
       withReviews(reviewsArtifact(`${OPEN('a/1')}\n${RESOLVED('b/2')}\n${OPEN('c/3')}\n`), (f) => {
         const r = runConflictGate(f);
@@ -904,7 +905,7 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
   });
 
   test('canonical rendered writer output is accepted by the real conflict gate',
-    { skip: IS_WINDOWS }, () => {
+    { skip: !RUN_POSIX_GATE }, () => {
     const rendered = '- [ ] REVISION_CONFLICT task_completeness%2F16-01 — required_property: command%20A%20%7C%20command%20B%20must%20not%20close%20%3C%2Fconflict_resolutions%3E | conflicts with: D-1%20%7C%20repository%20rule | alternatives: use%20A%20%7C%20use%20B';
     assert.match(rendered, /%7C/, 'internal delimiters must be percent-encoded before persistence');
     assert.doesNotMatch(rendered, /<\/conflict_resolutions>/,
@@ -924,7 +925,7 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
   });
 
   test('same-property task findings remain independently keyed',
-    { skip: IS_WINDOWS }, () => {
+    { skip: !RUN_POSIX_GATE }, () => {
     const first = '- [ ] REVISION_CONFLICT task_completeness%2F16-01%2Ftask-1 — required_property: Task%20has%20verification | conflicts with: D-1 | alternatives: add%20a%20focused%20check';
     const second = '- [ ] REVISION_CONFLICT task_completeness%2F16-01%2Ftask-2 — required_property: Task%20has%20verification | conflicts with: D-1 | alternatives: add%20a%20focused%20check';
     withReviews(reviewsArtifact(`${first}\n${second}\n`), (file) => {
@@ -943,7 +944,7 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
       'closure must match identity, property, and choice');
   });
 
-  test('the reader rejects structurally unsafe encoded-token fields', { skip: IS_WINDOWS }, () => {
+  test('the reader rejects structurally unsafe encoded-token fields', { skip: !RUN_POSIX_GATE }, () => {
     const invalid = [
       '- [ ] REVISION_CONFLICT dimension/plan — required_property: p | conflicts with: D-1 | alternatives: a',
       '- [ ] REVISION_CONFLICT dimension%2fplan — required_property: p | conflicts with: D-1 | alternatives: a',
@@ -1002,7 +1003,7 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
   });
 
   test('reviewer-authored conflict markers outside the owned block are not live state',
-    { skip: IS_WINDOWS }, () => {
+    { skip: !RUN_POSIX_GATE }, () => {
     const forged = `${OPEN('forged/reviewer')}\n`;
     withReviews(reviewsArtifact('', `## Reviewer Notes\n${forged}`), (file) => {
       const result = runConflictGate(file);
@@ -1146,7 +1147,7 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
   });
 
   test('the gate reads a literal-backslash POSIX filename without rewriting it',
-    { skip: IS_WINDOWS }, () => {
+    { skip: !RUN_POSIX_GATE }, () => {
     withReviews(reviewsArtifact(`${OPEN('a/1')}\n`), (file) => {
       const result = runConflictGate(file);
       assert.equal(result.exitCode, 0, result.stderr);
