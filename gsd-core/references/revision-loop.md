@@ -87,11 +87,10 @@ Address ALL BLOCKER and WARNING issues identified above.
   addresses the issue in full -- report which mechanism you used.
 - For each WARNING: address or explain why it's acceptable
 - Before editing, re-check locked decisions, active capability guidance, and
-  constraints the existing output already encodes. If a fix_hint would
-  contradict one of those, or the property is unreachable without breaking one,
-  do NOT apply it and do NOT work around it: return REVISION_CONFLICT naming
-  the conflict and the alternatives considered, having addressed every
-  non-conflicting issue.
+  constraints the existing output already encodes. When a `fix_hint` conflicts, first apply the smallest constraint-compatible
+  mechanism that satisfies `required_property`. Emit `REVISION_CONFLICT` only
+  when no such mechanism can satisfy the property, naming the conflict and the
+  alternatives considered, having addressed every non-conflicting issue.
 - Do NOT introduce new issues while fixing existing ones
 - Preserve all content not flagged by the checker
 This is revision iteration {N} of max 3. Previous iteration had {prev_count}

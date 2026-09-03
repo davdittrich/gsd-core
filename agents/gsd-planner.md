@@ -962,9 +962,9 @@ Your orchestrator dispatches on exact marker strings in your final output. Emit 
 ```markdown
 ## REVISION_CONFLICT
 ```
-(revision mode only — a checker `fix_hint` contradicts a locked decision, capability guidance, or
-an existing plan constraint, OR the `required_property` is unreachable without breaking one of
-those. Carries the conflict and the alternatives considered, plus the
+(revision mode only — When a `fix_hint` conflicts, first apply the smallest constraint-compatible
+mechanism that satisfies `required_property`. Emit `REVISION_CONFLICT` only when no such mechanism
+can satisfy the property. Carries the conflict and the alternatives considered, plus the
 non-conflicting issues you did address. Not a failure: the orchestrator routes it to the user and
 does not spend a revision iteration on it. Shape: `gsd-core/references/planner-revision.md` Step 7b)
 

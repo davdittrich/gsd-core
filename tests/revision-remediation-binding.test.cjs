@@ -811,7 +811,7 @@ describe('#3771 every revision orchestrator routes conflicts instead of retrying
   // plan-phase @-imports revision-loop.md, so the shared Conflict Return protocol really is in
   // its loaded context; gsd-planner also loads planner-revision.md for `<revision_context>`.
   // Other orchestrators carry their rules inline. `loadedFor` models each runtime surface.
-  const importsShared = (content) => /@~\/\.claude\/gsd-core\/references\/revision-loop\.md/.test(content);
+  const importsShared = (content) => /@~\/\.claude\/gsd-core\/references\/revision-loop\.md|read the \*\*Conflict Return \(`REVISION_CONFLICT`\)\*\* section of\s+`gsd-core\/references\/revision-loop\.md`/i.test(content);
   const plannerLoadsRevision = /If `<revision_context>` provided by orchestrator: Read `gsd-core\/references\/planner-revision\.md`/.test(PLANNER);
   const loadedFor = (content) => flat(content
     + (importsShared(content) ? '\n' + REVISION_LOOP : '')
