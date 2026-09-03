@@ -112,7 +112,7 @@ so they restate the operative rules inline; this section is the authority they m
 1. **Do not spend budget.** Do NOT increment the iteration counter and do NOT update
    `prev_issue_count`. Do NOT re-spawn the checker yet — the conflict is not a revised output.
 2. **Record**, where the host has a channel an arbitration loop reads. `review.md` emits one
-   fixed writer-owned slot immediately after the artifact title, between
+   fixed writer-owned slot at the first nonblank line after the artifact title, between
    `<!-- gsd:plan-revision-conflicts:begin -->` and
    `<!-- gsd:plan-revision-conflicts:end -->`. When `workflow.plan_review_convergence` is enabled
    and the phase `*-REVIEWS.md` already exists, `plan-phase` appends one line per conflict under
@@ -123,8 +123,7 @@ so they restate the operative rules inline; this section is the authority they m
 ```
 
    A checkbox, not a table row: `- [ ] REVISION_CONFLICT` is open and `- [x] REVISION_CONFLICT`
-   is resolved. The reader counts matching open lines only inside the first fixed slot after the
-   artifact title; an identical marker in reviewer output is not state. An open line in the owned
+   is resolved. The reader counts matching open lines only inside the first nonblank slot after the artifact title; an identical marker in reviewer output is not state. An open line in the owned
    slot blocks convergence even if this run is abandoned.
    A workflow with no such channel (`quick` has no phase and no REVIEWS.md) skips this step.
 

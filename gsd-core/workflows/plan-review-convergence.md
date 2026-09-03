@@ -452,7 +452,7 @@ fi
 UNRESOLVED_COUNT=$((HIGH_COUNT + ACTIONABLE_COUNT + OPEN_CONFLICTS))
 ```
 
-`/gsd:review` emits exactly one writer-owned slot immediately after the artifact title,
+`/gsd:review` emits exactly one writer-owned slot at the first nonblank line after the artifact title,
 between `<!-- gsd:plan-revision-conflicts:begin -->` and
 `<!-- gsd:plan-revision-conflicts:end -->`. Inside that slot, `/gsd:plan-phase` records each
 conflict as a `- [ ] REVISION_CONFLICT` checklist line and flips it to

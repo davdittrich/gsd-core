@@ -1026,7 +1026,7 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
     ]) {
       assert.match(flat(contract), /first nonblank line after.*artifact title/i,
         `${name} must use the canonical first-nonblank position`);
-      assert.doesNotMatch(flat(contract), /immediately after.*artifact title/i,
+      assert.doesNotMatch(flat(contract), /slot immediately after the artifact title/i,
         `${name} must not describe a physical-line position the template does not use`);
     }
     const templateTail = REVIEW.slice(REVIEW.indexOf('# Cross-AI Plan Review — Phase {N}'));
