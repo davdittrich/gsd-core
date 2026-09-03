@@ -186,6 +186,50 @@ test('the POSIX gate execution policy excludes Windows', () => {
   assert.equal(canRunPosixGate('linux'), true);
 });
 
+test('#3916 UI conflict templates preserve the canonical issue identity', () => {
+  const conflictAt = UI_RESEARCHER.indexOf('## Revision Conflict');
+  assert.ok(conflictAt >= 0, 'UI researcher must retain its revision-conflict contract');
+  const conflict = UI_RESEARCHER.slice(conflictAt);
+  assert.match(conflict, /\| \{exact issue_identity\} \| \{property\} \|/);
+  assert.doesNotMatch(conflict, /\| Dimension \{N\} \|/);
+});
+
+test('#3916 explicit completion resets only consecutive-conflict state', () => {
+  const flowAt = REVISION_LOOP.indexOf('### Flow');
+  const trackingAt = REVISION_LOOP.indexOf('### Issue Count Tracking', flowAt);
+  assert.ok(flowAt >= 0 && trackingAt > flowAt, 'revision-loop flow anchors must exist');
+  const flow = REVISION_LOOP.slice(flowAt, trackingAt);
+  assert.match(
+    flow,
+    /If the agent returns its explicit completion marker:[\s\S]*previous_conflict_keys = \[\][\s\S]*prev_issue_count = issue_count/,
+    'a completed revision must break conflict-return consecutiveness before the next checker pass',
+  );
+  assert.doesNotMatch(
+    flow,
+    /If the agent returns its explicit completion marker:[\s\S]*conflict_return_count = 0/,
+    'the whole-loop conflict-return cap must survive a completed revision',
+  );
+});
+
+test('#3916 structural test helpers reject missing and reversed anchors', () => {
+  assert.throws(
+    () => requiredSlice('alpha beta', 'missing', 'beta', 'probe'),
+    /probe: missing start anchor/,
+  );
+  assert.throws(
+    () => requiredSlice('alpha beta', 'beta', 'alpha', 'probe'),
+    /probe: missing end anchor/,
+  );
+  assert.throws(
+    () => assertPrecedes('alpha beta', 'missing', 'beta', 'probe'),
+    /probe: missing first anchor/,
+  );
+  assert.throws(
+    () => assertPrecedes('alpha beta', 'beta', 'missing', 'probe'),
+    /probe: missing second anchor/,
+  );
+});
+
 describe('#3771 checker states the property and marks the example non-binding', () => {
   test('the issue schema carries required_property and evidence, with binding-ness declared', () => {
     const schema = PLAN_CHECKER.slice(PLAN_CHECKER.indexOf('## Issue Format'));
