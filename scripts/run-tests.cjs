@@ -960,12 +960,17 @@ function rankChunkFilesByWeight(files, weightOf, timingsTable) {
 function collectSweepProtectedPaths(selected, runTempRoot, dirname) {
   const protectedPaths = new Set();
   for (const file of selected) {
+    const ancestors = [];
     let current = file;
-    while (current && current !== runTempRoot && current.length > 1) {
-      protectedPaths.add(current);
-      current = dirname(current);
+    while (current && current !== runTempRoot) {
+      const parent = dirname(current);
+      if (parent === current) break;
+      ancestors.push(current);
+      current = parent;
     }
-    if (current === runTempRoot) protectedPaths.add(file);
+    if (current !== runTempRoot) continue;
+    protectedPaths.add(file);
+    for (const ancestor of ancestors) protectedPaths.add(ancestor);
   }
   return protectedPaths;
 }
