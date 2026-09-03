@@ -1184,7 +1184,7 @@ test('#3916 sweep-protection traversal terminates outside the run root', () => {
   const selected = 'C:\\USERS\\RUNNERADMIN\\AppData\\Local\\Temp\\gsd-test-run-probe\\suite';
   const mixedCaseProtected = collectSweepProtectedPaths(
     [selected],
-    'c:\\users\\runneradmin\\AppData\\Local\\Temp\\gsd-test-run-probe',
+    'c:/users/runneradmin/AppData/Local/Temp/gsd-test-run-probe/',
     path.win32.dirname,
     windowsKey,
   );
