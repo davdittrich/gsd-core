@@ -91,6 +91,7 @@ const assertPrecedes = (content, firstAnchor, secondAnchor, message) => {
 const PLAN_CHECKER = read('agents', 'gsd-plan-checker.md');
 const UI_CHECKER = read('agents', 'gsd-ui-checker.md');
 const PLANNER_REVISION = read('gsd-core', 'references', 'planner-revision.md');
+const PLANNER_REVIEWS = read('gsd-core', 'references', 'planner-reviews.md');
 const REVISION_LOOP = read('gsd-core', 'references', 'revision-loop.md');
 const FEW_SHOT = read('gsd-core', 'references', 'few-shot-examples', 'plan-checker.md');
 const PLAN_PHASE = read('gsd-core', 'workflows', 'plan-phase.md');
@@ -1225,8 +1226,13 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
       'resume scanning must share the bounded ownership and malformed-state rules');
     assert.match(flat(PLAN_PHASE), /(?:keep it|leave) open.*Only on `## REVISION COMPLETE`.*close only/i,
       'resume must not close a live blocker before explicit completion');
-    assert.match(PLAN_PHASE, /<conflict_resolutions>[\s\S]*\{CONFLICT_RESOLUTIONS\}[\s\S]*<\/conflict_resolutions>/,
-      'the revision prompt must inject every collected conflict resolution');
+    const initialPrompt = requiredSlice(PLAN_PHASE, 'Planner prompt:', '## 9. Handle Planner Return', 'initial reviews-mode planner prompt');
+    assert.match(initialPrompt, /<conflict_resolutions>[\s\S]*\{CONFLICT_RESOLUTIONS\}[\s\S]*<\/conflict_resolutions>/,
+      'the initial reviews-mode prompt must inject every collected conflict resolution');
+    assert.match(flat(PLANNER_REVIEWS), /conflict resolutions.*apply.*exact.*Applied Conflict Resolutions/i,
+      'reviews-mode planner must apply and acknowledge every supplied resolution');
+    assert.match(flat(PLAN_PHASE), /PLANNING COMPLETE.*nonempty.*CONFLICT_RESOLUTIONS.*exact.*Applied Conflict Resolutions.*close/i,
+      'initial completion must close only exactly acknowledged persisted choices');
     assert.match(flat(PLANNER_REVISION), /Applied Conflict Resolutions.*Issue.*Chosen resolution/i,
       'the planner completion contract must acknowledge applied choices by identity');
     assert.match(flat(PLAN_PHASE), /close only when `### Applied Conflict Resolutions` acknowledges the exact `issue_identity \| required_property: property \| chosen_resolution: chosen_resolution`/i,
