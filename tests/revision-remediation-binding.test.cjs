@@ -443,6 +443,8 @@ describe('#3771 revision re-checks constraints and has a conflict path', () => {
   test('a conflicting hint uses a compatible alternative before conflict routing', () => {
     for (const [name, producer] of [
       ['planner revision', PLANNER_REVISION],
+      ['shared revision loop', REVISION_LOOP],
+      ['planner return contract', PLANNER],
       ['UI researcher', UI_RESEARCHER],
       ['quick loop', QUICK_LOOP],
       ['UI phase', UI_PHASE],
