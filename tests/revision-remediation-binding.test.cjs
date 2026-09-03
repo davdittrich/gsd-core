@@ -1019,8 +1019,16 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
     assert.match(REVIEW, /<!-- gsd:plan-revision-conflicts:begin -->\n## Plan-Revision Conflicts\n\{preserved_plan_revision_conflict_entries\}\n<!-- gsd:plan-revision-conflicts:end -->/,
       'the first-write template must emit the canonical heading before preserved entries');
     assert.match(flat(REVIEW), /restore the captured bytes at the explicit slot below/i);
-    assert.match(flat(REVIEW), /inspect only.*first nonblank line after.*title/i,
-      'slot ownership must use the same first-nonblank position as the reader and template');
+    for (const [name, contract] of [
+      ['review writer', REVIEW],
+      ['revision loop', REVISION_LOOP],
+      ['convergence reader', CONVERGENCE],
+    ]) {
+      assert.match(flat(contract), /first nonblank line after.*artifact title/i,
+        `${name} must use the canonical first-nonblank position`);
+      assert.doesNotMatch(flat(contract), /immediately after.*artifact title/i,
+        `${name} must not describe a physical-line position the template does not use`);
+    }
     const templateTail = REVIEW.slice(REVIEW.indexOf('# Cross-AI Plan Review — Phase {N}'));
     assert.equal(templateTail.split(/\r?\n/).slice(1).find((line) => line !== ''), CONFLICTS_BEGIN,
       'the emitted template delimiter must be the first nonblank line after its title');
