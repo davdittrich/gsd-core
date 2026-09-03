@@ -18,6 +18,38 @@ const fc = require('./helpers/fast-check-setup.cjs');
 const { gitOrThrow, throwIfFailed } = require('./helpers/git-fixture.cjs');
 const { runNode } = require('./helpers/process-seam.cjs');
 
+describe('global option sentinel boundary', () => {
+  let projectDir;
+
+  beforeEach(() => {
+    projectDir = createTempProject();
+  });
+
+  afterEach(() => {
+    cleanup(projectDir);
+  });
+
+  test('post-sentinel help and version tokens remain owned by a non-capture command', () => {
+    const result = runGsdTools(
+      ['query', 'sentinel-owner-does-not-exist', '--', '--help', '--version'],
+      projectDir,
+    );
+    assert.equal(result.success, false);
+    assert.match(result.error, /Unknown command: sentinel-owner-does-not-exist/);
+    assert.doesNotMatch(result.error, /does not accept version flags/);
+  });
+
+  test('help and version remain terminal when they precede the sentinel', () => {
+    const help = runGsdTools(['--help', 'query', 'sentinel-owner-does-not-exist', '--'], projectDir);
+    assert.equal(help.success, true);
+    assert.match(help.output, /Usage: gsd-tools/);
+
+    const version = runGsdTools(['--version', 'query', 'sentinel-owner-does-not-exist', '--'], projectDir);
+    assert.equal(version.success, false);
+    assert.match(version.error, /does not accept version flags/);
+  });
+});
+
 describe('history-digest command', () => {
   let tmpDir;
 

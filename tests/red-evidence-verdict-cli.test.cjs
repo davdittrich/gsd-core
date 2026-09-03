@@ -487,16 +487,28 @@ describe('public CLI receipt lifecycle', () => {
   });
 
   test('public capture preserves every post-sentinel child argv element', (t) => {
-    const spellings = [
-      { leading: [], command: ['task', 'red-evidence-capture'], project: 'spaced', pick: true, expectedExit: 0 },
-      { leading: [], command: ['task.red-evidence-capture'], project: 'dotted', pick: false, expectedExit: 0 },
-      { leading: ['--json-errors'], command: ['task', 'red-evidence-capture'], project: 'leading-json-spaced', pick: false, expectedExit: 0 },
-      { leading: ['--json-errors'], command: ['task.red-evidence-capture'], project: 'leading-json-dotted', pick: false, expectedExit: 0 },
-      { leading: ['--exit-contract=v2'], command: ['task', 'red-evidence-capture'], project: 'leading-exit-spaced', pick: false, expectedExit: 80 },
-      { leading: ['--exit-contract=v2'], command: ['task.red-evidence-capture'], project: 'leading-exit-dotted', pick: false, expectedExit: 80 },
+    const leadingGlobals = [
+      { label: 'none', args: () => [] },
+      { label: 'cwd', args: (root) => ['--cwd', root] },
+      { label: 'project-dir', args: (root) => ['--project-dir', root], ownsProjectDir: true },
+      { label: 'ws', args: () => ['--ws', 'sentinel-test'] },
+      { label: 'raw', args: () => ['--raw'] },
+      { label: 'pick', args: () => ['--pick', 'exit_status'], pick: true },
+      { label: 'default', args: () => ['--default', 'unused'] },
+      { label: 'json-errors', args: () => ['--json-errors'] },
+      { label: 'exit-contract', args: () => ['--exit-contract=v2'], expectedExit: 80 },
     ];
+    const commandSpellings = [
+      { label: 'spaced', command: ['task', 'red-evidence-capture'] },
+      { label: 'dotted', command: ['task.red-evidence-capture'] },
+    ];
+    const matrix = leadingGlobals.flatMap((global) =>
+      commandSpellings.map((spelling) => ({ ...global, ...spelling })));
 
-    for (const { leading, command, project, pick, expectedExit } of spellings) {
+    for (const {
+      label, args: leading, ownsProjectDir = false, command, pick = false, expectedExit = 0,
+    } of matrix) {
+      const project = `${label}-${command.length === 1 ? 'dotted' : 'spaced'}`;
       const root = createTempDir(`red-receipt-${project}-`);
       t.after(() => cleanup(root));
       fs.mkdirSync(path.join(root, '.planning'));
@@ -524,27 +536,48 @@ describe('public CLI receipt lifecycle', () => {
         '--raw',
         '--pick',
         '--default',
+        '--ws',
+        'child-workstream',
         '--help',
+        '--version',
         '',
         '  spaces  ',
         '雪',
         '--',
       ];
       const publicPrefix = ['query', ...command];
-      const projection = pick ? ['--pick', 'exit_status'] : [];
+      const projectDir = ownsProjectDir ? [] : ['--project-dir', root];
       const captured = runNode([
-        GSD_TOOLS, ...leading, ...publicPrefix, '--project-dir', root,
-        '--task-file', plan, '--task-index', '1', ...projection, '--',
+        GSD_TOOLS, ...leading(root), ...publicPrefix, ...projectDir,
+        '--task-file', plan, '--task-index', '1', '--',
         process.execPath, recorder, ...childArgs,
       ], { cwd: root });
 
       assert.equal(captured.exitCode, expectedExit, captured.stderr);
+      assert.equal(fs.existsSync(observed), true, `${project}: child recorder was not invoked`);
       assert.deepEqual(JSON.parse(fs.readFileSync(observed, 'utf8')), childArgs);
       if (pick) {
         assert.equal(captured.stdout, '1');
       } else {
         assert.equal(JSON.parse(captured.stdout).exit_status, 1);
       }
+    }
+
+    for (const { flag, expectedExit } of [
+      { flag: '--help', expectedExit: 0 },
+      { flag: '--version', expectedExit: 64 },
+    ]) {
+      const root = createTempDir(`red-receipt-terminal-${flag.slice(2)}-`);
+      t.after(() => cleanup(root));
+      fs.mkdirSync(path.join(root, '.planning'));
+      const observed = path.join(root, 'terminal-child-ran');
+      const terminal = runNode([
+        GSD_TOOLS, flag, 'query', 'task', 'red-evidence-capture',
+        '--project-dir', root, '--task-file', '.planning/never.md', '--task-index', '1', '--',
+        process.execPath, '--eval', 'require("node:fs").writeFileSync(process.argv[1], "ran")', observed,
+      ], { cwd: root });
+      assert.equal(terminal.exitCode, expectedExit, terminal.stderr);
+      assert.equal(fs.existsSync(observed), false, `${flag} before the sentinel must remain terminal`);
     }
   });
 });

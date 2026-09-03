@@ -137,6 +137,30 @@ describe('#2351 run-with-timeout — argument handling (negative matrix)', () =>
     assert.equal(r.status, 0, 'wrapped --raw/--cwd/--pick must be passed through untouched');
   });
 
+  test('a leading global leaves the post-sentinel child vector opaque', (t) => {
+    const dir = createTempDir('rwt-global-sentinel-');
+    t.after(() => cleanup(dir));
+    const script = path.join(dir, 'record-argv.js');
+    const observed = path.join(dir, 'observed.json');
+    const childArgs = [
+      '--cwd', 'child-cwd', '--project-dir', 'child-project', '--ws', 'child-ws',
+      '--raw', '--pick', 'child-pick', '--default', 'child-default',
+      '--json-errors', '--exit-contract=v2', '--help', '--version', '--',
+    ];
+    fs.writeFileSync(
+      script,
+      "require('node:fs').writeFileSync(process.argv[2], JSON.stringify(process.argv.slice(3)));\n",
+    );
+
+    const r = spawnSync(NODE, [
+      GSD_TOOLS, '--raw', 'run-with-timeout', '5', '--',
+      NODE, script, observed, ...childArgs,
+    ], { cwd: dir, encoding: 'utf8', timeout: 30000 });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(fs.existsSync(observed), true, 'wrapped child must run behind a leading global');
+    assert.deepEqual(JSON.parse(fs.readFileSync(observed, 'utf8')), childArgs);
+  });
+
   test('the `query` meta-prefix form is accepted', () => {
     const r = spawnSync(NODE, [GSD_TOOLS, 'query', 'run-with-timeout', '5', '--', ...OK], {
       cwd: os.tmpdir(), encoding: 'utf8', timeout: 30000,

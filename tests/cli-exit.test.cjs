@@ -1236,6 +1236,15 @@ describe('#3912: gsd-tools dispatcher splices --exit-contract=<v> regardless of 
       `leading --json-errors must not intercept run-with-timeout's own dispatch; stderr: ${r.stderr}`,
     );
   });
+
+  test('leading raw preserves v2 projection when post-sentinel help is command-owned', () => {
+    const dir = makeFixture();
+    const r = run([
+      '--raw', '--exit-contract=v2', 'state-snapshot', `--cwd=${dir}`,
+      '--', '--help',
+    ]);
+    assert.equal(r.status, 80, `post-sentinel help must not replace DEGRADED v2 projection; stderr: ${r.stderr}`);
+  });
 });
 
 describe('#3906: terminateNow', () => {
