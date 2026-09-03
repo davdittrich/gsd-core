@@ -45,13 +45,11 @@ const path = require('path');
 // Windows-EBUSY retry budget), and every synchronous spawn goes through the typed process seam.
 const { createTempDir, cleanup } = require('./helpers.cjs');
 const { runHook, OUTCOME } = require('./helpers/process-seam.cjs');
+const { PROBE_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
 
 // The extracted gate is POSIX shell; Windows keeps source-contract coverage without spawning Git Bash.
 const canRunPosixGate = (platform) => platform !== 'win32';
 const RUN_POSIX_GATE = canRunPosixGate(process.platform);
-
-/** Bound for the extracted-gate subprocess: it runs one grep over a small fixture. */
-const GATE_TIMEOUT_MS = 30_000;
 
 const ROOT = path.join(__dirname, '..');
 
@@ -139,7 +137,7 @@ function runConflictGate(reviewsFile) {
     const result = runHook(script, [], {
       interpreter: 'bash',
       env: { ...process.env, REVIEWS_FILE: reviewsFile },
-      timeoutMs: GATE_TIMEOUT_MS,
+      timeoutMs: PROBE_TIMEOUT_MS,
     });
     assert.equal(result.outcome, OUTCOME.EXITED,
       `conflict gate must exit normally; got ${result.outcome}: ${result.stderr}`);
