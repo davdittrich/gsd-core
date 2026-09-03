@@ -457,8 +457,10 @@ between `<!-- gsd:plan-revision-conflicts:begin -->` and
 `<!-- gsd:plan-revision-conflicts:end -->`. Inside that slot, `/gsd:plan-phase` records each
 conflict as a `- [ ] REVISION_CONFLICT` checklist line and flips it to
 `- [x] REVISION_CONFLICT` when resolved. The reader counts only the first fixed slot at that
-position, accepts only canonical RFC 3986 percent-encoded fields, and stops at its explicit end
-delimiter. Any malformed field fails the convergence gate closed. Reviewer output is rendered after the slot, so
+position, and stops at its explicit end delimiter. The reader treats encoded fields as opaque
+delimiter-safe ASCII tokens and does not decode them; raw delimiters, whitespace, malformed `%`
+escapes, and lowercase escapes fail the convergence gate closed. The writer alone guarantees
+canonical UTF-8 percent encoding. Reviewer output is rendered after the slot, so
 raw reviewer text containing either the heading or an exact conflict-shaped checklist line cannot
 forge blocking state. There is deliberately no fallback to the prior global line-shape scan: that
 shape never merged to `next`, and accepting both grammars would recreate the reviewer collision.

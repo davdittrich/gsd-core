@@ -686,8 +686,8 @@ plan_coverage:        # only present if at least one graded lane is incomplete
 
 Combine all review responses into `{phase_dir}/{padded_phase}-REVIEWS.md`:
 
-Inspect only the canonical position immediately after the artifact title. If its begin delimiter
-starts there, capture only the existing conflict entry bytes after the exact `## Plan-Revision Conflicts`
+Inspect only the first nonblank line after the artifact title. If the begin delimiter starts there,
+capture only the existing conflict entry bytes after the exact `## Plan-Revision Conflicts`
 heading through the matching end delimiter as `{preserved_plan_revision_conflict_entries}`. If no begin delimiter starts at that
 canonical position, the artifact is legacy clean: use empty preserved entries regardless of identical
 delimiters later in reviewer output. A begin delimiter at the canonical position whose exact bounded
