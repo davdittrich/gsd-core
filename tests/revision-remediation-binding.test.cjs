@@ -95,6 +95,7 @@ let REVISION_LOOP;
 let FEW_SHOT;
 let PLAN_PHASE;
 let QUICK_LOOP;
+let QUICK_BATCH_LOOP;
 let UI_PHASE;
 let DIAGNOSE;
 let CONVERGENCE;
@@ -117,6 +118,7 @@ before(() => {
   FEW_SHOT = read('gsd-core', 'references', 'few-shot-examples', 'plan-checker.md');
   PLAN_PHASE = read('gsd-core', 'workflows', 'plan-phase.md');
   QUICK_LOOP = read('gsd-core', 'workflows', 'quick', 'steps', 'plan-checker-loop.md');
+  QUICK_BATCH_LOOP = read('gsd-core', 'workflows', 'quick-batch', 'steps', 'plan-checker-loop.md');
   UI_PHASE = read('gsd-core', 'workflows', 'ui-phase.md');
   DIAGNOSE = read('gsd-core', 'workflows', 'diagnose-issues.md');
   CONVERGENCE = read('gsd-core', 'workflows', 'plan-review-convergence.md');
@@ -447,6 +449,7 @@ describe('#3771 revision re-checks constraints and has a conflict path', () => {
       ['planner return contract', PLANNER],
       ['UI researcher', UI_RESEARCHER],
       ['quick loop', QUICK_LOOP],
+      ['quick-batch loop', QUICK_BATCH_LOOP],
       ['UI phase', UI_PHASE],
       ['verify work', VERIFY_WORK],
     ]) {
@@ -488,7 +491,7 @@ describe('#3771 revision re-checks constraints and has a conflict path', () => {
     for (const [name, row] of [['gsd-planner', plannerRow], ['gsd-ui-researcher', uiRow]]) {
       assert.match(row, /`## REVISION_CONFLICT`/, `${name}'s registry row must declare the marker`);
     }
-    for (const consumer of ['quick/steps/plan-checker-loop.md', 'verify-work.md']) {
+    for (const consumer of ['quick/steps/plan-checker-loop.md', 'quick-batch/steps/plan-checker-loop.md', 'verify-work.md']) {
       assert.ok(plannerRow.includes(consumer),
         `gsd-planner's Consumed by must list ${consumer} — it dispatches on the marker`);
     }
@@ -797,6 +800,7 @@ describe('#3771 generic revision pattern carries the same separation', () => {
 const ORCHESTRATORS = [
   ['plan-phase', PLAN_PHASE, 'iteration_count'],
   ['quick plan-checker-loop', QUICK_LOOP, 'iteration_count'],
+  ['quick-batch plan-checker-loop', QUICK_BATCH_LOOP, 'iteration count'],
   ['ui-phase', UI_PHASE, 'revision_count'],
   // verify-work's gap-plan revision hands <revision_context> to gsd-planner, so it inherits the
   // contract whether or not it states it. It was missed in the first pass (#3771 round-2 review).
