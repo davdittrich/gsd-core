@@ -131,14 +131,15 @@ so they restate the operative rules inline; this section is the authority they m
    Before appending, reuse the existing open line instead of appending a duplicate when its
    sanitized fields identify the same conflict. This makes persisted conflict state idempotent.
 
-   **Sanitize before writing — the conflict text is agent-authored.** Validate returned `issue_identity` and `required_property` as already encoded by the producing
-   agent; validate every other returned conflict field the same way. Each must be nonempty and
-   contain only RFC 3986 unreserved bytes or uppercase `%HH`. Treat valid values as opaque and
-   never encode them again. percent-encode the raw
+   **Sanitize before writing — the conflict text is agent-authored.** Validate every returned
+   conflict field, including `issue_identity` and `required_property`, as an already encoded
+   nonempty canonical value of valid UTF-8: only RFC 3986 unreserved bytes or uppercase `%HH`;
+   strictly decode and re-encode to prove equality. Empty or invalid input: do not write; report
+   `BLOCKED`. Decode a validated copy only for user display; keep the encoded originals for keys,
+   persistence, and transport, and never encode them again. percent-encode the raw
    chosen_resolution's UTF-8 bytes exactly once with the same codec, leaving only RFC 3986
-   unreserved bytes. One conflict is exactly one line beginning
-   `- [ ]`; never append raw agent text or a fenced block. Empty input or an invalid token: do not write;
-   report `BLOCKED`.
+   unreserved bytes. One conflict is exactly one line beginning `- [ ]`; never append raw agent
+   text or a fenced block.
 3. **Resolve** — present the conflict and its alternatives to the user and ask which to take
    (pattern: `gsd-core/references/gate-prompts.md`): adopt a named alternative / override the
    named constraint and apply the hint / amend the constraint itself. Each option resolves the
