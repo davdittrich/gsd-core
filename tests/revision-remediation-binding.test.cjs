@@ -180,12 +180,9 @@ function yamlIssueBlocks(content) {
 
 // ── Checker side: binding payload vs advisory remediation ──────────
 
-test('the POSIX gate harness never opts Windows into Git Bash execution', () => {
-  const source = fs.readFileSync(__filename, 'utf8');
-  const windowsAdapter = ['WINDOWS', 'BASH'].join('_');
-  const availabilityGuard = ['HAS', 'BASH'].join('_');
-  assert.doesNotMatch(source, new RegExp(`${windowsAdapter}|${availabilityGuard}`),
-    'POSIX gate execution stays on POSIX runners; Git Bash presence does not make Node temp paths portable');
+test('the POSIX gate execution policy excludes Windows', () => {
+  assert.equal(canRunPosixGate('win32'), false);
+  assert.equal(canRunPosixGate('linux'), true);
 });
 
 describe('#3771 checker states the property and marks the example non-binding', () => {
