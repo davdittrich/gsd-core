@@ -1083,7 +1083,7 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
       '- [ ] REVISION_CONFLICT dimension%2F%FF — required_property: p | conflicts with: D-1 | alternatives: a',
     ]) {
       withReviews(reviewsArtifact(`${record}\n`), (file) => {
-        assert.equal(runConflictGate(file).exitCode, 0, `rejected delimiter-safe opaque record: ${record}`);
+        assert.notEqual(runConflictGate(file).exitCode, 0, `accepted noncanonical UTF-8 record: ${record}`);
       });
     }
     assert.match(flat(CONVERGENCE), /reader treats encoded fields as opaque delimiter-safe ASCII tokens and does not decode them/i);
