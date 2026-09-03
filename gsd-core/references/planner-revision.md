@@ -50,10 +50,10 @@ Before editing, re-read the constraints already in force:
 - Constraints the existing plans already encode (chosen mechanism, scope boundary, must_haves)
 
 A `fix_hint` conflicts when applying it would contradict any of those. Applying it anyway is
-a contract violation, not a judgement call. When a hint conflicts — or when the property is
-unreachable without breaking a constraint — do NOT edit around it and do NOT burn a revision
-iteration on it: emit `## REVISION_CONFLICT` (Step 7) for that issue, apply every
-non-conflicting issue normally, and return.
+a contract violation, not a judgement call. When a `fix_hint` conflicts, first apply the smallest
+constraint-compatible mechanism that satisfies `required_property`. Emit `REVISION_CONFLICT` only
+when no such mechanism can satisfy the property. Do not burn a revision iteration on that conflict:
+apply every non-conflicting issue normally, then return it through Step 7.
 
 A hint that merely proposes a *bigger* mechanism than needed is not a conflict. Take the
 smaller route under Step 2 and report it as addressed.

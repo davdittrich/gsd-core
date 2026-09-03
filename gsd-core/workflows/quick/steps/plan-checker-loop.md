@@ -92,9 +92,9 @@ Make targeted updates to address checker issues.
 `required_property` + evidence + severity BIND. `fix_hint` is ONE non-binding example route: a
 smaller or different mechanism reaching the same property addresses the issue in full — say which
 you used. Re-check ${DISCUSS_MODE ? 'locked decisions in ' + quick_id + '-CONTEXT.md, ' : ''}capability guidance (CLAUDE.md, project skills) and the
-constraints these plans already encode BEFORE editing; if a hint would contradict one, or the
-property is unreachable without breaking one, return `## REVISION_CONFLICT` with the conflict and
-the alternatives rather than applying or working around it. Full contract:
+constraints these plans already encode BEFORE editing. When a `fix_hint` conflicts, first apply the
+smallest constraint-compatible mechanism that satisfies `required_property`. Emit
+`REVISION_CONFLICT` only when no such mechanism can satisfy the property. Full contract:
 `gsd-core/references/planner-revision.md`, which you load in revision mode.
 
 Do NOT replan from scratch unless issues are fundamental.

@@ -376,11 +376,10 @@ UI-SPEC complete. Checker can now validate.
 
 ## Revision Conflict
 
-Revision mode only. Emit this INSTEAD OF `## UI-SPEC COMPLETE` when a checker `fix_hint`
-contradicts a locked user answer, active capability guidance, or a constraint this UI-SPEC already
-encodes — or when the `required_property` is unreachable without breaking one. Resolve every
-non-conflicting issue first. This is not a failure: `/gsd:ui-phase` routes it to the user and does
-not spend a revision iteration on it.
+Revision mode only. When a `fix_hint` conflicts, first apply the smallest constraint-compatible
+mechanism that satisfies `required_property`. Emit `REVISION_CONFLICT` only when no such mechanism
+can satisfy the property. Resolve every non-conflicting issue first. This is not a failure:
+`/gsd:ui-phase` routes it to the user and does not spend a revision iteration on it.
 
 ```markdown
 ## REVISION_CONFLICT
