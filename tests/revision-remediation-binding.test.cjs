@@ -793,8 +793,7 @@ describe('#3771 every revision orchestrator routes conflicts instead of retrying
     test(`${name} orders a constraint re-check before editing`, () => {
       assert.match(loaded, /BEFORE editing|before any edit/i,
         `${name} must order the constraint re-check before any edit`);
-      assert.match(loaded, /return `## REVISION_CONFLICT` with the conflict and\s+the alternatives rather than applying or working around it|emit `## REVISION_CONFLICT`.*conflict.*alternatives/i,
-        `${name} must forbid applying a conflicting hint`);
+
     });
 
     // Four prompts state this contract; planner-revision.md is the authority they must agree

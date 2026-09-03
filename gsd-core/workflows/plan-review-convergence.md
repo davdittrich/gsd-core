@@ -459,7 +459,9 @@ const splitOnce = (value, separator) => {
 };
 try {
   for (const line of fs.readFileSync(0, "utf8").split(/\r?\n/).filter(Boolean)) {
-    let rest = line.slice(line.indexOf("REVISION_CONFLICT ") + "REVISION_CONFLICT ".length);
+    const marker = line.match(/REVISION_CONFLICT[ \t]+/);
+    if (!marker) throw new Error("missing conflict marker");
+    let rest = line.slice(marker.index + marker[0].length);
     const [identity, afterIdentity] = splitOnce(rest, " — required_property: ");
     const [property, afterProperty] = splitOnce(afterIdentity, " | conflicts with: ");
     const [conflict, alternatives] = splitOnce(afterProperty, " | alternatives: ");

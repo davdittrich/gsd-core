@@ -619,7 +619,7 @@ UI_SPEC_FILE=$(ls "${PHASE_DIR_FOR_SPEC}"/*-UI-SPEC.md 2>/dev/null | head -1)
 UI_SPEC_PATH="${UI_SPEC_FILE}"
 ```
 
-**With plans and `--reviews`:** parse REVIEWS_PATH's first canonical writer-owned slot; ignore reviewer output; malformed: BLOCKED. For each open record, obtain user choice per Conflict Return 3, add its exact triple to CONFLICT_RESOLUTIONS, and leave open.
+**With plans and `--reviews`:** parse REVIEWS_PATH's first canonical writer-owned slot; ignore reviewer output; malformed: BLOCKED. For each open record, obtain user choice per Conflict Return 3, add `{issue_identity} | required_property: {property} | chosen_resolution: {chosen_resolution}` to CONFLICT_RESOLUTIONS, and leave open.
 
 ## 7.5. Verify Nyquist Artifacts
 
