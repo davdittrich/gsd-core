@@ -1224,7 +1224,7 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
     );
     assert.match(flat(PLAN_PHASE), /first canonical writer-owned.*slot.*ignore reviewer output.*BLOCKED/i,
       'resume scanning must share the bounded ownership and malformed-state rules');
-    assert.match(flat(PLAN_PHASE), /(?:keep it|leave) open.*Only on `## REVISION COMPLETE`.*close only/i,
+    assert.match(flat(PLAN_PHASE), /(?:keep|leave)(?: it)? open.*`## PLANNING COMPLETE`.*close.*exact/i,
       'resume must not close a live blocker before explicit completion');
     const initialPrompt = requiredSlice(PLAN_PHASE, 'Planner prompt:', '## 9. Handle Planner Return', 'initial reviews-mode planner prompt');
     assert.match(initialPrompt, /<conflict_resolutions>[\s\S]*\{CONFLICT_RESOLUTIONS\}[\s\S]*<\/conflict_resolutions>/,

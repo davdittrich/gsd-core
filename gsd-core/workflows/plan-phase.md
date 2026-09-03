@@ -619,7 +619,7 @@ UI_SPEC_FILE=$(ls "${PHASE_DIR_FOR_SPEC}"/*-UI-SPEC.md 2>/dev/null | head -1)
 UI_SPEC_PATH="${UI_SPEC_FILE}"
 ```
 
-**With plans and `--reviews`:** at REVIEWS_PATH, parse the first canonical writer-owned slot; ignore reviewer output; malformed: BLOCKED. Each open: get user choice per Conflict Return 3; add `{issue_identity} | required_property: {property} | chosen_resolution: {chosen_resolution}` to CONFLICT_RESOLUTIONS; leave open.
+**With plans and `--reviews`:** parse REVIEWS_PATH's first canonical writer-owned slot; ignore reviewer output; malformed: BLOCKED. For each open record, obtain user choice per Conflict Return 3, add its exact triple to CONFLICT_RESOLUTIONS, and leave open.
 
 ## 7.5. Verify Nyquist Artifacts
 
@@ -777,14 +777,13 @@ ${API_SURFACE_PATH ? `
 ` : ''}
 ${AGENT_SKILLS_PLANNER}
 
+{When Mode is reviews and CONFLICT_RESOLUTIONS is nonempty:}
+<conflict_resolutions>
+{CONFLICT_RESOLUTIONS}
+</conflict_resolutions>
+
 <review_incorporation_contract>
-**If Mode is reviews:** REVIEWS.md is feedback input, not a hidden execution contract. /gsd:execute-phase primarily consumes PLAN.md plus the normal phase context, so every current actionable review finding must become visible in the relevant PLAN.md before planning can pass.
-
-For each current actionable finding in REVIEWS.md, the planner MUST either:
-- incorporate it into a PLAN.md task, `<action>`, `<acceptance_criteria>`, `<verify>`, `must_haves`, threat model, or artifact list; or
-- explicitly document a deferral/rejection rationale in the relevant PLAN.md so the executor and reviewer can see the decision.
-
-Historical findings already incorporated, explicitly deferred/rejected in PLAN.md, or marked fully resolved do not require new plan changes.
+**If Mode is reviews:** REVIEWS.md is feedback input; /gsd:execute-phase primarily consumes PLAN.md. Put every current actionable finding in the relevant PLAN.md execution fields, or record its deferral/rejection rationale there. Ignore historical findings already handled.
 </review_incorporation_contract>
 
 **Phase requirement IDs (every ID MUST appear in a plan's `requirements` field):** {phase_req_ids}
@@ -944,7 +943,7 @@ If `section_manifest` is `null` or `"chunked-planning-mode"` is in its `included
 
 ## 9. Handle Planner Return
 
-- **`## PLANNING COMPLETE`:** Display plan count. If `--skip-verify` or `plan_checker_enabled` is false (from init): skip to step 13. Otherwise: step 10.
+- **`## PLANNING COMPLETE`:** With nonempty `CONFLICT_RESOLUTIONS`, accept only an exact `### Applied Conflict Resolutions` echo; otherwise Retry or Stop without closing or advancing. Close exact matches only. Display plan count. If `--skip-verify` or checker disabled: step 13; otherwise step 10.
 - **`## PHASE SPLIT RECOMMENDED`:** The planner determined the phase exceeds the context budget for full-fidelity implementation of all source items. Handle in step 9b.
 - **`## ⚠ Source Audit: Unplanned Items Found`:** The planner's multi-source coverage audit found items from REQUIREMENTS.md, RESEARCH.md, ROADMAP goal, or CONTEXT.md decisions that are not covered by any plan. Handle in step 9c.
 - **`## CHECKPOINT REACHED`:** Present to user, get response, spawn continuation (step 12)
