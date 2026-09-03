@@ -42,7 +42,7 @@ LOOP:
              resolve it (see "Conflict Return" below) and go to step d.
              Do NOT update prev_issue_count or increment iteration -- the conflict was not a failed attempt.
      f. If the agent returns its explicit completion marker:
-        -> prev_issue_count = issue_count; iteration += 1; go to LOOP
+        -> previous_conflict_keys = []\n        -> prev_issue_count = issue_count; iteration += 1; go to LOOP
      g. Otherwise (unknown, empty, or both markers): offer Retry or Stop.
 
 The baseline update and increment are step f, only after explicit producer completion.

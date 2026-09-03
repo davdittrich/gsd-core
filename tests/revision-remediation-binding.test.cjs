@@ -64,6 +64,30 @@ const read = (...parts) => fs.readFileSync(path.join(ROOT, ...parts), 'utf-8');
  */
 const flat = (content) => content.replace(/\s+/g, ' ');
 
+
+const requiredSlice = (content, startAnchor, endAnchor, label) => {
+  const start = content.indexOf(startAnchor);
+  assert.ok(start >= 0, `${label}: missing start anchor ${startAnchor}`);
+  const end = content.indexOf(endAnchor, start + startAnchor.length);
+  assert.ok(end > start, `${label}: missing end anchor ${endAnchor}`);
+  return content.slice(start, end);
+};
+
+
+const requiredTail = (content, anchor, label) => {
+  const start = content.indexOf(anchor);
+  assert.ok(start >= 0, `${label}: missing anchor ${anchor}`);
+  return content.slice(start);
+};
+
+const assertPrecedes = (content, firstAnchor, secondAnchor, message) => {
+  const first = content.indexOf(firstAnchor);
+  const second = content.indexOf(secondAnchor);
+  assert.ok(first >= 0, `${message}: missing first anchor ${firstAnchor}`);
+  assert.ok(second >= 0, `${message}: missing second anchor ${secondAnchor}`);
+  assert.ok(first < second, message);
+};
+
 const PLAN_CHECKER = read('agents', 'gsd-plan-checker.md');
 const UI_CHECKER = read('agents', 'gsd-ui-checker.md');
 const PLANNER_REVISION = read('gsd-core', 'references', 'planner-revision.md');
@@ -232,7 +256,7 @@ test('#3916 structural test helpers reject missing and reversed anchors', () => 
 
 describe('#3771 checker states the property and marks the example non-binding', () => {
   test('the issue schema carries required_property and evidence, with binding-ness declared', () => {
-    const schema = PLAN_CHECKER.slice(PLAN_CHECKER.indexOf('## Issue Format'));
+    const schema = requiredTail(PLAN_CHECKER, '## Issue Format', 'plan-checker issue format');
     assert.match(schema, /required_property:.*#\s*BINDING/,
       'Issue Format must declare required_property as the binding invariant');
     assert.match(schema, /description:.*#\s*BINDING.*evidence/i,
@@ -362,9 +386,11 @@ describe('#3771 revision re-checks constraints and has a conflict path', () => {
   });
 
   test('the issue reproduction demonstrates a smaller proof satisfying the same property', () => {
-    const example = flat(PLANNER_REVISION.slice(
-      PLANNER_REVISION.indexOf('**Worked example — smaller mechanism:**'),
-      PLANNER_REVISION.indexOf('### Step 3: Revision Strategy')
+    const example = flat(requiredSlice(
+      PLANNER_REVISION,
+      '**Worked example — smaller mechanism:**',
+      '### Step 3: Revision Strategy',
+      'planner smaller-mechanism example',
     ));
     assert.match(example, /exhaustive dynamic verification/,
       'the example must retain the reported oversized fix_hint');
@@ -413,13 +439,11 @@ describe('#3771 revision re-checks constraints and has a conflict path', () => {
   });
 
   test('agent documentation exposes the binding split and conflict outcome', () => {
-    const plannerDocs = AGENT_DOCS.slice(
-      AGENT_DOCS.indexOf('### gsd-planner'),
-      AGENT_DOCS.indexOf('### gsd-roadmapper')
+    const plannerDocs = requiredSlice(
+      AGENT_DOCS, '### gsd-planner', '### gsd-roadmapper', 'planner agent docs',
     );
-    const uiDocs = AGENT_DOCS.slice(
-      AGENT_DOCS.indexOf('### gsd-ui-researcher'),
-      AGENT_DOCS.indexOf('### gsd-assumptions-analyzer')
+    const uiDocs = requiredSlice(
+      AGENT_DOCS, '### gsd-ui-researcher', '### gsd-assumptions-analyzer', 'UI researcher agent docs',
     );
     for (const [name, docs] of [['gsd-planner', plannerDocs], ['gsd-ui-researcher', uiDocs]]) {
       assert.match(docs, /required_property.*binding/i, `${name} docs must identify what binds`);
@@ -427,7 +451,7 @@ describe('#3771 revision re-checks constraints and has a conflict path', () => {
       assert.match(docs, /REVISION_CONFLICT/, `${name} docs must name the conflict outcome`);
     }
     for (const name of ['gsd-plan-checker', 'gsd-ui-checker']) {
-      const docs = AGENT_DOCS.slice(AGENT_DOCS.indexOf(`### ${name}`), AGENT_DOCS.indexOf('\n---', AGENT_DOCS.indexOf(`### ${name}`)));
+      const docs = requiredSlice(AGENT_DOCS, `### ${name}`, '\n---', `${name} agent docs`);
       assert.match(flat(docs), /required_property.*bind/i, `${name} docs must identify what binds`);
       assert.match(flat(docs), /fix_hint.*non-binding/i, `${name} docs must identify the advisory hint`);
     }
@@ -435,7 +459,7 @@ describe('#3771 revision re-checks constraints and has a conflict path', () => {
 
   test('conflicts return REVISION_CONFLICT carrying conflicts and alternatives', () => {
     assert.match(PLANNER_REVISION, /## REVISION_CONFLICT/);
-    const block = PLANNER_REVISION.slice(PLANNER_REVISION.indexOf('### Step 7b'));
+    const block = requiredTail(PLANNER_REVISION, '### Step 7b', 'planner conflict-return step');
     assert.match(block, /### Alternatives Considered/, 'the conflict must carry alternatives');
     assert.match(block, /Conflicts with/, 'the conflict must name what it conflicts with');
     assert.match(block, /it does not count as a failed revision iteration/,
@@ -443,7 +467,7 @@ describe('#3771 revision re-checks constraints and has a conflict path', () => {
   });
 
   test('the completion checklist accepts a smaller mechanism and rejects conflicting application', () => {
-    const checklist = PLANNER_REVISION.slice(PLANNER_REVISION.indexOf('### Step 5: Validate Changes'));
+    const checklist = requiredTail(PLANNER_REVISION, '### Step 5: Validate Changes', 'planner validation checklist');
     assert.match(checklist, /smaller\/different mechanism \(both count as addressed\)/);
     assert.match(checklist, /No `fix_hint` applied that contradicts a locked decision/);
     assert.doesNotMatch(checklist, /- \[ \] All flagged issues addressed\r?\n/,
@@ -455,9 +479,11 @@ describe('#3771 revision re-checks constraints and has a conflict path', () => {
 
 describe('#3771 generic revision pattern carries the same separation', () => {
   test('the canonical issue example obeys plan/plans exclusivity', () => {
-    const issueFormat = PLAN_CHECKER.slice(
-      PLAN_CHECKER.indexOf('<issue_structure>'),
-      PLAN_CHECKER.indexOf('## Binding Payload vs Advisory Remediation')
+    const issueFormat = requiredSlice(
+      PLAN_CHECKER,
+      '<issue_structure>',
+      '## Binding Payload vs Advisory Remediation',
+      'plan-checker issue structure',
     );
     const yaml = yamlIssueBlocks(issueFormat)[0];
     assert.ok(yaml, 'canonical issue YAML must exist');
@@ -482,20 +508,27 @@ describe('#3771 generic revision pattern carries the same separation', () => {
   });
 
   test('the conflict return is handled before the iteration counter and stall check', () => {
-    const section = REVISION_LOOP.slice(REVISION_LOOP.indexOf('### Conflict Return'));
-    const flow = REVISION_LOOP.slice(
-      REVISION_LOOP.indexOf('### Flow'),
-      REVISION_LOOP.indexOf('### Issue Count Tracking')
+    const section = requiredTail(REVISION_LOOP, '### Conflict Return', 'revision-loop conflict return');
+    const flow = requiredSlice(
+      REVISION_LOOP, '### Flow', '### Issue Count Tracking', 'revision-loop flow',
     );
     assert.ok(section.length > 0, 'the pattern must define a conflict return');
     assert.match(section, /has not failed and has not stalled/);
     assert.match(flat(section), /Do NOT increment the iteration counter and do NOT update `prev_issue_count`/);
     assert.match(flat(REVISION_LOOP), /The baseline update and increment are step f, only after explicit producer completion/,
       'the canonical flow must place both mutations on the normal return path');
-    assert.ok(flow.indexOf('Re-spawn') < flow.indexOf('prev_issue_count = issue_count'),
-      'the stall baseline must update only after explicit producer completion');
-    assert.ok(section.indexOf('Re-spawn') < section.indexOf('Close'),
-      'the writer-owned record must remain open until the producer applies the resolution');
+    assertPrecedes(
+      flow,
+      'Re-spawn',
+      'prev_issue_count = issue_count',
+      'the stall baseline must update only after explicit producer completion',
+    );
+    assertPrecedes(
+      section,
+      'Re-spawn',
+      'Close',
+      'the writer-owned record must remain open until the producer applies the resolution',
+    );
     assert.doesNotMatch(flat(REVISION_LOOP), /a\. iteration \+= 1|An iteration counted at step a is already spent/,
       'the canonical flow must not claim a revision was spent before the conflict return');
     assert.match(flat(section), /Accepting the output with the blocker still open is NOT offered here/,
@@ -1073,7 +1106,7 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
       assert.doesNotMatch(flat(contract), /slot immediately after the artifact title/i,
         `${name} must not describe a physical-line position the template does not use`);
     }
-    const templateTail = REVIEW.slice(REVIEW.indexOf('# Cross-AI Plan Review — Phase {N}'));
+    const templateTail = requiredTail(REVIEW, '# Cross-AI Plan Review — Phase {N}', 'review template');
     assert.equal(templateTail.split(/\r?\n/).slice(1).find((line) => line !== ''), CONFLICTS_BEGIN,
       'the emitted template delimiter must be the first nonblank line after its title');
     assert.match(flat(REVIEW), /no begin delimiter.*canonical position.*legacy clean.*regardless.*reviewer output/i,
@@ -1083,9 +1116,8 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
   });
 
   test('the canonical flow accepts only explicit producer completion', () => {
-    const flow = flat(REVISION_LOOP.slice(
-      REVISION_LOOP.indexOf('### Flow'),
-      REVISION_LOOP.indexOf('### Issue Count Tracking')
+    const flow = flat(requiredSlice(
+      REVISION_LOOP, '### Flow', '### Issue Count Tracking', 'revision-loop flow',
     ));
     assert.match(flow, /explicit completion marker.*prev_issue_count.*iteration/i,
       'only the producer success marker may consume revision budget');
@@ -1096,16 +1128,17 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
   });
 
   test('a stalled revision spawn cannot bypass explicit completion', () => {
-    const spawn = flat(PLAN_PHASE.slice(
-      PLAN_PHASE.indexOf('ALL RUNTIMES:'),
-      PLAN_PHASE.indexOf('If iteration_count >= 3:')
+    const spawn = flat(requiredSlice(
+      PLAN_PHASE, 'ALL RUNTIMES:', 'If iteration_count >= 3:', 'plan-phase revision spawn',
     ));
     assert.match(spawn, /on \x60stalled\x60: Retry or Stop/i);
     assert.doesNotMatch(spawn, /on \x60stalled\x60: Accept/i);
   });
 
   test('the canonical flow declares and enforces both conflict counters', () => {
-    const flow = REVISION_LOOP.slice(REVISION_LOOP.indexOf('### Flow'), REVISION_LOOP.indexOf('### Issue Count Tracking'));
+    const flow = requiredSlice(
+      REVISION_LOOP, '### Flow', '### Issue Count Tracking', 'revision-loop flow',
+    );
     assert.match(flow, /previous_conflict_keys = \[\]/);
     assert.match(flow, /current_conflict_keys = sorted unique \(issue_identity, required_property\) pairs/);
     assert.match(flow, /conflict_return_count = 0/);
@@ -1123,10 +1156,11 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
       'identical open state needs idempotency, not a second event identity');
     assert.match(flat(PLAN_PHASE), /(?:obtain|get) user choice (?:under|per) Conflict Return (?:step )?3/i,
       'persisted conflicts must pass through the same user-choice gate');
-    assert.ok(
-      PLAN_PHASE.indexOf('REVIEWS_PATH=$(_gsd_field "$INIT" reviews_path)') <
-        PLAN_PHASE.indexOf('**With plans and `--reviews`:**'),
-      'REVIEWS_PATH must be initialized before reviews-mode scans it'
+    assertPrecedes(
+      PLAN_PHASE,
+      'REVIEWS_PATH=$(_gsd_field "$INIT" reviews_path)',
+      '**With plans and `--reviews`:**',
+      'REVIEWS_PATH must be initialized before reviews-mode scans it',
     );
     assert.match(flat(PLAN_PHASE), /first canonical writer-owned.*slot.*ignore reviewer output.*BLOCKED/i,
       'resume scanning must share the bounded ownership and malformed-state rules');
@@ -1173,8 +1207,12 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
   test('stall accounting includes every open conflict after parsing the owned slot', () => {
     const total = 'UNRESOLVED_COUNT=$((HIGH_COUNT + ACTIONABLE_COUNT + OPEN_CONFLICTS))';
     assert.match(CONVERGENCE, /UNRESOLVED_COUNT=\$\(\(HIGH_COUNT \+ ACTIONABLE_COUNT \+ OPEN_CONFLICTS\)\)/);
-    assert.ok(CONVERGENCE.indexOf('OPEN_CONFLICTS=') < CONVERGENCE.indexOf(total),
-      'open conflicts must be known before the stall baseline is calculated');
+    assertPrecedes(
+      CONVERGENCE,
+      'OPEN_CONFLICTS=',
+      total,
+      'open conflicts must be known before the stall baseline is calculated',
+    );
   });
 
   test('REVIEWS_FILE is a quoted direct path and must be a regular file', () => {
@@ -1216,7 +1254,7 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
   });
 
   test('the command docs include open conflicts in the exit condition', () => {
-    const section = COMMANDS.slice(COMMANDS.indexOf('### `/gsd-plan-review-convergence`'));
+    const section = requiredTail(COMMANDS, '### `/gsd-plan-review-convergence`', 'convergence command docs');
     assert.match(flat(section), /open `## Plan-Revision Conflicts` entries.*must also be zero/i);
   });
 

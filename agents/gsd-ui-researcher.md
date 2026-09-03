@@ -389,16 +389,16 @@ not spend a revision iteration on it.
 
 | Issue | required_property | Conflicts with | Why the hint cannot be applied |
 |-------|-------------------|----------------|-------------------------------|
-| Dimension {N} | {property} | {locked answer / CLAUDE.md rule / spec constraint} | {one line} |
+| {exact issue_identity} | {property} | {locked answer / CLAUDE.md rule / spec constraint} | {one line} |
 
 ### Alternatives Considered
 
 | Issue | Alternative | Satisfies required_property? | Cost of adopting |
 |-------|-------------|------------------------------|------------------|
-| Dimension {N} | {smaller or different mechanism} | {yes / partially — how} | {what it changes} |
+| {exact issue_identity} | {smaller or different mechanism} | {yes / partially — how} | {what it changes} |
 ```
 
-**Every field is one line safe for a Markdown table cell:** reject empty input; percent-encode
+**Issue identity:** use `{dimension}/{plan}` for scalar `plan`; otherwise join sorted `plans` with `+`,\nor use `{dimension}/phase` when neither exists. When `task` is present, append `/task-{task}`.\nUse the exact sanitized `issue_identity` received from the checker in both tables.\n\n**Every field is one line safe for a Markdown table cell:** reject empty input; percent-encode
 UTF-8 bytes with uppercase `%HH`, leaving only RFC 3986 unreserved bytes, otherwise text can forge rows.
 
 ## UI-SPEC Blocked
