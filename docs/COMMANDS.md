@@ -806,8 +806,9 @@ closed.
 
 Missing or duplicate required security flags produce a typed fail-closed verdict at exit `0` before
 any receipt claim. A present, valid-shape `--red-sha` is evaluated after the receipt is claimed and
-read; Git/object failures consume that claimed receipt and produce a typed fail-closed verdict at
-exit `0`. Successfully claimed receipts are consumed on every terminal verdict path. Strict
+read; Git/object failures attempt to consume that claimed receipt and produce a typed fail-closed
+verdict at exit `0`. After a successful claim, consumption is attempted on every terminal verdict path;
+inability to consume remains typed fail-closed and can leave the claimed artifact. Strict
 command-shape parser rejection exits non-zero before typed verdict production.
 
 | Exit | Meaning |
