@@ -469,11 +469,13 @@ describe('public CLI receipt lifecycle', () => {
     const missing = runNode(common.filter(arg => arg !== '--trailer' && arg !== trailer(target)), { cwd: root });
     assert.equal(missing.exitCode, 0, missing.stderr);
     assert.equal(JSON.parse(missing.stdout).verdict, 'red_commit_not_failing');
+    assert.match(JSON.parse(missing.stdout).reason, /flags must occur exactly once/);
     assert.equal(receiptFiles(root).length, 1);
 
     const duplicate = runNode([...common, '--red-sha', 'f'.repeat(40)], { cwd: root });
     assert.equal(duplicate.exitCode, 0, duplicate.stderr);
     assert.equal(JSON.parse(duplicate.stdout).verdict, 'red_commit_not_failing');
+    assert.match(JSON.parse(duplicate.stdout).reason, /flags must occur exactly once/);
     assert.equal(receiptFiles(root).length, 1);
 
     const malformed = runNode([...common, '--unknown-verdict-flag'], { cwd: root });
@@ -483,6 +485,7 @@ describe('public CLI receipt lifecycle', () => {
     const invalidObject = runNode(common, { cwd: root });
     assert.equal(invalidObject.exitCode, 0, invalidObject.stderr);
     assert.equal(JSON.parse(invalidObject.stdout).verdict, 'red_commit_not_failing');
+    assert.match(JSON.parse(invalidObject.stdout).reason, /Git metadata validation failed closed/);
     assert.equal(receiptFiles(root).length, 0);
   });
 

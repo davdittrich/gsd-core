@@ -12,9 +12,13 @@ function read(relativePath) {
 }
 
 test('stale RED membership and verdict exit contracts are rejected and their guard is CI-selected', () => {
+  // allow-test-rule: docs-parity (#3770) — these shipped docs must mirror the executable verdict contract.
   const commands = read('docs/COMMANDS.md');
+  // allow-test-rule: docs-parity (#3770) — this inventory row must mirror the executable verdict contract.
   const inventory = read('docs/INVENTORY.md');
+  // allow-test-rule: source-text-is-the-product (#3770) — the agent Markdown is the deployed instruction.
   const executor = read('agents/gsd-executor.md');
+  // allow-test-rule: source-text-is-the-product (#3770) — the reference Markdown is the deployed instruction.
   const tdd = read('gsd-core/references/tdd.md');
 
   assert.doesNotMatch(commands, /commit changed the declared target path/);
@@ -25,7 +29,7 @@ test('stale RED membership and verdict exit contracts are rejected and their gua
   assert.match(commands, /valid-shape `--red-sha`.*after\s+the receipt is claimed\s+and\s+read.*consume.*exit `0`/s);
   assert.match(commands, /Successfully claimed receipts are consumed on every terminal verdict path/);
   assert.match(commands, /Strict\s+command-shape parser rejection exits non-zero/);
-  assert.doesNotMatch(inventory, /consumes the capture receipt terminally on every verdict path/i);
+  assert.doesNotMatch(inventory, /consumes the capture receipt terminally/i);
   assert.match(inventory, /Security-flag cardinality.*failures.*before claim.*valid-shape.*after claim\/read.*claimed receipts.*consumed.*terminal/s);
 
   assert.doesNotMatch(inventory, /`--changed-files`/);
