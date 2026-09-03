@@ -52,6 +52,9 @@ const canRunPosixGate = (platform) => platform !== 'win32';
 const RUN_POSIX_GATE = canRunPosixGate(process.platform);
 
 const ROOT = path.join(__dirname, '..');
+const PRE_PHASE6 = { 'plan-phase.md': 94519 };
+const LARGE_CAP = 49152;
+const REQUIRED_HEADROOM_BYTES = 128;
 
 // allow-test-rule: source-text-is-the-product (#3771)
 const read = (...parts) => fs.readFileSync(path.join(ROOT, ...parts), 'utf-8');
@@ -894,10 +897,12 @@ describe('#3771 the UI-spec and gap-plan hints are marked non-binding too', () =
     assert.match(flat(UI_CHECKER), /reaches the same property by a smaller or different mechanism has resolved the issue in full/);
     const uiBlocks = yamlIssueBlocks(UI_CHECKER);
     assert.ok(uiBlocks.length >= 6, `expected the UI dimension examples, got ${uiBlocks.length}`);
-    assert.doesNotMatch(UI_CHECKER, /exact fix required/,
-      'the UI verdict must not order an exact fix — that is the prescription this fix removes');
+    assert.doesNotMatch(UI_CHECKER, /exact fix required|exact fix descriptions|Specific fixes:/,
+      'the UI verdict and success criteria must not order an exact fix');
     assert.match(flat(UI_CHECKER), /- \*\*Dimension \{N\} — \{name\}:\*\* \{required_property\} Evidence: \{description\} Example fix \(non-binding/,
       'the UI ISSUES FOUND rendering must name the property, its evidence, and a non-binding example');
+    assert.match(flat(UI_CHECKER), /BLOCK verdicts state the `required_property`, its evidence, and a non-binding example fix/,
+      'the completion gate must enforce the binding property and advisory example split');
     for (const block of uiBlocks) {
       assert.match(block, /(^|\r?\n)[>\s]*required_property:/,
         `UI checker issue example lacks required_property:\n${block.trim().slice(0, 200)}`);
@@ -908,6 +913,17 @@ describe('#3771 the UI-spec and gap-plan hints are marked non-binding too', () =
     assert.doesNotMatch(UI_PHASE, /fix ONLY the listed issues/,
       '"fix ONLY the listed issues" pairs with a prescriptive hint; it must read as resolve');
     assert.match(UI_PHASE, /resolve ONLY the listed issues/);
+  });
+
+  test('legacy summaries skip commit measurement without a base revision', () => {
+    const reconciliation = requiredSlice(
+      VERIFY_WORK, '**Commit-claim reconciliation (#3968).**', '</step>',
+      'verify-work commit-claim reconciliation',
+    );
+    assert.match(reconciliation, /if \[ -n "\$BASE" \]; then[\s\S]*ACTUAL=\$\(git rev-list --count "\$\{BASE\}"\.\.HEAD\)[\s\S]*else[\s\S]*ACTUAL=absent[\s\S]*fi/,
+      'git rev-list must run only when plan_head_before supplied a base');
+    assert.match(flat(reconciliation), /plan_head_before: absent.*WARNING.*do not invoke `git rev-list`/i,
+      'legacy summaries must warn and continue without an invalid revision range');
   });
 
   test('the gap-plan hint is bound to the root cause, not to the suggested direction', () => {
@@ -967,7 +983,11 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
   });
 
   test('the reader source contract rejects unsafe or noncanonical encoded fields', () => {
-    assert.match(flat(CONVERGENCE), /reader strictly decodes and canonically re-encodes every open-record field.*invalid UTF-8.*fail.*closed/i);
+    assert.match(flat(CONVERGENCE), /reader strictly decodes and canonically re-encodes every open and resolved record field.*invalid UTF-8.*fail.*closed/i);
+    assert.match(CONVERGENCE, /in_owned && \$0 ~ resolved_record \{ records\[\+\+record_count\] = \$0; next \}/,
+      'resolved rows must enter the same canonical-validation stream before being skipped');
+    assert.match(CONVERGENCE, /CONFLICT_RECORD_LINES=/,
+      'the validator must receive both open and resolved records');
   });
 
   test('writer contract requires canonical percent encoding and rejects empty fields', () => {
@@ -1058,6 +1078,18 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
     assert.match(flow, /conflict_return_count \+= 1/);
     assert.match(flow, /If conflict_return_count >= 3/,
       'alternating conflict sets must still hit the total-conflict cap');
+    assertPrecedes(
+      flow,
+      'current_conflict_keys = sorted unique (issue_identity, required_property) pairs',
+      'If conflict_return_count >= 3',
+      'the third conflict must be derived before cap escalation',
+    );
+    assertPrecedes(
+      flow,
+      'validate, sanitize, and idempotently persist the returned conflict',
+      'If conflict_return_count >= 3',
+      'the third conflict must be persisted before cap escalation',
+    );
     assert.match(flow, /If current_conflict_keys intersects previous_conflict_keys/,
       'a repeated member of a plural conflict return must stall');
     assert.match(flow, /Else: previous_conflict_keys = current_conflict_keys[\s\S]*resolve it/,
@@ -1077,6 +1109,8 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
     );
     assert.match(flat(PLAN_PHASE), /first canonical writer-owned.*slot.*ignore reviewer output.*BLOCKED/i,
       'resume scanning must share the bounded ownership and malformed-state rules');
+    assert.match(flat(PLAN_PHASE), /preserve.*encoded `issue_identity`.*`required_property`.*percent-encode.*raw.*`chosen_resolution` exactly once.*CONFLICT_RESOLUTIONS/i,
+      'reviews-mode collection must preserve canonical keys and encode only the raw choice');
     assert.match(flat(PLAN_PHASE), /(?:keep|leave)(?: it)? open.*`## PLANNING COMPLETE`.*close.*exact/i,
       'resume must not close a live blocker before explicit completion');
     const initialPrompt = requiredSlice(PLAN_PHASE, 'Planner prompt:', '## 9. Handle Planner Return', 'initial reviews-mode planner prompt');
@@ -1100,8 +1134,14 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
   });
 
   test('prompt files retain material headroom below their hard caps', () => {
-    assert.ok(Buffer.byteLength(PLAN_PHASE) <= 94391, 'plan-phase needs at least 128 bytes headroom');
-    assert.ok(Buffer.byteLength(PLAN_CHECKER) <= 49024, 'plan-checker needs at least 128 bytes headroom');
+    assert.ok(
+      Buffer.byteLength(PLAN_PHASE) <= PRE_PHASE6['plan-phase.md'] - REQUIRED_HEADROOM_BYTES,
+      `plan-phase needs at least ${REQUIRED_HEADROOM_BYTES} bytes headroom`,
+    );
+    assert.ok(
+      Buffer.byteLength(PLAN_CHECKER) <= LARGE_CAP - REQUIRED_HEADROOM_BYTES,
+      `plan-checker needs at least ${REQUIRED_HEADROOM_BYTES} bytes headroom`,
+    );
   });
 
   test('conflict-field guidance describes delimiter ownership and record forgery, not heading truncation', () => {
