@@ -21,6 +21,7 @@ test('stale RED membership and verdict exit contracts are rejected and their gua
   // allow-test-rule: source-text-is-the-product (#3770) — the reference Markdown is the deployed instruction.
   const tdd = read('gsd-core/references/tdd.md');
 
+  assert.doesNotMatch(commands, /atomically claims\s+and deletes the receipt/i);
   assert.doesNotMatch(commands, /commit changed the declared target path/);
   assert.match(commands, /`--red-sha`.*sole parent.*NUL-delimited changed paths/s);
   assert.match(commands, /selected `<red_contract>`'s `target_test`/);
