@@ -68,8 +68,13 @@ describe('quick-batch: /gsd:quick command + workflow stay byte-identical (row 48
       'gsd-core/workflows/quick.md must stay untouched by the #3676 quick-batch phase',
     );
     // The step fragments under quick/steps/ are likewise untouched — quick-batch
-    // has its own, separate quick-batch/steps/ tree.
-    const touchedQuickSteps = changed.filter((p) => p.startsWith('gsd-core/workflows/quick/steps/'));
+    // has its own, separate quick-batch/steps/ tree. The plan-checker loop is also
+    // governed by the cross-orchestrator revision contract (#3771), so changes to
+    // that one shared contract are not evidence of quick-batch coupling.
+    const touchedQuickSteps = changed.filter((p) =>
+      p.startsWith('gsd-core/workflows/quick/steps/') &&
+      p !== 'gsd-core/workflows/quick/steps/plan-checker-loop.md'
+    );
     assert.deepEqual(touchedQuickSteps, [], `unexpected changes under gsd-core/workflows/quick/steps/: ${touchedQuickSteps.join(', ')}`);
   });
 });
