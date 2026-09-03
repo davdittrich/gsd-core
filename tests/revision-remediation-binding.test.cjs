@@ -235,6 +235,29 @@ test('#3916 conflict prompts use physical lines and single-pass identity encodin
   );
 });
 
+test('#3916 conflict transport has one encoder per field', () => {
+  for (const [name, producer] of [
+    ['planner revision', PLANNER_REVISION],
+    ['UI researcher', UI_RESEARCHER],
+  ]) {
+    assert.match(flat(producer), /encode each raw field exactly once|percent-encode UTF-8 bytes.*Echo the exact encoded prompt values/i,
+      `${name} must own initial identity/property encoding`);
+  }
+
+  for (const [name, consumer] of [
+    ['shared revision loop', REVISION_LOOP],
+    ['quick', QUICK_LOOP],
+    ['UI phase', UI_PHASE],
+    ['verify work', VERIFY_WORK],
+  ]) {
+    const contract = flat(consumer);
+    assert.match(contract, /validate.*returned.*issue_identity.*required_property.*already encoded.*never encode.*again/i,
+      `${name} must treat returned identity/property fields as opaque encoded tokens`);
+    assert.match(contract, /percent-encode.*raw chosen_resolution.*exactly once/i,
+      `${name} must own encoding of the new user resolution`);
+  }
+});
+
 test('#3916 explicit completion resets only consecutive-conflict state', () => {
   const flowAt = REVISION_LOOP.indexOf('### Flow');
   const trackingAt = REVISION_LOOP.indexOf('### Issue Count Tracking', flowAt);
