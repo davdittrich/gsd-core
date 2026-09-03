@@ -186,6 +186,14 @@ function yamlIssueBlocks(content) {
 
 // ── Checker side: binding payload vs advisory remediation ──────────
 
+test('the POSIX gate harness never opts Windows into Git Bash execution', () => {
+  const source = fs.readFileSync(__filename, 'utf8');
+  const windowsAdapter = ['WINDOWS', 'BASH'].join('_');
+  const availabilityGuard = ['HAS', 'BASH'].join('_');
+  assert.doesNotMatch(source, new RegExp(`${windowsAdapter}|${availabilityGuard}`),
+    'POSIX gate execution stays on POSIX runners; Git Bash presence does not make Node temp paths portable');
+});
+
 describe('#3771 checker states the property and marks the example non-binding', () => {
   test('the issue schema carries required_property and evidence, with binding-ness declared', () => {
     const schema = PLAN_CHECKER.slice(PLAN_CHECKER.indexOf('## Issue Format'));
