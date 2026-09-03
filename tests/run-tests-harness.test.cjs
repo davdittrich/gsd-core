@@ -1159,7 +1159,7 @@ test('hangs forever', () => new Promise(() => {}));
 // completeness / disjointness / balance / determinism, including a fast-check
 // property test (RULESET.TESTS.property-based-testing: partition is a
 // bijective transformation contract).
-const { collectSweepProtectedPaths, parseShardArg, selectShard } = require('../scripts/run-tests.cjs');
+const { collectSweepProtectedPaths, parseShardArg, selectShard, sweepRunTempRoot } = require('../scripts/run-tests.cjs');
 
 test('#3916 sweep-protection traversal terminates outside the run root', () => {
   let driveRootCalls = 0;
@@ -1190,6 +1190,20 @@ test('#3916 sweep-protection traversal terminates outside the run root', () => {
   );
   assert.equal(mixedCaseProtected.has(windowsKey(selected)), true,
     'Windows containment and protection keys must ignore path casing');
+
+  const sweepRoot = createTempDir('gsd-3916-case-');
+  try {
+    const kept = path.join(sweepRoot, 'KEEP');
+    const removed = path.join(sweepRoot, 'remove');
+    fs.mkdirSync(kept);
+    fs.mkdirSync(removed);
+
+    assert.equal(sweepRunTempRoot(sweepRoot, new Set([windowsKey(kept)]), windowsKey), 1);
+    assert.equal(fs.existsSync(kept), true, 'case-folded protection key must preserve the entry');
+    assert.equal(fs.existsSync(removed), false, 'unprotected sibling must still be swept');
+  } finally {
+    cleanup(sweepRoot);
+  }
 });
 
 describe('selectShard round-robin partition (#1212)', () => {
