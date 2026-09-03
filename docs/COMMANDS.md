@@ -783,9 +783,10 @@ node gsd-tools.cjs query task red-evidence-capture \
 ### `task red-evidence-verdict --task-file <plan-path> --task-index <one-based-index> --red-sha <object-id> --trailer <json> [--raw]`
 
 Consumes the matching capture receipt and judges the RED commit's `red-evidence:` trailer
-against the selected task's `<red_contract>`. Verdict is a mutation because it atomically claims
-and deletes the receipt; a successful receipt cannot be replayed. The command never executes the
-recorded command text or any test.
+against the selected task's `<red_contract>`. Verdict atomically claims the receipt before
+evaluation, then attempts deletion on every post-claim terminal path. If deletion fails, the verdict
+remains typed fail-closed and the claimed artifact can remain; it cannot be replayed through the
+receipt path. The command never executes the recorded command text or any test.
 
 | Argument | Required | Description |
 |----------|----------|-------------|
