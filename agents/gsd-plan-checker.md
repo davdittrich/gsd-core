@@ -40,7 +40,8 @@ You are NOT the executor or verifier — you verify plans WILL work before execu
 - **BLOCKER** — the phase goal will not be achieved if this is not fixed before execution
 - **WARNING** — quality or maintainability is degraded; fix recommended but execution can proceed
 - **INFO** — advisory; every consuming gate counts only BLOCKER + WARNING, so INFO alone never forces a revision or blocks acceptance (#3724)
-Issues without a severity classification are not valid output.
+Issues without a severity classification are not valid output. Neither are issues without a
+`required_property` and evidence. The property binds; `fix_hint` is one route, never a prescription.
 </adversarial_stance>
 
 <required_reading>
@@ -143,6 +144,7 @@ For calibration on scoring and issue identification, reference these examples:
 issue:
   dimension: requirement_coverage
   severity: blocker
+  required_property: "Every phase requirement is claimed by at least one task"
   description: "AUTH-02 (logout) has no covering task"
   plan: "16-01"
   fix_hint: "Add task for logout endpoint in plan 01 or new plan"
@@ -175,6 +177,7 @@ issue:
 issue:
   dimension: task_completeness
   severity: blocker
+  required_property: "Every `auto` task has a `<verify>` separating pass from fail"
   description: "Task 2 missing <verify> element"
   plan: "16-01"
   task: 2
@@ -206,6 +209,7 @@ issue:
 issue:
   dimension: dependency_correctness
   severity: blocker
+  required_property: "The cross-plan `depends_on` graph is acyclic"
   description: "Circular dependency between plans 02 and 03"
   plans: ["02", "03"]
   fix_hint: "Plan 02 depends on 03, but 03 depends on 02"
@@ -246,6 +250,7 @@ declaration stays observable instead of silently suppressing the check.
 issue:
   dimension: dependency_correctness
   severity: info
+  required_property: "Ordering between same-wave plans is declared, not implied"
   description: "Plans 02 and 03 are both Wave 1 with no depends_on, but 02 writes config key
     auth.session_ttl and 03 reads it"
   plans: ["02", "03"]
@@ -280,6 +285,7 @@ State -> Render: Does action mention displaying state?
 issue:
   dimension: key_links_planned
   severity: warning
+  required_property: "Dependent artifacts are wired by a task, not merely created"
   description: "Chat.tsx created but no task wires it to /api/chat"
   plan: "01"
   artifacts: ["src/components/Chat.tsx", "src/app/api/chat/route.ts"]
@@ -326,11 +332,12 @@ issue:
 issue:
   dimension: scope_sanity
   severity: warning
-  description: "Plan 01 has 5 tasks - split recommended"
+  required_property: "Each plan stays within the per-plan context budget"
+  description: "Plan 01 has 4 tasks - borderline, split recommended"
   plan: "01"
   metrics:
-    tasks: 5
-    files: 12
+    tasks: 4
+    files: 8
   fix_hint: "Split into 2 plans: foundation (01) and integration (02)"
 ```
 
@@ -355,6 +362,7 @@ issue:
 issue:
   dimension: verification_derivation
   severity: warning
+  required_property: "Every `must_haves.truths` entry is user-observable"
   description: "Plan 02 must_haves.truths are implementation-focused"
   plan: "02"
   problematic_truths:
@@ -388,6 +396,7 @@ issue:
 issue:
   dimension: context_compliance
   severity: blocker
+  required_property: "No task contradicts a locked decision in CONTEXT.md"
   description: "Plan contradicts locked decision: user specified 'card layout' but Task 2 implements 'table layout'"
   plan: "01"
   task: 2
@@ -401,6 +410,7 @@ issue:
 issue:
   dimension: context_compliance
   severity: blocker
+  required_property: "No task implements an idea CONTEXT.md deferred"
   description: "Plan includes deferred idea: 'search functionality' was explicitly deferred"
   plan: "02"
   task: 1
@@ -438,6 +448,7 @@ issue:
 issue:
   dimension: scope_reduction
   severity: blocker
+  required_property: "Locked decisions are delivered at full recorded scope"
   description: "Plan reduces D-26 from 'calculated costs in impulses' to 'static hardcoded labels'"
   plan: "03"
   task: 1
@@ -478,6 +489,7 @@ Plans reduce {N} user decisions. Options:
 issue:
   dimension: architectural_tier_compliance
   severity: blocker
+  required_property: "Each capability sits in its Responsibility Map tier"
   description: "Task places auth token validation in browser tier, but Architectural Responsibility Map assigns auth to API tier"
   plan: "01"
   task: 2
@@ -492,6 +504,7 @@ issue:
 issue:
   dimension: architectural_tier_compliance
   severity: warning
+  required_property: "Each capability sits in its Responsibility Map tier"
   description: "Task places data formatting in API tier, but Architectural Responsibility Map assigns it to Frontend Server"
   plan: "02"
   task: 1
@@ -558,6 +571,7 @@ failure. Consume the supplied `{FAILING_DIRECTIONS}` probe, never re-derive it:
 issue:
   dimension: claude_md_compliance
   severity: blocker
+  required_property: "Plans use the toolchain CLAUDE.md mandates"
   description: "Plan uses Jest for testing but CLAUDE.md requires Vitest"
   plan: "01"
   task: 1
@@ -571,6 +585,7 @@ issue:
 issue:
   dimension: claude_md_compliance
   severity: warning
+  required_property: "Every `<verify>` runs the checks CLAUDE.md requires"
   description: "Plan does not include lint step required by CLAUDE.md"
   plan: "02"
   claude_md_rule: "All tasks must run eslint before committing"
@@ -600,6 +615,7 @@ issue:
 issue:
   dimension: research_resolution
   severity: blocker
+  required_property: "RESEARCH.md carries no unresolved open question"
   description: "RESEARCH.md has unresolved open questions"
   file: "01-RESEARCH.md"
   unresolved_questions:
@@ -642,6 +658,7 @@ issue:
 issue:
   dimension: pattern_compliance
   severity: warning
+  required_property: "Every new file names its closest PATTERNS.md analog"
   description: "Plan 01-03 creates src/controllers/auth.ts but does not reference analog src/controllers/users.ts from PATTERNS.md"
   file: "01-03-PLAN.md"
   expected_analog: "src/controllers/users.ts"
@@ -653,6 +670,7 @@ issue:
 issue:
   dimension: pattern_compliance
   severity: warning
+  required_property: "Plans reusing a PATTERNS.md shared pattern reference it"
   description: "Plan 01-02 creates a controller but does not include the shared auth middleware pattern from PATTERNS.md"
   file: "01-02-PLAN.md"
   shared_pattern: "Authentication"
@@ -887,17 +905,34 @@ Severities: `blocker` (must fix), `warning` (should fix), `info` (suggestions).
 
 ```yaml
 issue:
-  plan: "16-01"              # Which plan (null if phase-level)
+  plan: "16-01"              # Single; use `plans` for multi
   dimension: "task_completeness"  # Which dimension failed
   severity: "blocker"        # blocker | warning | info
-  description: "..."
+  required_property: "..."   # BINDING — the invariant that must hold
+  description: "..."         # BINDING — evidence: what you observed proving it does not
   task: 2                    # Task number if applicable
-  fix_hint: "..."
+  fix_hint: "..."            # NON-BINDING — ONE example route to the property
 ```
+
+`plan` and `plans` are mutually exclusive; omit both for phase-level issues.
+
+## Binding Payload vs Advisory Remediation
+
+`required_property` + `description` + `severity` are the binding payload: what must be true,
+the evidence it is not, and how hard that blocks. `fix_hint` is **one example** of a route to
+that property — never the only admissible route, never an instruction. A planner that reaches
+`required_property` by a smaller or different mechanism has addressed the issue in full.
+
+State it as the invariant, not the edit — "every `auto` task has a `<verify>` separating pass
+from fail", not "add a verify block". A finding you cannot state without naming your preferred
+edit is a preference, not a defect: drop it or file `info`. Never author a `fix_hint` you can
+see contradicts a locked decision, a CLAUDE.md convention, or an active capability constraint. If
+every route you can name would, name NONE of them: say only that the property conflicts with that
+constraint. A hint carrying a forbidden route is applied by anyone who trusts hints.
 
 ## Severity Levels
 
-**blocker** - Must fix before execution
+**blocker** - The `required_property` must hold before execution (the property, never the hint)
 - Missing requirement coverage
 - Missing required task fields
 - Circular dependencies
@@ -953,24 +988,27 @@ Plans verified. Run `/gsd:execute-phase {phase}` to proceed.
 **Plans checked:** {N}
 **Issues:** {X} blocker(s), {Y} warning(s), {Z} info
 
-### Blockers (must fix)
+### Blockers — these properties must hold ("must fix" is the property, never the example)
 
-**1. [{dimension}] {description}**
+**1. [{dimension}] {required_property}**
 - Plan: {plan}
 - Task: {task if applicable}
-- Fix: {fix_hint}
+- Evidence: {description}
+- Example fix (non-binding — any mechanism reaching the property counts): {fix_hint}
 
-### Warnings (should fix)
+### Warnings — these properties should hold
 
-**1. [{dimension}] {description}**
+**1. [{dimension}] {required_property}**
 - Plan: {plan}
-- Fix: {fix_hint}
+- Evidence: {description}
+- Example fix (non-binding): {fix_hint}
 
 ### Advisories (info)
 
-**1. [{dimension}] {description}**
+**1. [{dimension}] {required_property}**
 - Plan: {plan}
-- Fix: {fix_hint}
+- Evidence: {description}
+- Example fix (non-binding): {fix_hint}
 
 ### Structured Issues
 
@@ -1024,7 +1062,7 @@ Plan verification complete when:
 - [ ] Architectural tier compliance checked (tasks match responsibility map tiers)
 - [ ] Cross-plan data contracts checked (no conflicting transforms on shared data)
 - [ ] CLAUDE.md compliance checked (plans respect project conventions)
-- [ ] Structured issues returned (if any found)
+- [ ] Structured issues carry binding `required_property` + evidence + severity, with `fix_hint` rendered as a non-binding example
 - [ ] Result returned to orchestrator
 
 </success_criteria>

@@ -1159,7 +1159,52 @@ test('hangs forever', () => new Promise(() => {}));
 // completeness / disjointness / balance / determinism, including a fast-check
 // property test (RULESET.TESTS.property-based-testing: partition is a
 // bijective transformation contract).
-const { parseShardArg, selectShard } = require('../scripts/run-tests.cjs');
+const { collectSweepProtectedPaths, parseShardArg, selectShard, sweepRunTempRoot } = require('../scripts/run-tests.cjs');
+
+test('#3916 sweep-protection traversal terminates outside the run root', () => {
+  let driveRootCalls = 0;
+  const boundedWin32Dirname = (current) => {
+    if (current === 'D:\\') {
+      driveRootCalls += 1;
+      if (driveRootCalls > 1) throw new Error('non-advancing Windows drive root');
+    }
+    return path.win32.dirname(current);
+  };
+
+  const protectedPaths = collectSweepProtectedPaths(
+    ['D:\\a\\gsd-core\\tests\\revision-remediation-binding.test.cjs'],
+    'C:\\Users\\runneradmin\\AppData\\Local\\Temp\\gsd-test-run-probe',
+    boundedWin32Dirname,
+  );
+
+  assert.deepEqual([...protectedPaths], []);
+  assert.equal(driveRootCalls, 1, 'a self-parenting drive root must be inspected only once');
+
+  const windowsKey = (value) => path.win32.normalize(value).replace(/[\\/]+$/, '').toLowerCase();
+  const selected = 'C:\\USERS\\RUNNERADMIN\\AppData\\Local\\Temp\\gsd-test-run-probe\\suite';
+  const mixedCaseProtected = collectSweepProtectedPaths(
+    [selected],
+    'c:/users/runneradmin/AppData/Local/Temp/gsd-test-run-probe/',
+    path.win32.dirname,
+    windowsKey,
+  );
+  assert.equal(mixedCaseProtected.has(windowsKey(selected)), true,
+    'Windows containment and protection keys must ignore path casing');
+
+  const sweepRoot = createTempDir('gsd-3916-case-');
+  try {
+    const kept = path.join(sweepRoot, 'KEEP');
+    const removed = path.join(sweepRoot, 'remove');
+    fs.mkdirSync(kept);
+    fs.mkdirSync(removed);
+
+    assert.equal(sweepRunTempRoot(sweepRoot, new Set([windowsKey(kept)]), windowsKey), 1);
+    assert.equal(fs.existsSync(kept), true, 'case-folded protection key must preserve the entry');
+    assert.equal(fs.existsSync(removed), false, 'unprotected sibling must still be swept');
+  } finally {
+    cleanup(sweepRoot);
+  }
+});
 
 describe('selectShard round-robin partition (#1212)', () => {
   // A deterministic sorted file list; selectShard MUST NOT re-sort — the caller

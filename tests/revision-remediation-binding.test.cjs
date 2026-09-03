@@ -1,0 +1,1215 @@
+
+/**
+ * Remediation binding-ness across the revision contract (#3771).
+ *
+ * The remediation channel used to fuse "what property failed" with "how to fix it"
+ * into a single `fix_hint` and never said which half binds. The checker rendered
+ * every hint under a "must fix" heading, the orchestrators injected the issues
+ * verbatim and ordered targeted updates, and the shared revision references mapped
+ * each hint to a prescriptive strategy. A contract-following planner therefore
+ * applied a hint literally even when a smaller mechanism satisfied the same
+ * property, or when the hint contradicted a locked decision — with no channel to
+ * report the conflict, and each attempt burning a revision iteration.
+ *
+ * ## What this suite locks
+ *
+ * The separation, at every link in the chain that carries it:
+ *   - checker side  — `required_property` + evidence + severity bind; `fix_hint` is
+ *     marked non-binding, including in the human-facing blocker rendering
+ *   - planner side  — constraints are re-checked before editing, a smaller
+ *     mechanism counts as addressing, and conflicts return `REVISION_CONFLICT`
+ *   - orchestrators — the conflict is routed to the user and, when configured,
+ *     also recorded for the convergence gate WITHOUT consuming retry budget
+ *   - field naming  — the generic pattern and the plan-checker schema agree on
+ *     `fix_hint`; `suggested_fix` is retired
+ *
+ * It also pins what must NOT have been weakened: blockers still block, severity
+ * still gates, the iteration caps and stall escalation still fire.
+ *
+ * ## What it cannot prove
+ *
+ * That a model acts on the text. The subject is a set of LLM prompts; no test in
+ * this repo can prove behavior for the checker's other dimensions either. Stated so
+ * the coverage claim is honest rather than implied.
+ *
+ * Multi-line phrases are asserted against a whitespace-normalized copy (`flat`), which
+ * is CRLF-tolerant and survives a re-wrap of the same words — the runtime loads these
+ * files whole, including on a checkout that produced CRLF.
+ */
+
+const { before, describe, test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('fs');
+const path = require('path');
+// Project rules: temp dirs and their removal go through the shared helpers (cleanup carries the
+// Windows-EBUSY retry budget), and every synchronous spawn goes through the typed process seam.
+const { createTempDir, cleanup } = require('./helpers.cjs');
+const { runHook, OUTCOME } = require('./helpers/process-seam.cjs');
+const { PROBE_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
+
+// The extracted gate is POSIX shell; Windows keeps source-contract coverage without spawning Git Bash.
+const canRunPosixGate = (platform) => platform !== 'win32';
+const RUN_POSIX_GATE = canRunPosixGate(process.platform);
+
+const ROOT = path.join(__dirname, '..');
+const PRE_PHASE6 = { 'plan-phase.md': 94519 };
+const LARGE_CAP = 49152;
+const REQUIRED_HEADROOM_BYTES = 128;
+
+// allow-test-rule: source-text-is-the-product (#3771)
+const read = (...parts) => fs.readFileSync(path.join(ROOT, ...parts), 'utf-8');
+
+/**
+ * Collapse every whitespace run to one space. Multi-line phrases are asserted against
+ * this form so a re-wrap of the prose — which changes nothing the runtime reads — cannot
+ * red the suite, while the words themselves stay pinned. CRLF folds out here too.
+ */
+const flat = (content) => content.replace(/\s+/g, ' ');
+
+
+const requiredSlice = (content, startAnchor, endAnchor, label) => {
+  const start = content.indexOf(startAnchor);
+  assert.ok(start >= 0, `${label}: missing start anchor ${startAnchor}`);
+  const end = content.indexOf(endAnchor, start + startAnchor.length);
+  assert.ok(end > start, `${label}: missing end anchor ${endAnchor}`);
+  return content.slice(start, end);
+};
+
+
+const requiredTail = (content, anchor, label) => {
+  const start = content.indexOf(anchor);
+  assert.ok(start >= 0, `${label}: missing anchor ${anchor}`);
+  return content.slice(start);
+};
+
+const assertPrecedes = (content, firstAnchor, secondAnchor, message) => {
+  const first = content.indexOf(firstAnchor);
+  const second = content.indexOf(secondAnchor);
+  assert.ok(first >= 0, `${message}: missing first anchor ${firstAnchor}`);
+  assert.ok(second >= 0, `${message}: missing second anchor ${secondAnchor}`);
+  assert.ok(first < second, message);
+};
+
+let PLAN_CHECKER;
+let UI_CHECKER;
+let PLANNER_REVISION;
+let PLANNER_REVIEWS;
+let REVISION_LOOP;
+let FEW_SHOT;
+let PLAN_PHASE;
+let QUICK_LOOP;
+let QUICK_BATCH_LOOP;
+let UI_PHASE;
+let DIAGNOSE;
+let CONVERGENCE;
+let VERIFY_WORK;
+let PLANNER;
+let UI_RESEARCHER;
+let CONTRACTS;
+let REVIEW;
+let COMMANDS;
+let AGENT_DOCS;
+let CHANGESET;
+let REPRESENTATIVE_CONFLICT_MANIFEST;
+
+before(() => {
+  PLAN_CHECKER = read('agents', 'gsd-plan-checker.md');
+  UI_CHECKER = read('agents', 'gsd-ui-checker.md');
+  PLANNER_REVISION = read('gsd-core', 'references', 'planner-revision.md');
+  PLANNER_REVIEWS = read('gsd-core', 'references', 'planner-reviews.md');
+  REVISION_LOOP = read('gsd-core', 'references', 'revision-loop.md');
+  FEW_SHOT = read('gsd-core', 'references', 'few-shot-examples', 'plan-checker.md');
+  PLAN_PHASE = read('gsd-core', 'workflows', 'plan-phase.md');
+  QUICK_LOOP = read('gsd-core', 'workflows', 'quick', 'steps', 'plan-checker-loop.md');
+  QUICK_BATCH_LOOP = read('gsd-core', 'workflows', 'quick-batch', 'steps', 'plan-checker-loop.md');
+  UI_PHASE = read('gsd-core', 'workflows', 'ui-phase.md');
+  DIAGNOSE = read('gsd-core', 'workflows', 'diagnose-issues.md');
+  CONVERGENCE = read('gsd-core', 'workflows', 'plan-review-convergence.md');
+  VERIFY_WORK = read('gsd-core', 'workflows', 'verify-work.md');
+  PLANNER = read('agents', 'gsd-planner.md');
+  UI_RESEARCHER = read('agents', 'gsd-ui-researcher.md');
+  CONTRACTS = read('gsd-core', 'references', 'agent-contracts.md');
+  REVIEW = read('gsd-core', 'workflows', 'review.md');
+  COMMANDS = read('docs', 'COMMANDS.md');
+  AGENT_DOCS = read('docs', 'AGENTS.md');
+  CHANGESET = read('.changeset', 'quiet-otters-listen.md');
+  REPRESENTATIVE_CONFLICT_MANIFEST = JSON.parse(read(
+    'tests', 'fixtures', 'representative', 'plan-revision-conflicts', 'MANIFEST.json',
+  ));
+});
+
+// ── Helpers ────────────────────────────────────────────────────────
+
+/**
+ * The convergence conflict gate, extracted from the workflow and RUN.
+ *
+ * Everything else in this suite asserts on prose. That is the right instrument for a prompt,
+ * but this one block is real shell that an orchestrator executes, and it has been wrong four
+ * times — a heading-truncated scan, a laundered read error, an inverted status, and a global
+ * line-shape scan that let raw reviewer text forge blocking state.
+ * Every one of those passed the text assertions that existed at the time. So this block gets
+ * executed against fixtures instead of read.
+ *
+ * Located by content (the fence containing the CONFLICT_SCAN assignment), not by line number,
+ * so re-ordering the document cannot silently point this at the wrong block.
+ */
+function extractConflictGate() {
+  const fences = CONVERGENCE.split(/```/);
+  const block = fences.find((f) => /^bash\r?\n/.test(f) && /CONFLICT_SCAN=\$\(awk/.test(f));
+  assert.ok(block, 'could not find the bash fence containing the conflict-state gate');
+  return block.replace(/^bash\r?\n/, '');
+}
+
+/** Run the extracted gate with REVIEWS_FILE set through the repository process seam. */
+function runConflictGate(reviewsFile) {
+  const dir = createTempDir('gsd-3771-gate-');
+  try {
+    const script = path.join(dir, 'gate.sh');
+    fs.writeFileSync(script, `${extractConflictGate()}\nprintf '%s' "\${OPEN_CONFLICTS}"\n`);
+    const result = runHook(script, [], {
+      interpreter: 'bash',
+      env: { ...process.env, REVIEWS_FILE: reviewsFile },
+      timeoutMs: PROBE_TIMEOUT_MS,
+    });
+    assert.equal(result.outcome, OUTCOME.EXITED,
+      `conflict gate must exit normally; got ${result.outcome}: ${result.stderr}`);
+    return result;
+  } finally {
+    cleanup(dir);
+  }
+}
+
+const CONFLICTS_BEGIN = '<!-- gsd:plan-revision-conflicts:begin -->';
+
+/** Extract the canonical writer template without normalizing indentation or line wrapping. */
+function extractConflictTemplate() {
+  const fences = REVISION_LOOP.split(/```/);
+  const block = fences.find((f) => /^markdown\r?\n/.test(f) && /required_property: \{property\}/.test(f));
+  assert.ok(block, 'could not find the canonical Plan-Revision Conflicts writer template');
+  return block.replace(/^markdown\r?\n/, '').replace(/\r?\n$/, '');
+}
+
+/**
+ * Every fenced YAML issue example that names a `fix_hint`. Each block is returned
+ * whole so an assertion can check the two fields co-occur rather than merely both
+ * existing somewhere in the file.
+ */
+function yamlIssueBlocks(content) {
+  return content
+    .split(/```/)
+    // `[>\s]*` not `\s*`: the few-shot file blockquotes its YAML (`>     fix_hint:`), so an
+    // indent-only anchor matched nothing there and every loop over it ran zero times.
+    .filter((block) => /(^|\r?\n)[>\s]*fix_hint:/.test(block));
+}
+
+// ── Checker side: binding payload vs advisory remediation ──────────
+
+test('the POSIX gate execution policy excludes Windows', () => {
+  assert.equal(canRunPosixGate('win32'), false);
+  assert.equal(canRunPosixGate('linux'), true);
+});
+
+test('#3916 UI conflict templates preserve the canonical issue identity', () => {
+  const conflictAt = UI_RESEARCHER.indexOf('## Revision Conflict');
+  assert.ok(conflictAt >= 0, 'UI researcher must retain its revision-conflict contract');
+  const conflict = UI_RESEARCHER.slice(conflictAt);
+  assert.match(conflict, /\| \{exact issue_identity\} \| \{property\} \|/);
+  assert.doesNotMatch(conflict, /\| Dimension \{N\} \|/);
+});
+
+test('#3916 conflict prompts use physical lines and single-pass identity encoding', () => {
+  const conflictAt = UI_RESEARCHER.indexOf('## Revision Conflict');
+  assert.ok(conflictAt >= 0, 'UI researcher must retain its revision-conflict contract');
+  const conflict = UI_RESEARCHER.slice(conflictAt);
+  assert.doesNotMatch(conflict, /\\n/, 'UI conflict guidance must use physical Markdown lines');
+  assert.match(
+    flat(conflict),
+    /derive.*issue_identity.*checker fields.*encode.*once/i,
+    'new UI conflicts must derive the canonical identity from checker fields and encode it once',
+  );
+  assert.match(
+    flat(conflict),
+    /supplied encoded.*byte-for-byte.*do not encode again/i,
+    'completion acknowledgements must preserve supplied encoded triples exactly',
+  );
+});
+
+test('#3916 conflict transport has one encoder per field', () => {
+  for (const [name, producer] of [
+    ['planner revision', PLANNER_REVISION],
+    ['UI researcher', UI_RESEARCHER],
+  ]) {
+    assert.match(flat(producer), /encode each raw field exactly once|percent-encode UTF-8 bytes.*Echo the exact encoded prompt values/i,
+      `${name} must own initial identity/property encoding`);
+  }
+
+  for (const [name, consumer] of [
+    ['shared revision loop', REVISION_LOOP],
+    ['quick', QUICK_LOOP],
+    ['UI phase', UI_PHASE],
+    ['verify work', VERIFY_WORK],
+  ]) {
+    const contract = flat(consumer);
+    assert.match(contract, /validate.*returned.*issue_identity.*required_property.*already encoded.*never encode.*again/i,
+      `${name} must treat returned identity/property fields as opaque encoded tokens`);
+    assert.match(contract, /percent-encode.*raw chosen_resolution.*exactly once/i,
+      `${name} must own encoding of the new user resolution`);
+    assert.match(contract, /nonempty.*unreserved.*uppercase `%HH`.*invalid.*do not (?:write|persist).*(?:unknown|BLOCKED)/i,
+      `${name} must reject noncanonical returned tokens before state or prompt transport`);
+  }
+});
+
+test('#3916 explicit completion resets only consecutive-conflict state', () => {
+  const flowAt = REVISION_LOOP.indexOf('### Flow');
+  const trackingAt = REVISION_LOOP.indexOf('### Issue Count Tracking', flowAt);
+  assert.ok(flowAt >= 0 && trackingAt > flowAt, 'revision-loop flow anchors must exist');
+  const flow = REVISION_LOOP.slice(flowAt, trackingAt);
+  assert.doesNotMatch(flow, /\\n/, 'revision-loop pseudocode must use physical lines');
+  assert.match(
+    flow,
+    /^\s*-> previous_conflict_keys = \[\]\r?\n\s*-> prev_issue_count = issue_count; iteration \+= 1; go to LOOP$/m,
+    'reset and baseline update must be distinct consecutive pseudocode operations',
+  );
+  assert.doesNotMatch(
+    flow,
+    /If the agent returns its explicit completion marker:[\s\S]*conflict_return_count = 0/,
+    'the whole-loop conflict-return cap must survive a completed revision',
+  );
+});
+
+test('#3916 structural test helpers reject missing and reversed anchors', () => {
+  assert.throws(
+    () => requiredSlice('alpha beta', 'missing', 'beta', 'probe'),
+    /probe: missing start anchor/,
+  );
+  assert.throws(
+    () => requiredSlice('alpha beta', 'beta', 'alpha', 'probe'),
+    /probe: missing end anchor/,
+  );
+  assert.throws(
+    () => assertPrecedes('alpha beta', 'missing', 'beta', 'probe'),
+    /probe: missing first anchor/,
+  );
+  assert.throws(
+    () => assertPrecedes('alpha beta', 'beta', 'missing', 'probe'),
+    /probe: missing second anchor/,
+  );
+});
+
+describe('#3771 checker states the property and marks the example non-binding', () => {
+  test('the issue schema carries required_property and evidence, with binding-ness declared', () => {
+    const schema = requiredTail(PLAN_CHECKER, '## Issue Format', 'plan-checker issue format');
+    assert.match(schema, /required_property:.*#\s*BINDING/,
+      'Issue Format must declare required_property as the binding invariant');
+    assert.match(schema, /description:.*#\s*BINDING.*evidence/i,
+      'Issue Format must declare description as the binding evidence field');
+    assert.match(schema, /fix_hint:.*#\s*NON-BINDING/,
+      'Issue Format must declare fix_hint as non-binding');
+  });
+
+  test('a smaller mechanism counts as addressing, and a conflicting hint is never authored', () => {
+    assert.match(PLAN_CHECKER, /smaller or different mechanism has addressed the issue in full/,
+      'the checker must concede that a smaller valid mechanism fully addresses the issue');
+    assert.match(flat(PLAN_CHECKER), /Never author a `fix_hint` you can see contradicts/,
+      'the checker must not emit remediation that contradicts a constraint it can see');
+  });
+
+  test('every YAML issue example carries required_property alongside its fix_hint', () => {
+    const blocks = yamlIssueBlocks(PLAN_CHECKER);
+    assert.ok(blocks.length >= 15, `expected the dimension examples to be present, found ${blocks.length}`);
+    for (const block of blocks) {
+      assert.match(
+        block,
+        /(^|\r?\n)[>\s]*required_property:/,
+        `issue example names fix_hint but no required_property:\n${block.trim().slice(0, 240)}`
+      );
+    }
+  });
+
+  test('progressive-disclosure issue examples carry the same binding schema', () => {
+    const examplesPath = path.join(
+      ROOT,
+      'gsd-core',
+      'references',
+      'plan-checker-examples.md'
+    );
+    assert.ok(
+      fs.existsSync(examplesPath),
+      'the current-base plan-checker examples reference must be present after integration'
+    );
+    const blocks = yamlIssueBlocks(fs.readFileSync(examplesPath, 'utf-8'));
+    assert.ok(blocks.length > 0, 'the progressive-disclosure reference must contain an issue example');
+    for (const block of blocks) {
+      assert.match(
+        block,
+        /(^|\r?\n)[>\s]*required_property:/,
+        `progressive-disclosure issue example lacks required_property:\n${block.trim().slice(0, 200)}`
+      );
+    }
+  });
+
+  test('the blocker rendering names the property, not the example, as what must be fixed', () => {
+    assert.match(
+      PLAN_CHECKER,
+      /### Blockers — these properties must hold \("must fix" is the property, never the example\)/,
+      '"must fix" must unambiguously refer to the required property'
+    );
+    assert.match(PLAN_CHECKER, /- Evidence: \{description\}/,
+      'the blocker rendering must surface the evidence');
+    assert.match(
+      PLAN_CHECKER,
+      /- Example fix \(non-binding — any mechanism reaching the property counts\): \{fix_hint\}/,
+      'the blocker rendering must label the hint non-binding at the point of display'
+    );
+    assert.doesNotMatch(PLAN_CHECKER, /(^|\r?\n)- Fix: \{fix_hint\}/,
+      'the bare "Fix: {fix_hint}" rendering reads as a prescription and must be gone');
+  });
+
+  test('the adversarial stance requires the property and evidence, not just severity', () => {
+    assert.match(
+      flat(PLAN_CHECKER),
+      /Neither are issues without a `required_property`/,
+      'a missing required_property must invalidate the finding the same way a missing severity does'
+    );
+  });
+
+  test('the success checklist gates on the binding/advisory split', () => {
+    assert.match(
+      flat(PLAN_CHECKER),
+      /binding `required_property` \+ evidence \+ severity, with `fix_hint` rendered as a non-binding example/,
+      'success_criteria must require the split, or the checker is never told to produce it'
+    );
+  });
+
+  test('the calibration examples model the split and a smaller-alternative acceptance', () => {
+    assert.doesNotMatch(FEW_SHOT, /suggested_fix|(^|\n)>?\s*finding:|affected_field/,
+      'few-shot examples must use the plan-checker schema field names, not the drifted ones');
+    const fewShotBlocks = yamlIssueBlocks(FEW_SHOT);
+    assert.ok(fewShotBlocks.length >= 3,
+      `expected the few-shot issue examples to be found, got ${fewShotBlocks.length} — ` +
+      'a zero here means the block filter stopped matching, not that the file is clean');
+    for (const block of fewShotBlocks) {
+      assert.match(block, /(^|\r?\n)[>\s]*required_property:/,
+        `few-shot issue example lacks required_property:\n${block.trim().slice(0, 200)}`);
+    }
+    // The smaller-alternative rule is NOT demonstrated here on purpose: this file is the
+    // CHECKER's calibration set, fixed by tests/few-shot-calibration.test.cjs at 2 positive +
+    // 2 negative, and the rule is about what the PLANNER may do with a hint. It is normative in
+    // the checker and in planner-revision.md, and pinned by the assertions in this suite.
+    assert.match(flat(FEW_SHOT), /because the binding payload is the property rather than the example, the planner may satisfy it a different way/,
+      'the calibration commentary must still teach that the hint does not bind');
+  });
+});
+
+// ── Planner side: re-check, smaller alternative, conflict channel ───
+
+describe('#3771 revision re-checks constraints and has a conflict path', () => {
+  test('constraints are re-read before any edit', () => {
+    const stepAt = PLANNER_REVISION.indexOf('### Step 2.5');
+    assert.ok(stepAt > 0, 'a constraint re-check step must exist before Step 3');
+    const step = PLANNER_REVISION.slice(stepAt);
+    assert.match(step, /Locked decisions in CONTEXT\.md/, 'locked decisions must be re-checked');
+    assert.match(step, /capability \/ project guidance/i, 'capability guidance must be re-checked');
+    assert.match(step, /Constraints the existing plans already encode/, 'plan constraints must be re-checked');
+  });
+
+  test('binding-ness of each field is stated to the planner', () => {
+    assert.match(flat(PLANNER_REVISION), /`fix_hint` is \*\*one example\*\*/,
+      'the planner must be told the hint is an example');
+    assert.match(
+      flat(PLANNER_REVISION),
+      /Never treat the absence of the field as licence to apply `fix_hint` literally/,
+      'an older checker return without required_property must not fall back to literal application'
+    );
+  });
+
+  test('a smaller sufficient mechanism is preferred and reported as addressed', () => {
+    assert.match(flat(PLANNER_REVISION), /must be reported as addressed, naming the property satisfied and the mechanism used/);
+  });
+
+  test('a conflicting hint uses a compatible alternative before conflict routing', () => {
+    for (const [name, producer] of [
+      ['planner revision', PLANNER_REVISION],
+      ['shared revision loop', REVISION_LOOP],
+      ['planner return contract', PLANNER],
+      ['UI researcher', UI_RESEARCHER],
+      ['quick loop', QUICK_LOOP],
+      ['quick-batch loop', QUICK_BATCH_LOOP],
+      ['UI phase', UI_PHASE],
+      ['verify work', VERIFY_WORK],
+    ]) {
+      assert.match(
+        flat(producer),
+        /When a `fix_hint` conflicts, first apply the smallest constraint-compatible mechanism that satisfies `required_property`\. Emit `REVISION_CONFLICT` only when no such mechanism can satisfy the property/,
+        `${name} must keep an advisory hint from forcing avoidable arbitration`,
+      );
+    }
+  });
+
+  test('the issue reproduction demonstrates a smaller proof satisfying the same property', () => {
+    const example = flat(requiredSlice(
+      PLANNER_REVISION,
+      '**Worked example — smaller mechanism:**',
+      '### Step 3: Revision Strategy',
+      'planner smaller-mechanism example',
+    ));
+    assert.match(example, /exhaustive dynamic verification/,
+      'the example must retain the reported oversized fix_hint');
+    assert.match(example, /static identity proof plus one distinct-behavior execution/,
+      'the example must name the smaller capability-compatible mechanism');
+    assert.match(example, /required_property.*holds?.*report the issue addressed/i,
+      'the smaller mechanism must be accepted because it satisfies the binding property');
+    assert.match(example, /not a `REVISION_CONFLICT` merely because it differs from the hint/,
+      'a merely smaller valid mechanism must be distinguished from a constraint conflict');
+  });
+
+  // A marker four workflows dispatch on must be declared and emitted where the agent is
+  // defined, not only in the shared reference — otherwise nothing produces what they match.
+  test('the producing agents declare and emit REVISION_CONFLICT', () => {
+    for (const [name, agent] of [['gsd-planner', PLANNER], ['gsd-ui-researcher', UI_RESEARCHER]]) {
+      assert.match(agent, /```markdown\r?\n## REVISION_CONFLICT/,
+        `${name} must emit the marker in-fence, or check:contract-drift reports an orphan consumer`);
+    }
+    const plannerRow = CONTRACTS.split(/\r?\n/).find((l) => l.startsWith('| gsd-planner |'));
+    const uiRow = CONTRACTS.split(/\r?\n/).find((l) => l.startsWith('| gsd-ui-researcher |'));
+    assert.ok(plannerRow && uiRow, 'both registry rows must exist');
+    for (const [name, row] of [['gsd-planner', plannerRow], ['gsd-ui-researcher', uiRow]]) {
+      assert.match(row, /`## REVISION_CONFLICT`/, `${name}'s registry row must declare the marker`);
+    }
+    for (const consumer of ['quick/steps/plan-checker-loop.md', 'quick-batch/steps/plan-checker-loop.md', 'verify-work.md']) {
+      assert.ok(plannerRow.includes(consumer),
+        `gsd-planner's Consumed by must list ${consumer} — it dispatches on the marker`);
+    }
+  });
+
+  test('gsd-planner declares and emits REVISION COMPLETE for successful revision returns', () => {
+    assert.match(PLANNER, /```markdown\r?\n## REVISION COMPLETE/,
+      'the producer must emit the exact marker required by revision workflows');
+    const plannerRow = CONTRACTS.split(/\r?\n/).find((l) => l.startsWith('| gsd-planner |'));
+    assert.ok(plannerRow, 'gsd-planner registry row must exist');
+    assert.match(plannerRow, /`## REVISION COMPLETE`/,
+      'the registry must declare the successful revision marker');
+    for (const consumer of [
+      'gsd-core/workflows/plan-phase.md',
+      'gsd-core/workflows/quick/steps/plan-checker-loop.md',
+      'gsd-core/workflows/verify-work.md',
+    ]) {
+      assert.ok(plannerRow.includes(consumer),
+        `gsd-planner's Consumed by must list ${consumer}`);
+    }
+  });
+
+  test('agent documentation exposes the binding split and conflict outcome', () => {
+    const plannerDocs = requiredSlice(
+      AGENT_DOCS, '### gsd-planner', '### gsd-roadmapper', 'planner agent docs',
+    );
+    const uiDocs = requiredSlice(
+      AGENT_DOCS, '### gsd-ui-researcher', '### gsd-assumptions-analyzer', 'UI researcher agent docs',
+    );
+    for (const [name, docs] of [['gsd-planner', plannerDocs], ['gsd-ui-researcher', uiDocs]]) {
+      assert.match(docs, /required_property.*binding/i, `${name} docs must identify what binds`);
+      assert.match(docs, /fix_hint.*non-binding/i, `${name} docs must identify the advisory hint`);
+      assert.match(docs, /REVISION_CONFLICT/, `${name} docs must name the conflict outcome`);
+    }
+    for (const name of ['gsd-plan-checker', 'gsd-ui-checker']) {
+      const docs = requiredSlice(AGENT_DOCS, `### ${name}`, '\n---', `${name} agent docs`);
+      assert.match(flat(docs), /required_property.*bind/i, `${name} docs must identify what binds`);
+      assert.match(flat(docs), /fix_hint.*non-binding/i, `${name} docs must identify the advisory hint`);
+    }
+  });
+
+  test('conflicts return REVISION_CONFLICT carrying conflicts and alternatives', () => {
+    assert.match(PLANNER_REVISION, /## REVISION_CONFLICT/);
+    const block = requiredTail(PLANNER_REVISION, '### Step 7b', 'planner conflict-return step');
+    assert.match(block, /### Alternatives Considered/, 'the conflict must carry alternatives');
+    assert.match(block, /Conflicts with/, 'the conflict must name what it conflicts with');
+    assert.match(block, /it does not count as a failed revision iteration/,
+      'a conflict must not consume retry budget');
+  });
+
+  test('the completion checklist accepts a smaller mechanism and rejects conflicting application', () => {
+    const checklist = requiredTail(PLANNER_REVISION, '### Step 5: Validate Changes', 'planner validation checklist');
+    assert.match(checklist, /smaller\/different mechanism \(both count as addressed\)/);
+    assert.match(checklist, /No `fix_hint` applied that contradicts a locked decision/);
+    assert.doesNotMatch(checklist, /- \[ \] All flagged issues addressed\r?\n/,
+      'the old "all flagged issues addressed" line implies literal application and must be replaced');
+  });
+});
+
+// ── Generic pattern: naming reconciled, literal-application removed ─
+
+describe('#3771 generic revision pattern carries the same separation', () => {
+  test('the canonical issue example obeys plan/plans exclusivity', () => {
+    const issueFormat = requiredSlice(
+      PLAN_CHECKER,
+      '<issue_structure>',
+      '## Binding Payload vs Advisory Remediation',
+      'plan-checker issue structure',
+    );
+    const yaml = yamlIssueBlocks(issueFormat)[0];
+    assert.ok(yaml, 'canonical issue YAML must exist');
+    const keys = yaml.split(/\r?\n/).filter((line) => /^ {2}plans?:/.test(line));
+    assert.equal(keys.length, 1, 'canonical example must contain exactly one of plan or plans');
+  });
+
+  test('the field list matches the plan-checker schema', () => {
+    assert.match(flat(REVISION_LOOP), /`plan` or `plans`, `dimension`, `severity`, `required_property`, `description`, `task`, `fix_hint`/,
+      'the generic pattern must advertise scalar and multi-plan checker schema');
+    assert.match(flat(PLAN_CHECKER), /`plan` and `plans` are mutually exclusive; omit both for phase-level issues/,
+      'the canonical schema must define scalar, multi-plan, and phase-level identity');
+    assert.match(PLAN_CHECKER, /plans: \["02", "03"\]/,
+      'the documented multi-plan schema must cover the checker examples it emits');
+  });
+
+  test('BLOCKERs are satisfied by property, not by literal application of the hint', () => {
+    assert.doesNotMatch(REVISION_LOOP, /For each BLOCKER: make the required change/,
+      '"make the required change" orders the example applied and must be gone');
+    assert.match(REVISION_LOOP, /For each BLOCKER: make required_property true/);
+    assert.match(REVISION_LOOP, /a smaller or different mechanism that makes the same property true/);
+  });
+
+  test('the conflict return is handled before the iteration counter and stall check', () => {
+    const section = requiredTail(REVISION_LOOP, '### Conflict Return', 'revision-loop conflict return');
+    const flow = requiredSlice(
+      REVISION_LOOP, '### Flow', '### Issue Count Tracking', 'revision-loop flow',
+    );
+    assert.ok(section.length > 0, 'the pattern must define a conflict return');
+    assert.match(section, /has not failed and has not stalled/);
+    assert.match(flat(section), /Do NOT increment the iteration counter and do NOT update `prev_issue_count`/);
+    assert.match(flat(REVISION_LOOP), /The baseline update and increment are step f, only after explicit producer completion/,
+      'the canonical flow must place both mutations on the normal return path');
+    assertPrecedes(
+      flow,
+      'Re-spawn',
+      'prev_issue_count = issue_count',
+      'the stall baseline must update only after explicit producer completion',
+    );
+    assertPrecedes(
+      section,
+      'Re-spawn',
+      'Close',
+      'the writer-owned record must remain open until the producer applies the resolution',
+    );
+    assert.doesNotMatch(flat(REVISION_LOOP), /a\. iteration \+= 1|An iteration counted at step a is already spent/,
+      'the canonical flow must not claim a revision was spent before the conflict return');
+    assert.match(flat(section), /Accepting the output with the blocker still open is NOT offered here/,
+      'the conflict gate must not become an early exit from a blocker');
+  });
+
+  test('the shared contract does not describe a hand-off that no workflow performs', () => {
+    assert.match(flat(REVISION_LOOP), /recording is in addition to asking, never instead of it/,
+      'after #3771 round 2 no workflow hands a conflict to a loop and returns');
+    assert.match(flat(PLANNER_REVISION), /routes this to the user and, when configured, also records it for the convergence gate/);
+    assert.doesNotMatch(flat(REVISION_LOOP + '\n' + PLANNER_REVISION), /it may route there instead of asking directly|to the user or to the configured plan-review convergence loop/,
+      'the superseded routing description must not survive as drift');
+    assert.doesNotMatch(flat(PLAN_PHASE), /Then replan without prompting/i,
+      'reviews-mode conflict replay must not bypass the required user-choice route');
+  });
+
+  // The conflict text is agent-authored and lands inside a writer-owned slot. Newlines are
+  // still a trust boundary: an embedded record-shaped line could forge an extra blocker.
+  test('agent-authored conflict text is sanitized at the write boundary', () => {
+    assert.match(flat(REVISION_LOOP), /Sanitize before writing — the conflict text is agent-authored/,
+      'the shared protocol must sanitize where the untrusted text enters the file');
+    assert.match(flat(REVISION_LOOP), /percent-encode.*UTF-8.*RFC 3986.*unreserved/,
+      'the rule must name the injective delimiter-safe transform');
+    assert.match(flat(REVISION_LOOP), /Empty input.*do not write.*report `BLOCKED`/,
+      'the writer must reject empty required fields');
+    for (const [name, agent] of [['planner-revision', PLANNER_REVISION], ['gsd-ui-researcher', UI_RESEARCHER]]) {
+      assert.match(flat(agent), /\*\*Every field (?:is one line safe for a Markdown table cell|uses the shared Conflict Return sanitizer):?\*\*/,
+        `${name} must define its field boundary`);
+    }
+    assert.match(flat(CONVERGENCE), /reader counts only the first fixed slot at that position/,
+      'the reader must state the ownership boundary that excludes raw reviewer text');
+  });
+
+  // A missing or non-file artifact must never read as "no conflicts".
+  // Unverifiable is not the same as clean.
+  test('the convergence gate fails CLOSED when it cannot read or parse REVIEWS.md', () => {
+    assert.match(CONVERGENCE, /if \[ ! -f "\$\{REVIEWS_FILE\}" \]; then/,
+      'the gate must require a regular file before trusting a count of zero');
+    assert.match(flat(CONVERGENCE), /Refusing to declare convergence on an unverifiable gate/,
+      'an unreadable or malformed gate input must block, not pass');
+    assert.match(CONVERGENCE, /CONFLICT_SCAN=\$\(awk/,
+      'the executable reader must parse the owned slot');
+    assert.match(CONVERGENCE, /awk_status=\$\?/,
+      'a parser failure must remain distinguishable from a legitimate zero');
+    assert.doesNotMatch(extractConflictGate(), /\|\| true/,
+      'the owned-block parser must not launder a failure into zero');
+  });
+
+  // ── The gate, EXECUTED ───────────────────────────────────────────
+  // Source assertions above prove the text says the right thing. These prove the shell does it.
+  describe('#3771 the extracted conflict gate behaves', { skip: !RUN_POSIX_GATE }, () => {
+    test('a representative pre-gate review artifact fails CLOSED', () => {
+      const fixture = REPRESENTATIVE_CONFLICT_MANIFEST.fixtures[0];
+      const fixturePath = path.join(
+        ROOT, 'tests', 'fixtures', 'representative', 'plan-revision-conflicts', fixture.file,
+      );
+      const r = runConflictGate(fixturePath);
+      assert.equal(r.exitCode, fixture.expectedExitCode);
+      assert.equal(fixture.expectedVerdict, 'BLOCKED');
+      assert.match(r.stderr, /BLOCKED/);
+    });
+
+    // An unreadable artifact must fail before the parser can emit a count.
+    test('a scan failure BLOCKS instead of reporting zero conflicts', () => {
+      const r = runConflictGate('/nonexistent/definitely-not-here/07-REVIEWS.md');
+      assert.notEqual(r.exitCode, 0, 'an unreadable REVIEWS.md must not converge');
+      assert.match(r.stderr, /BLOCKED/, 'the gate must say why it refused');
+      assert.notEqual(r.stdout.trim(), '0', 'it must not emit a zero count on failure');
+    });
+
+    test('an empty REVIEWS_FILE path BLOCKS', () => {
+      const r = runConflictGate('');
+      assert.notEqual(r.exitCode, 0, 'an unresolved path must not converge');
+      assert.match(r.stderr, /BLOCKED/);
+    });
+  });
+
+  // The slot is a blocking gate's state. One content owner, or it can be forged.
+  test('only plan-phase may mutate the conflicts section', () => {
+    assert.match(flat(CONVERGENCE), /\*\*Only `\/gsd:plan-phase` mutates the contents of this slot\.\*\*/,
+      'the section needs exactly one declared content owner');
+    assert.match(flat(CONVERGENCE), /review agent preserves the existing `## Plan-Revision Conflicts` block byte-for-byte/,
+      'the artifact writer may delimit and preserve the slot, never synthesize its state');
+  });
+
+  test('an issue satisfied by a smaller mechanism counts as resolved for the loop checks', () => {
+    assert.match(
+      REVISION_LOOP,
+      /A remediation hint is an example, not an order/,
+      'the Important Notes must state the binding rule the loop depends on'
+    );
+  });
+});
+
+// ── Orchestrators: routing without burning retry budget ────────────
+
+const ORCHESTRATORS = [
+  ['plan-phase', PLAN_PHASE, 'iteration_count'],
+  ['quick plan-checker-loop', QUICK_LOOP, 'iteration_count'],
+  ['quick-batch plan-checker-loop', QUICK_BATCH_LOOP, 'iteration count'],
+  ['ui-phase', UI_PHASE, 'revision_count'],
+  // verify-work's gap-plan revision hands <revision_context> to gsd-planner, so it inherits the
+  // contract whether or not it states it. It was missed in the first pass (#3771 round-2 review).
+  ['verify-work gap-plan revision', VERIFY_WORK, 'iteration_count'],
+];
+
+describe('#3771 every revision orchestrator routes conflicts instead of retrying', () => {
+  // plan-phase @-imports revision-loop.md, so the shared Conflict Return protocol really is in
+  // its loaded context; gsd-planner also loads planner-revision.md for `<revision_context>`.
+  // Other orchestrators carry their rules inline. `loadedFor` models each runtime surface.
+  const importsShared = (content) => /@~\/\.claude\/gsd-core\/references\/revision-loop\.md|read the \*\*Conflict Return \(`REVISION_CONFLICT`\)\*\* section of\s+`gsd-core\/references\/revision-loop\.md`/i.test(content);
+  const plannerLoadsRevision = /If `<revision_context>` provided by orchestrator: Read `gsd-core\/references\/planner-revision\.md`/.test(PLANNER);
+  const loadedFor = (content) => flat(content
+    + (importsShared(content) ? '\n' + REVISION_LOOP : '')
+    + (content === PLAN_PHASE && plannerLoadsRevision ? '\n' + PLANNER_REVISION : ''));
+
+  test('plan-phase delegates the shared protocol rather than duplicating it', () => {
+    assert.ok(importsShared(PLAN_PHASE), 'plan-phase must @-import the reference it defers to');
+    assert.ok(plannerLoadsRevision, 'gsd-planner must load planner-revision.md for <revision_context>');
+    assert.match(flat(PLAN_PHASE), /follow (?:the )?shared Conflict Return/,
+      'the delegation must be explicit, or the bindings have no protocol to bind to');
+  });
+
+  for (const [name, content, counter] of ORCHESTRATORS) {
+    const loaded = loadedFor(content);
+
+    test(`${name} tells the reviser the hint is non-binding`, () => {
+      assert.match(loaded, /`fix_hint` (?:is ONE non-binding example route|is \*\*one example\*\*)/i,
+        `${name} must mark the remediation example non-binding in its loaded revision contract`);
+      assert.match(loaded, /smaller or different mechanism/,
+        `${name} must accept a smaller alternative`);
+    });
+
+    test(`${name} orders a constraint re-check before editing`, () => {
+      assert.match(loaded, /BEFORE editing|before any edit/i,
+        `${name} must order the constraint re-check before any edit`);
+
+    });
+
+    // Four prompts state this contract; planner-revision.md is the authority they must agree
+    // with. Each must name where that authority is, or the next editor updates one of five.
+    test(`${name} names the authority its inline statement summarises`, () => {
+      assert.match(loaded, /Full contract:\s+`gsd-core\/references\/planner-revision\.md`|see your `## Revision Conflict`\s+section|under `gsd-core\/references\/planner-revision\.md`, loaded in revision mode/,
+        `${name} must point at the contract its prompt loads or paraphrases`);
+    });
+
+    test(`${name} routes REVISION_CONFLICT without consuming ${counter}`, () => {
+      assert.match(loaded, /## REVISION_CONFLICT/,
+        `${name} must handle the conflict return`);
+      assert.match(
+        loaded,
+        new RegExp(`[Dd]o NOT increment (the iteration counter|\`?${counter}\`?)`),
+        `${name} must not spend a revision iteration on an unresolvable conflict`
+      );
+    });
+
+    // A counter incremented BEFORE dispatch is already spent when the conflict comes back, so
+    // "do NOT increment" would be unreachable prose. The increment must sit on the return path.
+    test(`${name} increments ${counter} on the return, not before dispatch`, () => {
+      assert.doesNotMatch(
+        flat(content),
+        new RegExp(`- Increment \`${counter}\` - Re-spawn`),
+        `${name} must not increment ${counter} before the reviser is dispatched`
+      );
+      assert.match(loaded, new RegExp(`(returns|return) [^.]*increment \`?${counter}\`?|increment \`?${counter}\`?, then re-spawn|Counter not spent: \`${counter}\`|increment is step g, AFTER the producing agent returns|Only on [^.]*increment [^.]*${counter}|baseline update and increment are step f, (?:AFTER a non-conflict producing-agent return|only after explicit producer completion)`, 'i'),
+        `${name} must increment ${counter} only once the reviser has returned`);
+    });
+
+    // Not incrementing the counter removes the bound the counter provided. Something must
+    // replace it, or an agent returning the same conflict forever loops unattended.
+    // Two bounds, because one is evadable: an agent alternating property names never trips the
+    // repeat rule, so the repeat rule alone leaves the un-incremented path unbounded.
+    test(`${name} bounds conflict recurrence so the un-incremented path cannot spin`, () => {
+      assert.match(
+        loaded,
+        /canonical conflict key.*(repeated in consecutive returns|a second time in a row|twice in a row)/i,
+        `${name} must compare every conflict identity/property in plural returns`
+      );
+      assert.match(
+        loaded,
+        /THIRD conflict return(?: of this loop whatever property it names)?|On the THIRD, stop and escalate/,
+        `${name} must cap TOTAL conflict returns — round-robin across property names evades the repeat rule`
+      );
+    });
+
+    // The conflict gate resolves the conflict; it must not become an early exit from a blocker.
+    test(`${name} re-evaluates a second conflict instead of falling through to the checker`, () => {
+      assert.match(
+        loaded,
+        /re-evaluate (its|the [a-z]+'s|the) return (from the top of this handler|here)|return to this step/,
+        `${name} must loop back on the re-spawn, not fall through to the checker spawn`
+      );
+    });
+
+    test(`${name} does not offer accepting the output with the blocker still open`, () => {
+      assert.match(
+        loaded,
+        /is NOT offered here/,
+        `${name} must state that accepting an unaddressed blocker is not one of the conflict options`
+      );
+      assert.match(loaded, /amend the constraint/,
+        `${name} must offer amending the constraint as the third resolving option`);
+    });
+  }
+
+  test('only explicit producer completion can reach checker retry', () => {
+    for (const [name, content, marker] of [
+      ['plan-phase', PLAN_PHASE, 'REVISION COMPLETE'],
+      ['quick', QUICK_LOOP, 'REVISION COMPLETE'],
+      ['ui-phase', UI_PHASE, 'UI-SPEC COMPLETE'],
+      ['verify-work', VERIFY_WORK, 'REVISION COMPLETE'],
+    ]) {
+      const loaded = flat(content);
+      assert.match(loaded, new RegExp('Only .*`## ' + marker + '`.*check(?:er)?', 'i'),
+        `${name} must require its explicit success marker before checker retry`);
+      assert.match(loaded, /unknown|empty|both markers/i,
+        `${name} must classify malformed or ambiguous producer returns`);
+      if (name === 'plan-phase') {
+        assert.match(loaded, /leave.*open|preserve.*open/i,
+          'plan-phase must preserve persisted conflicts on an unrecognized return');
+      }
+      assert.match(loaded, /Retry.*Stop|retry.*stop/i,
+        `${name} must route an unrecognized return without accepting it`);
+    }
+  });
+
+  test('plan-phase records the conflict on a channel it can actually test for', () => {
+    assert.match(PLAN_PHASE, /workflow\.plan_review_convergence/,
+      'plan-phase must consult the convergence config');
+    assert.match(PLAN_PHASE, /REVIEWS_FILE="\$\{REVIEWS_PATH\}"/,
+      'conflict persistence must use the path initialized by the workflow');
+    assert.doesNotMatch(PLAN_PHASE, /REVIEWS_FILE=\$\(ls "\$\{PHASE_DIR\}"\/\*-REVIEWS\.md/,
+      'a second glob lookup can select a different review artifact');
+    assert.doesNotMatch(flat(PLAN_PHASE), /CONVERGENCE_ENABLED.*true.*\[ ! -f "\$\{REVIEWS_FILE\}" \].*exit 1/i,
+      'an absent review artifact must not replace required user conflict routing with a hard exit');
+    assert.match(flat(PLAN_PHASE), /Record only when enabled and the path is a regular file/i,
+      'persistence must remain conditional on an existing regular review artifact');
+    assert.match(flat(PLAN_PHASE), /follow shared Conflict Return/i,
+      'persistence must still use the shared user-choice route');
+    assert.match(flat(PLAN_PHASE), /close only when `### Applied Conflict Resolutions` acknowledges the exact/i,
+      'plan-phase must close only exact acknowledged records');
+    assert.match(flat(REVISION_LOOP), /never invokes `\/gsd:plan-review-convergence`/,
+      'plan-phase runs inside that loop; invoking it would be a cycle');
+    // A markdown table cannot be counted by any simple filter — its header and separator rows
+    // look like data. The recorded shape must be one the reader can match exactly.
+    assert.match(flat(REVISION_LOOP), /A checkbox, not a table row/,
+      'the recorded conflict must be countable without parsing a table');
+    assert.match(REVISION_LOOP, /- \[ \] REVISION_CONFLICT \{issue_identity\} — required_property:/,
+      'the shared protocol must define the open form the convergence gate matches');
+    assert.match(flat(REVISION_LOOP), /writer flip that line to `- \[x\]`/,
+      'the close step must produce the resolved form the gate excludes');
+  });
+
+  test('convergence gates on the conflicts BEFORE it writes state or prints success', () => {
+    assert.match(CONVERGENCE, /## Plan-Revision Conflicts/,
+      'the convergence loop must know about the section plan-phase writes');
+    assert.match(CONVERGENCE, /OPEN_CONFLICTS=/,
+      'the count must be read from REVIEWS.md — CYCLE_SUMMARY does not carry it');
+    // The counter and writer must agree on both marker and ownership boundary.
+    assert.match(CONVERGENCE, /in_owned \{ exit 2 \}/,
+      'every unrecognized nonblank line in the owned slot must fail closed');
+    assert.match(CONVERGENCE, /\[\[:space:\]\]\+REVISION_CONFLICT\[\[:space:\]\]\+/,
+      'open and resolved record grammars must accept POSIX whitespace');
+    assert.match(CONVERGENCE, /gsd:plan-revision-conflicts:begin/);
+    assert.match(CONVERGENCE, /gsd:plan-revision-conflicts:end/);
+    assert.doesNotMatch(CONVERGENCE, /grep -c/,
+      'the superseded global scan would count raw reviewer text and must not return');
+    assert.match(flat(CONVERGENCE), /escalates rather than deadlocking/,
+      'the gate must state that an unresolvable conflict still terminates at MAX_CYCLES');
+    assert.match(
+      CONVERGENCE,
+      /\*\*If HIGH_COUNT == 0 and ACTIONABLE_COUNT == 0 and OPEN_CONFLICTS == 0 \(converged\):\*\*/,
+      'an open conflict must be part of the converged CONDITION, not a note after the banner'
+    );
+    // Ordering is the whole finding: the gate placed after `state planned-phase` would write
+    // and announce convergence over a conflict nobody resolved.
+    const gateAt = CONVERGENCE.indexOf('CONFLICT_SCAN=$(awk');
+    const writeAt = CONVERGENCE.indexOf('gsd_run state planned-phase');
+    const bannerAt = CONVERGENCE.indexOf('GSD ► CONVERGENCE COMPLETE');
+    assert.ok(gateAt > 0 && writeAt > 0 && bannerAt > 0, 'all three anchors must exist');
+    assert.ok(gateAt < writeAt, 'the conflict gate must precede the planned-phase state write');
+    assert.ok(gateAt < bannerAt, 'the conflict gate must precede the convergence banner');
+    assert.match(flat(CONVERGENCE), /Re-running the planner against an unchanged conflict cannot resolve it/,
+      'the replan step must be told that re-running alone cannot clear a conflict');
+  });
+
+  test('quick does not advertise a convergence route it has no artifact for', () => {
+    assert.match(flat(QUICK_LOOP), /Quick has no persistence channel/,
+      'quick must say why the convergence route does not apply, rather than dangling a dead branch');
+  });
+
+  test('the conflict is surfaced to the user with its alternatives', () => {
+    for (const [name, content] of ORCHESTRATORS) {
+      assert.match(loadedFor(content), /alternatives to the user|conflict and its alternatives to the user/,
+        `${name} must present the alternatives rather than deciding silently`);
+    }
+  });
+});
+
+// ── UI-spec loop and the gap-plan hint ─────────────────────────────
+
+describe('#3771 the UI-spec and gap-plan hints are marked non-binding too', () => {
+  test('the UI checker states the property and marks its hint an example', () => {
+    assert.match(UI_CHECKER, /\*\*`fix_hint` is an example, never an order\.\*\*/);
+    assert.match(flat(UI_CHECKER), /reaches the same property by a smaller or different mechanism has resolved the issue in full/);
+    const uiBlocks = yamlIssueBlocks(UI_CHECKER);
+    assert.ok(uiBlocks.length >= 6, `expected the UI dimension examples, got ${uiBlocks.length}`);
+    assert.doesNotMatch(UI_CHECKER, /exact fix required|exact fix descriptions|Specific fixes:/,
+      'the UI verdict and success criteria must not order an exact fix');
+    assert.match(flat(UI_CHECKER), /- \*\*Dimension \{N\} — \{name\}:\*\* \{required_property\} Evidence: \{description\} Example fix \(non-binding/,
+      'the UI ISSUES FOUND rendering must name the property, its evidence, and a non-binding example');
+    assert.match(flat(UI_CHECKER), /BLOCK verdicts state the `required_property`, its evidence, and a non-binding example fix/,
+      'the completion gate must enforce the binding property and advisory example split');
+    for (const block of uiBlocks) {
+      assert.match(block, /(^|\r?\n)[>\s]*required_property:/,
+        `UI checker issue example lacks required_property:\n${block.trim().slice(0, 200)}`);
+    }
+  });
+
+  test('the UI-spec revision resolves listed issues rather than applying listed fixes', () => {
+    assert.doesNotMatch(UI_PHASE, /fix ONLY the listed issues/,
+      '"fix ONLY the listed issues" pairs with a prescriptive hint; it must read as resolve');
+    assert.match(UI_PHASE, /resolve ONLY the listed issues/);
+  });
+
+  test('legacy summaries skip commit measurement without a base revision', () => {
+    const reconciliation = requiredSlice(
+      VERIFY_WORK, '**Commit-claim reconciliation (#3968).**', '</step>',
+      'verify-work commit-claim reconciliation',
+    );
+    assert.match(reconciliation, /if \[ -n "\$BASE" \]; then[\s\S]*ACTUAL=\$\(git rev-list --count "\$\{BASE\}"\.\.HEAD\)[\s\S]*else[\s\S]*ACTUAL=absent[\s\S]*fi/,
+      'git rev-list must run only when plan_head_before supplied a base');
+    assert.match(flat(reconciliation), /plan_head_before: absent.*WARNING.*do not invoke `git rev-list`/i,
+      'legacy summaries must warn and continue without an invalid revision range');
+  });
+
+  test('the gap-plan hint is bound to the root cause, not to the suggested direction', () => {
+    assert.doesNotMatch(DIAGNOSE, /- suggested_fix: Hint for gap closure plan/,
+      'the gap-closure hint must not read as the binding payload');
+    assert.match(DIAGNOSE, /fix_hint: NON-BINDING example route for the gap closure plan/);
+    assert.match(flat(DIAGNOSE), /the binding payload is `root_cause`/);
+  });
+});
+
+// ── Preservation: nothing legitimately binding was weakened ────────
+
+describe('#3771 preserves everything that legitimately binds', () => {
+  test('blockers still block and severity still gates', () => {
+    assert.match(PLAN_CHECKER, /Issues without a severity classification are not valid output/);
+    assert.match(PLAN_CHECKER, /\*\*blocker\*\* - The `required_property` must hold before execution/);
+    assert.match(PLAN_CHECKER, /\*\*BLOCKER\*\* — the phase goal will not be achieved if this is not fixed before execution/);
+  });
+
+  test('iteration caps and stall escalation still fire', () => {
+    assert.match(REVISION_LOOP, /## Pattern: Check-Revise-Escalate \(max 3 iterations\)/);
+    assert.match(REVISION_LOOP, /If the count does not decrease between consecutive iterations/);
+    assert.match(PLAN_PHASE, /## 12\. Revision Loop \(Max 3 Iterations\)/);
+    assert.match(PLAN_PHASE, /\*\*Stall detection:\*\* If `issue_count >= prev_issue_count`/);
+    assert.match(QUICK_LOOP, /\*\*Revision loop \(max 2 iterations\):\*\*/);
+    assert.match(UI_PHASE, /## 9\. Revision Loop \(Max 2 Iterations\)/);
+  });
+
+  test('required task fields and decision coverage still hold', () => {
+    assert.match(PLAN_CHECKER, /\*\*FAIL the verification\*\* if any requirement ID from the roadmap is absent/);
+    assert.match(PLANNER_REVISION, /\*\*DO NOT:\*\* Rewrite entire plans for minor issues/);
+    assert.match(REVISION_LOOP, /Do NOT introduce new issues while fixing existing ones/);
+    assert.match(REVISION_LOOP, /Preserve all content not flagged by the checker/);
+  });
+});
+
+// ── PR #3916 live review remediation ──────────────────────────────
+
+describe('#3916 writer, persistence, reader and migration contracts agree', () => {
+  test('the canonical writer renders one uniquely-discriminated physical line', () => {
+    const template = extractConflictTemplate();
+    assert.doesNotMatch(template, /\r?\n/, 'one conflict must be exactly one physical line');
+    assert.match(template, /^- \[ \] REVISION_CONFLICT /,
+      'the writer must start at column zero with a reader-specific discriminator');
+  });
+
+  test('same-property task findings remain independently keyed in the source contract', () => {
+    assert.match(PLAN_PHASE,
+      /\{issue_identity\} \| required_property: \{property\} \| chosen_resolution: \{chosen_resolution\}/,
+      'resolution transport must carry the full canonical conflict key');
+    assert.match(flat(PLANNER_REVISION),
+      /Applied Conflict Resolutions.*Issue.*required_property.*Chosen resolution/i,
+      'completion acknowledgement must echo the full conflict key');
+    assert.match(flat(PLAN_PHASE),
+      /exact \x60issue_identity \| required_property: property \| chosen_resolution: chosen_resolution\x60/i,
+      'closure must match identity, property, and choice');
+  });
+
+  test('the reader source contract rejects unsafe or noncanonical encoded fields', () => {
+    assert.match(flat(CONVERGENCE), /reader strictly decodes and canonically re-encodes every open and resolved record field.*invalid UTF-8.*fail.*closed/i);
+    assert.match(CONVERGENCE, /in_owned && \$0 ~ resolved_record \{ records\[\+\+record_count\] = \$0; next \}/,
+      'resolved rows must enter the same canonical-validation stream before being skipped');
+    assert.match(CONVERGENCE, /CONFLICT_RECORD_LINES=/,
+      'the validator must receive both open and resolved records');
+    assert.match(CONVERGENCE, /tail\.includes\(" \| resolved: "\)[\s\S]*splitOnce\(tail, " \| resolved: "\)/,
+      'resolved choices must be split and validated as their own canonical field');
+  });
+
+  test('writer contract requires canonical percent encoding and rejects empty fields', () => {
+    assert.match(flat(REVISION_LOOP), /percent-encode.*UTF-8.*RFC 3986.*unreserved/i);
+    assert.match(flat(REVISION_LOOP), /empty input.*do not write.*BLOCKED/i);
+  });
+
+  test('all revision consumers transport the full encoded conflict-resolution triple', () => {
+    for (const [name, content] of [
+      ['quick', QUICK_LOOP], ['ui-phase', UI_PHASE], ['verify-work', VERIFY_WORK],
+    ]) {
+      const contract = flat(content);
+      assert.match(contract, /percent-encode.*UTF-8.*RFC 3986.*unreserved/i, `${name} codec`);
+      assert.match(contract,
+        /\{issue_identity\} \| required_property: \{property\} \| chosen_resolution: \{chosen_resolution\}/,
+        `${name} full resolution triple`);
+    }
+  });
+
+  test('revision consumers require exact returned choice acknowledgement before checking', () => {
+    for (const [name, content, marker] of [
+      ['quick', QUICK_LOOP, 'REVISION COMPLETE'],
+      ['ui-phase', UI_PHASE, 'UI-SPEC COMPLETE'],
+      ['verify-work', VERIFY_WORK, 'REVISION COMPLETE'],
+    ]) {
+      assert.match(flat(content), new RegExp(
+        `Only on \\x60## ${marker}\\x60.*Applied Conflict Resolutions.*exact.*issue_identity \\| required_property: property \\| chosen_resolution: chosen_resolution.*(?:check|checker)`, 'i'),
+      `${name} must bind completion to the chosen resolution`);
+    }
+    assert.match(flat(UI_RESEARCHER),
+      /UI-SPEC COMPLETE.*Applied Conflict Resolutions.*Issue.*required_property.*Chosen resolution/i,
+      'the UI producer must echo exact applied triples');
+  });
+
+  test('review regeneration preserves one deterministically bounded conflict block byte-for-byte', () => {
+    assert.match(flat(REVIEW), /capture only the existing conflict entry bytes after the exact/i);
+    assert.match(REVIEW, /\{preserved_plan_revision_conflict_entries\}/,
+      'the REVIEWS.md writer template needs an explicit preservation slot');
+    assert.match(REVIEW, /<!-- gsd:plan-revision-conflicts:begin -->\n## Plan-Revision Conflicts\n\{preserved_plan_revision_conflict_entries\}\n<!-- gsd:plan-revision-conflicts:end -->/,
+      'the first-write template must emit the canonical heading before preserved entries');
+    assert.match(flat(REVIEW), /restore the captured bytes at the explicit slot below/i);
+    for (const [name, contract] of [
+      ['review writer', REVIEW],
+      ['revision loop', REVISION_LOOP],
+      ['convergence reader', CONVERGENCE],
+    ]) {
+      assert.match(flat(contract), /first nonblank line after.*artifact title/i,
+        `${name} must use the canonical first-nonblank position`);
+      assert.doesNotMatch(flat(contract), /slot immediately after the artifact title/i,
+        `${name} must not describe a physical-line position the template does not use`);
+    }
+    const templateTail = requiredTail(REVIEW, '# Cross-AI Plan Review — Phase {N}', 'review template');
+    assert.equal(templateTail.split(/\r?\n/).slice(1).find((line) => line !== ''), CONFLICTS_BEGIN,
+      'the emitted template delimiter must be the first nonblank line after its title');
+    assert.match(flat(REVIEW), /no begin delimiter.*canonical position.*legacy clean.*regardless.*reviewer output/i,
+      'later reviewer prose must not prevent legacy migration');
+    assert.match(flat(REVIEW), /begin delimiter.*canonical position.*malformed.*BLOCKED.*do not rewrite/i,
+      'only partial or malformed state at the canonical position blocks regeneration');
+  });
+
+  test('the canonical flow accepts only explicit producer completion', () => {
+    const flow = flat(requiredSlice(
+      REVISION_LOOP, '### Flow', '### Issue Count Tracking', 'revision-loop flow',
+    ));
+    assert.match(flow, /explicit completion marker.*prev_issue_count.*iteration/i,
+      'only the producer success marker may consume revision budget');
+    assert.match(flow, /unknown.*empty.*both.*Retry or Stop/i,
+      'ambiguous or absent markers must not fall through as success');
+    assert.doesNotMatch(flow, /Otherwise: prev_issue_count/,
+      'the canonical flow must not accept every non-conflict return');
+  });
+
+  test('a stalled revision spawn cannot bypass explicit completion', () => {
+    const spawn = flat(requiredSlice(
+      PLAN_PHASE, 'ALL RUNTIMES:', 'If iteration_count >= 3:', 'plan-phase revision spawn',
+    ));
+    assert.match(spawn, /on \x60stalled\x60: Retry or Stop/i);
+    assert.doesNotMatch(spawn, /on \x60stalled\x60: Accept/i);
+  });
+
+  test('the canonical flow declares and enforces both conflict counters', () => {
+    const flow = requiredSlice(
+      REVISION_LOOP, '### Flow', '### Issue Count Tracking', 'revision-loop flow',
+    );
+    assert.match(flow, /previous_conflict_keys = \[\]/);
+    assert.match(flow, /current_conflict_keys = sorted unique \(issue_identity, required_property\) pairs/);
+    assert.match(flow, /conflict_return_count = 0/);
+    assert.match(flow, /conflict_return_count \+= 1/);
+    assert.match(flow, /If conflict_return_count >= 3/,
+      'alternating conflict sets must still hit the total-conflict cap');
+    assertPrecedes(
+      flow,
+      'current_conflict_keys = sorted unique (issue_identity, required_property) pairs',
+      'If conflict_return_count >= 3',
+      'the third conflict must be derived before cap escalation',
+    );
+    assertPrecedes(
+      flow,
+      'validate, sanitize, and idempotently persist the returned conflict',
+      'If conflict_return_count >= 3',
+      'the third conflict must be persisted before cap escalation',
+    );
+    assert.match(flow, /If current_conflict_keys intersects previous_conflict_keys/,
+      'a repeated member of a plural conflict return must stall');
+    assert.match(flow, /Else: previous_conflict_keys = current_conflict_keys[\s\S]*resolve it/,
+      'a non-repeat return must advance the canonical set compared next');
+  });
+
+  test('persisted conflicts are idempotent records and reviews-mode replanning closes them', () => {
+    assert.match(flat(REVISION_LOOP), /reuse the existing open line instead of appending a duplicate/i,
+      'identical open state needs idempotency, not a second event identity');
+    assert.match(flat(PLAN_PHASE), /(?:obtain|get) user choice (?:under|per) Conflict Return (?:step )?3/i,
+      'persisted conflicts must pass through the same user-choice gate');
+    assertPrecedes(
+      PLAN_PHASE,
+      'REVIEWS_PATH=$(_gsd_field "$INIT" reviews_path)',
+      '**With plans and `--reviews`:**',
+      'REVIEWS_PATH must be initialized before reviews-mode scans it',
+    );
+    assert.match(flat(PLAN_PHASE), /first canonical writer-owned.*slot.*ignore reviewer output.*BLOCKED/i,
+      'resume scanning must share the bounded ownership and malformed-state rules');
+    assert.match(flat(PLAN_PHASE), /preserve.*encoded `issue_identity`.*`required_property`.*percent-encode.*raw.*`chosen_resolution` exactly once.*CONFLICT_RESOLUTIONS/i,
+      'reviews-mode collection must preserve canonical keys and encode only the raw choice');
+    assert.match(flat(PLAN_PHASE), /(?:keep|leave)(?: it)? open.*`## PLANNING COMPLETE`.*close.*exact/i,
+      'resume must not close a live blocker before explicit completion');
+    const initialPrompt = requiredSlice(PLAN_PHASE, 'Planner prompt:', '## 9. Handle Planner Return', 'initial reviews-mode planner prompt');
+    assert.match(initialPrompt, /<conflict_resolutions>[\s\S]*\{CONFLICT_RESOLUTIONS\}[\s\S]*<\/conflict_resolutions>/,
+      'the initial reviews-mode prompt must inject every collected conflict resolution');
+    assert.match(flat(PLANNER_REVIEWS), /conflict resolutions.*apply.*exact.*Applied Conflict Resolutions/i,
+      'reviews-mode planner must apply and acknowledge every supplied resolution');
+    assert.match(flat(PLAN_PHASE), /PLANNING COMPLETE.*nonempty.*CONFLICT_RESOLUTIONS.*exact.*Applied Conflict Resolutions.*close/i,
+      'initial completion must close only exactly acknowledged persisted choices');
+    assert.match(flat(PLANNER_REVISION), /Applied Conflict Resolutions.*Issue.*Chosen resolution/i,
+      'the planner completion contract must acknowledge applied choices by identity');
+    assert.match(flat(PLAN_PHASE), /close only when `### Applied Conflict Resolutions` acknowledges the exact `issue_identity \| required_property: property \| chosen_resolution: chosen_resolution`/i,
+      'only an exact application acknowledgement may close persisted state');
+  });
+
+  test('conflict identity supports scalar, multi-plan, phase-level, and task findings', () => {
+    assert.match(flat(PLANNER_REVISION), /issue identity.*`plan`.*sorted `plans`.*phase/i);
+    assert.match(flat(PLANNER_REVISION), /when `task` is present.*append.*\/task-\{task\}/i);
+    assert.match(PLANNER_REVISION, /\{issue_identity\}/);
+    assert.match(REVISION_LOOP, /\{issue_identity\}/);
+  });
+
+  test('prompt files retain material headroom below their hard caps', () => {
+    assert.ok(
+      Buffer.byteLength(PLAN_PHASE) <= PRE_PHASE6['plan-phase.md'] - REQUIRED_HEADROOM_BYTES,
+      `plan-phase needs at least ${REQUIRED_HEADROOM_BYTES} bytes headroom`,
+    );
+    assert.ok(
+      Buffer.byteLength(PLAN_CHECKER) <= LARGE_CAP - REQUIRED_HEADROOM_BYTES,
+      `plan-checker needs at least ${REQUIRED_HEADROOM_BYTES} bytes headroom`,
+    );
+  });
+
+  test('conflict-field guidance describes delimiter ownership and record forgery, not heading truncation', () => {
+    assert.doesNotMatch(flat(PLANNER_REVISION + '\n' + UI_RESEARCHER),
+      /reader scans by heading|heading truncates that scan/i);
+    assert.match(flat(PLANNER_REVISION), /raw text could forge a record, delimiter, or prompt boundary/i);
+    assert.doesNotMatch(flat(UI_RESEARCHER), /writer-owned delimiter/i,
+      'ui-phase has no persistence channel, so its agent must not claim one');
+    assert.match(flat(UI_RESEARCHER), /one line.*Markdown table cell.*otherwise.*forge rows/i,
+      'UI conflict fields need only protect their actual table boundary');
+    assert.match(flat(UI_RESEARCHER), /percent-encode.*UTF-8.*RFC 3986.*unreserved/i,
+      'UI table fields must use the same injective field codec');
+  });
+
+  test('cap escalation discloses open conflict count and details in both prompt variants', () => {
+    assert.match(flat(CONVERGENCE), /OPEN_CONFLICTS.*open plan-revision conflicts.*OPEN_CONFLICT_LINES/i);
+    assert.ok((CONVERGENCE.match(/\{OPEN_CONFLICT_LINES\}/g) || []).length >= 2,
+      'text and AskUserQuestion prompts must both disclose conflict details');
+  });
+
+  test('stall accounting includes every open conflict after parsing the owned slot', () => {
+    const total = 'UNRESOLVED_COUNT=$((HIGH_COUNT + ACTIONABLE_COUNT + OPEN_CONFLICTS))';
+    assert.match(CONVERGENCE, /UNRESOLVED_COUNT=\$\(\(HIGH_COUNT \+ ACTIONABLE_COUNT \+ OPEN_CONFLICTS\)\)/);
+    assertPrecedes(
+      CONVERGENCE,
+      'OPEN_CONFLICTS=',
+      total,
+      'open conflicts must be known before the stall baseline is calculated',
+    );
+  });
+
+  test('REVIEWS_FILE is a quoted direct path and must be a regular file', () => {
+    assert.match(CONVERGENCE, /REVIEWS_FILE="\$\{phase_dir\}\/\$\{padded_phase\}-REVIEWS\.md"/);
+    assert.doesNotMatch(CONVERGENCE, /REVIEWS_FILE=\$\(ls \$\{phase_dir\}/,
+      'word-splitting and glob expansion must not select the gate input');
+    assert.match(CONVERGENCE, /\[ ! -f "\$\{REVIEWS_FILE\}" \]/,
+      'directories and other readable non-files are not valid review artifacts');
+  });
+
+  test('a config query failure blocks persistence instead of reading as disabled', () => {
+    assert.doesNotMatch(PLAN_PHASE, /config-get workflow\.plan_review_convergence 2>\/dev\/null \|\| echo "false"/);
+    assert.match(flat(PLAN_PHASE), /fail closed reading `workflow\.plan_review_convergence`/i);
+  });
+
+  test('the gate preserves the exact quoted POSIX path', () => {
+    assert.doesNotMatch(CONVERGENCE, /tr '\\\\' '\/'/,
+      'a quoted POSIX path is already exact; rewriting backslashes corrupts a valid filename');
+  });
+
+  test('the scope calibration stays inside a declared threshold band', () => {
+    assert.match(PLAN_CHECKER, /tasks: 4\r?\n\s+files: 8/,
+      'the warning is triggered by 4 tasks; its file count should remain in the 5-8 target band');
+  });
+
+  test('quick mode names locked decisions only when CONTEXT.md exists', () => {
+    assert.match(QUICK_LOOP, /\$\{DISCUSS_MODE \? 'locked decisions in ' \+ quick_id \+ '-CONTEXT\.md, ' : ''\}capability guidance/);
+  });
+
+  test('the changeset names the actual conflict-key retry bound', () => {
+    assert.match(CHANGESET, /repeated-conflict-key and third-return caps/);
+    assert.doesNotMatch(CHANGESET, /repeated-property/);
+  });
+
+  test('the command docs include open conflicts in the exit condition', () => {
+    const section = requiredTail(COMMANDS, '### `/gsd-plan-review-convergence`', 'convergence command docs');
+    assert.match(flat(section), /open `## Plan-Revision Conflicts` entries.*must also be zero/i);
+  });
+
+});

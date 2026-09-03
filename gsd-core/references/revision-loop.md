@@ -16,6 +16,8 @@ This pattern applies whenever:
 ```
 prev_issue_count = Infinity
 iteration = 0
+previous_conflict_keys = []
+conflict_return_count = 0
 
 LOOP:
   1. Run checker/validator on current output
@@ -23,15 +25,29 @@ LOOP:
   3. If PASSED or only INFO-level issues:
      -> Accept output, exit loop
   4. If BLOCKER or WARNING issues found:
-     a. iteration += 1
-     b. If iteration > 3:
+     a. If iteration + 1 > 3:
         -> Escalate to user (see "After 3 Iterations" below)
-     c. Parse issue count from checker output
-     d. If issue_count >= prev_issue_count:
+     b. Parse issue count from checker output
+     c. If issue_count >= prev_issue_count:
         -> Escalate to user: "Revision loop stalled (issue count not decreasing)"
-     e. prev_issue_count = issue_count
-     f. Re-spawn the producing agent with checker feedback appended
-     g. After revision completes, go to LOOP
+     d. Re-spawn the producing agent with checker feedback appended
+     e. If the agent returns REVISION_CONFLICT:
+        -> conflict_return_count += 1
+        -> current_conflict_keys = sorted unique (issue_identity, required_property) pairs
+        -> validate, sanitize, and idempotently persist the returned conflict where a channel exists
+        -> If conflict_return_count >= 3:
+             escalate through the iteration-cap gate
+        -> If current_conflict_keys intersects previous_conflict_keys:
+             escalate as a stall (a chosen resolution did not take)
+           Else: previous_conflict_keys = current_conflict_keys
+             resolve it (see "Conflict Return" below) and go to step d.
+             Do NOT update prev_issue_count or increment iteration -- the conflict was not a failed attempt.
+     f. If the agent returns its explicit completion marker:
+        -> previous_conflict_keys = []
+        -> prev_issue_count = issue_count; iteration += 1; go to LOOP
+     g. Otherwise (unknown, empty, or both markers): offer Retry or Stop.
+
+The baseline update and increment are step f, only after explicit producer completion.
 ```
 
 ### Issue Count Tracking
@@ -45,25 +61,118 @@ Display iteration progress before each revision spawn:
 
 When re-spawning the producing agent for revision, pass the checker's YAML-formatted issues. The checker's output contains a `## Issues` heading followed by a YAML block. Parse this block and pass it verbatim to the revision agent.
 
+The field names are the plan-checker's schema (`agents/gsd-plan-checker.md` → `<issue_structure>`):
+`plan` or `plans`, `dimension`, `severity`, `required_property`, `description`, `task`, `fix_hint`.
+`plan` and `plans` are mutually exclusive; omit both for phase-level issues. There is no
+`suggested_fix`, `finding`, or `affected_field` field — those names were drift.
+
 ```
 <checker_issues>
-The issues below are in YAML format. Each has: dimension, severity, finding,
-affected_field, suggested_fix. Address ALL BLOCKER issues. Address WARNING
-issues where feasible.
+The issues below are in YAML format. Each has: dimension, severity,
+required_property, description, fix_hint.
+
+BINDING: required_property (the invariant that must hold), description (the
+evidence it does not), severity. NON-BINDING: fix_hint -- ONE example route to
+the property, never an instruction.
+
+Satisfy the required_property of ALL BLOCKER issues. Satisfy WARNING issues
+where feasible.
 
 {YAML issues block from checker output -- passed verbatim}
 </checker_issues>
 
 <revision_instructions>
 Address ALL BLOCKER and WARNING issues identified above.
-- For each BLOCKER: make the required change
+- For each BLOCKER: make required_property true. Its fix_hint is one example
+  route; a smaller or different mechanism that makes the same property true
+  addresses the issue in full -- report which mechanism you used.
 - For each WARNING: address or explain why it's acceptable
+- Before editing, re-check locked decisions, active capability guidance, and
+  constraints the existing output already encodes. When a `fix_hint` conflicts, first apply the smallest constraint-compatible
+  mechanism that satisfies `required_property`. Emit `REVISION_CONFLICT` only
+  when no such mechanism can satisfy the property, naming the conflict and the
+  alternatives considered, having addressed every non-conflicting issue.
 - Do NOT introduce new issues while fixing existing ones
 - Preserve all content not flagged by the checker
 This is revision iteration {N} of max 3. Previous iteration had {prev_count}
 issues. You must reduce the count or the loop will terminate.
 </revision_instructions>
 ```
+
+### Conflict Return (REVISION_CONFLICT)
+
+A revision agent that returns `REVISION_CONFLICT` has not failed and has not stalled. Handle it
+BEFORE the iteration counter and the stall check — a conflict is not resolvable by re-running the
+same loop, so spending retry budget on it only exhausts the cap:
+
+**This protocol is shared.** Every revision-bearing workflow follows it — `plan-phase`, `quick`,
+`quick-batch`, `ui-phase`, and `verify-work`'s gap-plan loop. `plan-phase` @-imports this reference;
+`quick-batch` explicitly loads this section. Both state only their host-specific bindings. The other
+three restate the operative rules inline; this section is the authority they must agree with.
+
+1. **Do not spend budget.** Do NOT increment the iteration counter and do NOT update
+   `prev_issue_count`. Do NOT re-spawn the checker yet — the conflict is not a revised output.
+2. **Record**, where the host has a channel an arbitration loop reads. `review.md` emits one
+   fixed writer-owned slot at the first nonblank line after the artifact title, between
+   `<!-- gsd:plan-revision-conflicts:begin -->` and
+   `<!-- gsd:plan-revision-conflicts:end -->`. When `workflow.plan_review_convergence` is enabled
+   and the phase `*-REVIEWS.md` already exists, `plan-phase` appends one line per conflict under
+   `## Plan-Revision Conflicts` inside that slot:
+
+```markdown
+- [ ] REVISION_CONFLICT {issue_identity} — required_property: {property} | conflicts with: {locked decision D-nn / CLAUDE.md rule / plan constraint} | alternatives: {the agent's alternatives}
+```
+
+   A checkbox, not a table row: `- [ ] REVISION_CONFLICT` is open and `- [x] REVISION_CONFLICT`
+   is resolved. The reader counts matching open lines only inside the first nonblank slot after the artifact title; an identical marker in reviewer output is not state. An open line in the owned
+   slot blocks convergence even if this run is abandoned.
+   A workflow with no such channel (`quick` has no phase and no REVIEWS.md) skips this step.
+
+   Before appending, reuse the existing open line instead of appending a duplicate when its
+   sanitized fields identify the same conflict. This makes persisted conflict state idempotent.
+
+   **Sanitize before writing — the conflict text is agent-authored.** Validate every returned
+   conflict field, including `issue_identity` and `required_property`, as an already encoded
+   nonempty canonical value of valid UTF-8: only RFC 3986 unreserved bytes or uppercase `%HH`;
+   strictly decode and re-encode to prove equality. Empty input or invalid input: do not write; report
+   `BLOCKED`. Decode a validated copy only for user display; keep the encoded originals for keys,
+   persistence, and transport, and never encode them again. percent-encode the raw
+   chosen_resolution's UTF-8 bytes exactly once with the same codec, leaving only RFC 3986
+   unreserved bytes. One conflict is exactly one line beginning `- [ ]`; never append raw agent
+   text or a fenced block.
+3. **Resolve** — present the conflict and its alternatives to the user and ask which to take
+   (pattern: `gsd-core/references/gate-prompts.md`): adopt a named alternative / override the
+   named constraint and apply the hint / amend the constraint itself. Each option resolves the
+   conflict. Accepting the output with the blocker still open is NOT offered here — the blocking
+   `required_property` still fails, and that choice belongs to the cap escalation.
+4. **Re-spawn** with every sanitized
+   `{issue_identity} | required_property: {property} | chosen_resolution: {chosen_resolution}`
+   triple in the revision prompt, keeping recorded lines open; re-evaluate its return from the top of this handler.
+5. **Close after application** — `## REVISION COMPLETE` must echo each applied triple under
+   `### Applied Conflict Resolutions`. Only an exact identity/property/choice match lets the writer
+   flip that line to `- [x]` and append ` | resolved: {chosen resolution}`. Unknown, empty,
+   ambiguous, failed,
+   or abandoned returns leave it open.
+
+**Bounded — two ways, because one is evadable.** Not incrementing must not make this path
+unbounded:
+
+- **Repeat.** Derive the sorted unique `(issue_identity, required_property)` keys for every return.
+  Any canonical conflict key repeated in consecutive returns means its resolution did not take;
+  stop and escalate as a stall.
+- **Total.** Count every conflict return in this revision loop, whatever property each names. On
+  the THIRD, stop and escalate — an agent that alternates property names never trips the repeat
+  rule, so the repeat rule alone leaves the loop unbounded. This total is what actually bounds the
+  path; the repeat rule just catches the common case sooner.
+
+Both escalate through the same gate the iteration cap uses. A conflict still never consumes a
+revision iteration — the cap on conflicts is separate from, and additional to, the cap on
+revisions.
+
+**No workflow hands a conflict to a loop and returns.** Asking the user is the route everywhere;
+recording is in addition to asking, never instead of it. `plan-phase` in particular never invokes
+`/gsd:plan-review-convergence` — it runs *inside* that loop, so invoking it would be a cycle, and
+"was I invoked by convergence?" is not a question the orchestrator can answer at runtime.
 
 ### After 3 Iterations
 
@@ -95,3 +204,5 @@ If issues persist after 3 revision cycles:
 - **Each iteration gets a fresh agent spawn** -- don't try to continue in the same context
 - **Checker feedback must be inlined** -- the revision agent needs to see exactly what failed
 - **Don't silently swallow issues** -- always present the final state to the user after exiting the loop
+- **A remediation hint is an example, not an order** -- an issue satisfied through a smaller valid
+  mechanism is addressed, and counts as resolved for the issue-count and stall checks

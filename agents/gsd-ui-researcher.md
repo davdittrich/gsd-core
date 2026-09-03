@@ -345,6 +345,13 @@ gsd_run query commit "docs($PHASE): UI design contract" --files "$PHASE_DIR/$PAD
 **Phase:** {phase_number} - {phase_name}
 **Design System:** {shadcn preset / manual / none}
 
+### Applied Conflict Resolutions
+| Issue | required_property | Chosen resolution |
+|-------|-------------------|-------------------|
+| {exact issue_identity} | {exact property} | {exact chosen_resolution} |
+
+Omit this section when no conflict resolutions were supplied.
+
 ### Contract Summary
 - Spacing: {scale summary}
 - Typography: {N} sizes, {N} weights
@@ -366,6 +373,39 @@ gsd_run query commit "docs($PHASE): UI design contract" --files "$PHASE_DIR/$PAD
 ### Ready for Verification
 UI-SPEC complete. Checker can now validate.
 ```
+
+## Revision Conflict
+
+Revision mode only. When a `fix_hint` conflicts, first apply the smallest constraint-compatible
+mechanism that satisfies `required_property`. Emit `REVISION_CONFLICT` only when no such mechanism
+can satisfy the property. Resolve every non-conflicting issue first. This is not a failure:
+`/gsd:ui-phase` routes it to the user and does not spend a revision iteration on it.
+
+```markdown
+## REVISION_CONFLICT
+
+**Conflicts:** {N}  |  **Issues resolved anyway:** {M}
+
+| Issue | required_property | Conflicts with | Why the hint cannot be applied |
+|-------|-------------------|----------------|-------------------------------|
+| {exact issue_identity} | {property} | {locked answer / CLAUDE.md rule / spec constraint} | {one line} |
+
+### Alternatives Considered
+
+| Issue | Alternative | Satisfies required_property? | Cost of adopting |
+|-------|-------------|------------------------------|------------------|
+| {exact issue_identity} | {smaller or different mechanism} | {yes / partially — how} | {what it changes} |
+```
+
+**Issue identity:** for a new conflict, derive the raw `issue_identity` from the checker fields:
+use `{dimension}/{plan}` for scalar `plan`; otherwise join sorted `plans` with `+`, or use
+`{dimension}/phase` when neither exists. When `task` is present, append `/task-{task}`.
+Encode each raw field exactly once. When acknowledging supplied encoded resolution triples, echo
+their fields byte-for-byte; do not encode again.
+
+**Every field is one line safe for a Markdown table cell:** for newly derived fields, reject empty
+input and percent-encode UTF-8 bytes with uppercase `%HH`, leaving only RFC 3986 unreserved bytes;
+otherwise text can forge rows.
 
 ## UI-SPEC Blocked
 

@@ -336,6 +336,7 @@ const DOCS_GUARD_TESTS = {
   'tests/progress-forensic.test.cjs': ['docs/COMMANDS.md'],
   'tests/repo-layout.test.cjs': ['docs/contributing/bootstrap.md'],
   'tests/reversibility-tagging.test.cjs': ['docs/reference/plan-md.md'],
+  'tests/revision-remediation-binding.test.cjs': ['docs/AGENTS.md', 'docs/COMMANDS.md'],
   'tests/reviewer-docs-parity.test.cjs': [
     'docs/COMMANDS.md',
     'docs/ja-JP/COMMANDS.md',

@@ -180,10 +180,14 @@ instrument — the executor's own narration is never the last word. For each `*-
 ```bash
 BASE=$(grep -oE '^plan_head_before: [0-9a-f]{7,40}' "$SUMMARY_FILE" | awk '{print $2}')
 CLAIMED=$(grep -oE '^commits: [0-9]+' "$SUMMARY_FILE" | grep -oE '[0-9]+' || echo absent)
-ACTUAL=$(git rev-list --count "${BASE}"..HEAD)
+if [ -n "$BASE" ]; then
+  ACTUAL=$(git rev-list --count "${BASE}"..HEAD)
+else
+  ACTUAL=absent
+fi
 ```
 - A `commits: absent` or `plan_head_before: absent` SUMMARY (pre-#3968 legacy) is reported as
-  a WARNING with the measured git state, not a mismatch.
+  a WARNING, not a mismatch; when the base is absent, do not invoke `git rev-list`.
 - `ACTUAL == CLAIMED` is consistent. `ACTUAL == CLAIMED + 1` is ALSO consistent: the
   SUMMARY/metadata commit itself lands after the executor measured, so exactly one
   post-measurement commit is expected.
@@ -890,6 +894,15 @@ ${AGENT_SKILLS_PLANNER}
 
 <instructions>
 Read existing PLAN.md files. Make targeted updates to address checker issues.
+
+`required_property` + evidence + severity BIND. `fix_hint` is ONE non-binding example route: a
+smaller or different mechanism reaching the same property addresses the issue in full — say which
+you used. Re-check locked decisions, capability guidance (CLAUDE.md, project skills) and the
+constraints these plans already encode BEFORE editing. When a `fix_hint` conflicts, first apply the
+smallest constraint-compatible mechanism that satisfies `required_property`. Emit
+`REVISION_CONFLICT` only when no such mechanism can satisfy the property. Full contract:
+`gsd-core/references/planner-revision.md`, which you load in revision mode.
+
 Do NOT replan from scratch unless issues are fundamental.
 </instructions>
 """,
@@ -901,8 +914,11 @@ Do NOT replan from scratch unless issues are fundamental.
 
 > **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
 
-After planner returns → spawn checker again (verify_gap_plans logic)
-Increment iteration_count
+**On `## REVISION_CONFLICT`:** do NOT increment `iteration_count` or check. Present alternatives to the user; ask them to adopt a named alternative, override the named constraint and apply the hint, or amend the constraint; accepting the blocker is NOT offered here. Derive sorted unique `(issue_identity, required_property)` keys. Any canonical conflict key repeated in consecutive returns, or the THIRD conflict return, escalates as a stall. Validate every returned conflict field, including `issue_identity` and `required_property`, as an already encoded nonempty canonical value of valid UTF-8: only RFC 3986 unreserved bytes or uppercase `%HH`; strictly decode and re-encode to prove equality. Invalid: do not persist or re-spawn; treat the return as unknown/`BLOCKED`. Decode a validated copy only for user display; keep the encoded originals for keys and transport, and never encode them again. Percent-encode the raw chosen_resolution's UTF-8 bytes exactly once, leaving only RFC 3986 unreserved bytes. Re-spawn with `{issue_identity} | required_property: {property} | chosen_resolution: {chosen_resolution}` triples and re-evaluate its return from the top of this handler.
+
+**Only on `## REVISION COMPLETE`:** require `### Applied Conflict Resolutions` to acknowledge every exact `issue_identity | required_property: property | chosen_resolution: chosen_resolution` triple supplied in the re-spawn prompt. If any triple is absent or mismatched, treat the return as unknown: offer Retry or Stop; do not check or increment. On a qualifying return after exact acknowledgement, spawn checker (verify_gap_plans logic), then increment `iteration_count`.
+
+**Otherwise (unknown, empty, or both markers):** offer Retry or Stop. Do not check or increment.
 
 **If iteration_count >= 3:**
 

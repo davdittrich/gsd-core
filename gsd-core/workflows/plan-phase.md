@@ -584,8 +584,6 @@ map is refreshed first. (`drift_action: auto-remap` stays at `execute:wave:post`
 ls "${PHASE_DIR}"/*-PLAN.md 2>/dev/null || true
 ```
 
-**If exists AND `--reviews` flag:** Skip prompt — go straight to replanning (the purpose of `--reviews` is to replan with review feedback).
-
 **If exists AND no `--reviews` flag:** Offer: 1) Add more plans, 2) View existing, 3) Replan from scratch.
 
 ## 7. Use Context Paths from INIT
@@ -620,6 +618,8 @@ SPEC_PATH="${SPEC_FILE}"
 UI_SPEC_FILE=$(ls "${PHASE_DIR_FOR_SPEC}"/*-UI-SPEC.md 2>/dev/null | head -1)
 UI_SPEC_PATH="${UI_SPEC_FILE}"
 ```
+
+**With plans and `--reviews`:** parse REVIEWS_PATH's first canonical writer-owned slot; ignore reviewer output; malformed: BLOCKED. For each open record, preserve its encoded `issue_identity` and `required_property`; obtain user choice per Conflict Return 3; percent-encode raw `chosen_resolution` exactly once; add `{issue_identity} | required_property: {property} | chosen_resolution: {chosen_resolution}` to CONFLICT_RESOLUTIONS; leave open.
 
 ## 7.5. Verify Nyquist Artifacts
 
@@ -777,14 +777,13 @@ ${API_SURFACE_PATH ? `
 ` : ''}
 ${AGENT_SKILLS_PLANNER}
 
+{When Mode is reviews and CONFLICT_RESOLUTIONS is nonempty:}
+<conflict_resolutions>
+{CONFLICT_RESOLUTIONS}
+</conflict_resolutions>
+
 <review_incorporation_contract>
-**If Mode is reviews:** REVIEWS.md is feedback input, not a hidden execution contract. /gsd:execute-phase primarily consumes PLAN.md plus the normal phase context, so every current actionable review finding must become visible in the relevant PLAN.md before planning can pass.
-
-For each current actionable finding in REVIEWS.md, the planner MUST either:
-- incorporate it into a PLAN.md task, `<action>`, `<acceptance_criteria>`, `<verify>`, `must_haves`, threat model, or artifact list; or
-- explicitly document a deferral/rejection rationale in the relevant PLAN.md so the executor and reviewer can see the decision.
-
-Historical findings already incorporated, explicitly deferred/rejected in PLAN.md, or marked fully resolved do not require new plan changes.
+**If Mode is reviews:** REVIEWS.md is feedback input; /gsd:execute-phase primarily consumes PLAN.md. Put every current actionable finding in the relevant PLAN.md execution fields, or record its deferral/rejection rationale there. Ignore historical findings already handled.
 </review_incorporation_contract>
 
 **Phase requirement IDs (every ID MUST appear in a plan's `requirements` field):** {phase_req_ids}
@@ -944,7 +943,7 @@ If `section_manifest` is `null` or `"chunked-planning-mode"` is in its `included
 
 ## 9. Handle Planner Return
 
-- **`## PLANNING COMPLETE`:** Display plan count. If `--skip-verify` or `plan_checker_enabled` is false (from init): skip to step 13. Otherwise: step 10.
+- **`## PLANNING COMPLETE`:** With nonempty `CONFLICT_RESOLUTIONS`, accept only an exact `### Applied Conflict Resolutions` echo; otherwise Retry or Stop without closing or advancing. Close exact matches only. Display plan count. If `--skip-verify` or checker disabled: step 13; otherwise step 10.
 - **`## PHASE SPLIT RECOMMENDED`:** The planner determined the phase exceeds the context budget for full-fidelity implementation of all source items. Handle in step 9b.
 - **`## ⚠ Source Audit: Unplanned Items Found`:** The planner's multi-source coverage audit found items from REQUIREMENTS.md, RESEARCH.md, ROADMAP goal, or CONTEXT.md decisions that are not covered by any plan. Handle in step 9c.
 - **`## CHECKPOINT REACHED`:** Present to user, get response, spawn continuation (step 12)
@@ -1224,8 +1223,6 @@ Display (only when entering the revision loop — skip if the paragraph above al
     If "Proceed anyway": accept current plans and continue to step 13.
     If "Abandon": stop workflow.
 
-Set `prev_issue_count = issue_count`.
-
 Revision prompt:
 
 ```markdown
@@ -1241,12 +1238,16 @@ Revision prompt:
 ${AGENT_SKILLS_PLANNER}
 
 **Checker issues:** {structured_issues_from_checker}
+
+{When nonempty:}
+<conflict_resolutions>
+{CONFLICT_RESOLUTIONS}
+</conflict_resolutions>
 </revision_context>
 
 <instructions>
-Make targeted updates to address checker issues.
-Do NOT replan from scratch unless issues are fundamental.
-Return what changed.
+Make updates under `gsd-core/references/planner-revision.md`, loaded in revision mode. Honor binding
+properties/constraints; hints are examples. Replan only if fundamental. Return changes.
 </instructions>
 ```
 
@@ -1260,9 +1261,13 @@ Agent(
 )
 ```
 
-**ORCHESTRATOR RULE — ALL RUNTIMES:** (7.99; no marker, mtimes only) `TS=$(date +%s)`; repeat `PLANNER_STALL_RESULT=$(gsd_stall_watch "$TS" "{outputFile}" "${PHASE_DIR}"'/*-PLAN.md')` while waiting/active — `stalled` -> 1) Accept as revised, to step 13, 2) Retry, 3) Stop.
+**ORCHESTRATOR RULE — ALL RUNTIMES:** `TS=$(date +%s)`; while active, run `gsd_stall_watch "$TS" "{outputFile}" "${PHASE_DIR}"'/*-PLAN.md'`; on `stalled`: Retry or Stop.
 
-After planner returns -> spawn checker again (step 10), increment iteration_count.
+**On `## REVISION_CONFLICT`:** follow shared Conflict Return with `REVIEWS_FILE="${REVIEWS_PATH}"`; fail closed reading `workflow.plan_review_convergence`. Record only when enabled and the path is a regular file.
+
+**Only on `## REVISION COMPLETE`:** close only when `### Applied Conflict Resolutions` acknowledges the exact `issue_identity | required_property: property | chosen_resolution: chosen_resolution`; update baseline, check, increment.
+
+**Unknown, empty, or both:** leave open; offer Retry or Stop; preserve state.
 
 **If iteration_count >= 3:**
 

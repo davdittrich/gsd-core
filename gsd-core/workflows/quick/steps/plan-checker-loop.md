@@ -88,6 +88,15 @@ ${AGENT_SKILLS_PLANNER}
 
 <instructions>
 Make targeted updates to address checker issues.
+
+`required_property` + evidence + severity BIND. `fix_hint` is ONE non-binding example route: a
+smaller or different mechanism reaching the same property addresses the issue in full — say which
+you used. Re-check ${DISCUSS_MODE ? 'locked decisions in ' + quick_id + '-CONTEXT.md, ' : ''}capability guidance (CLAUDE.md, project skills) and the
+constraints these plans already encode BEFORE editing. When a `fix_hint` conflicts, first apply the
+smallest constraint-compatible mechanism that satisfies `required_property`. Emit
+`REVISION_CONFLICT` only when no such mechanism can satisfy the property. Full contract:
+`gsd-core/references/planner-revision.md`, which you load in revision mode.
+
 Do NOT replan from scratch unless issues are fundamental.
 Return what changed.
 </instructions>
@@ -104,7 +113,11 @@ Agent(
 
 > **ORCHESTRATOR RULE — CODEX RUNTIME**: After calling Agent() above, stop working on this task immediately. Do not read more files, edit code, or run tests related to this task while the subagent is active. Wait for the subagent to return its result. This prevents duplicate work, conflicting edits, and wasted context. Only resume when the subagent result is available.
 
-After planner returns → spawn checker again, increment iteration_count.
+**On `## REVISION_CONFLICT`:** do NOT increment `iteration_count` or check. Present alternatives to the user; ask them to adopt a named alternative, override the named constraint and apply the hint, or amend the constraint; accepting the blocker is NOT offered here. Derive sorted unique `(issue_identity, required_property)` keys. Any canonical conflict key repeated in consecutive returns, or the THIRD conflict return, escalates as a stall. Validate every returned conflict field, including `issue_identity` and `required_property`, as an already encoded nonempty canonical value of valid UTF-8: only RFC 3986 unreserved bytes or uppercase `%HH`; strictly decode and re-encode to prove equality. Invalid: do not persist or re-spawn; treat the return as unknown/`BLOCKED`. Decode a validated copy only for user display; keep the encoded originals for keys and transport, and never encode them again. Percent-encode the raw chosen_resolution's UTF-8 bytes exactly once, leaving only RFC 3986 unreserved bytes. Re-spawn with `{issue_identity} | required_property: {property} | chosen_resolution: {chosen_resolution}` triples and re-evaluate its return from the top of this handler. Quick has no persistence channel.
+
+**Only on `## REVISION COMPLETE`:** require `### Applied Conflict Resolutions` to acknowledge every exact `issue_identity | required_property: property | chosen_resolution: chosen_resolution` triple supplied in the re-spawn prompt. If any triple is absent or mismatched, treat the return as unknown: offer Retry or Stop; do not check or increment. On a qualifying return after exact acknowledgement, spawn checker, then increment `iteration_count`.
+
+**Otherwise (unknown, empty, or both markers):** offer Retry or Stop. Do not check or increment.
 
 **If iteration_count >= 2:**
 

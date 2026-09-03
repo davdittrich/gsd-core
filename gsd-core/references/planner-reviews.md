@@ -26,6 +26,9 @@ Create new plans following the standard planning process, but with review feedba
 - Note in task actions: "Addresses review concern: {concern}" for traceability
 
 ### Step 4: Return
+When the prompt supplies conflict resolutions, apply every exact triple to the plans and echo each
+one byte-for-byte under `### Applied Conflict Resolutions`; do not re-encode any field.
+
 Use standard PLANNING COMPLETE return format, adding a reviews section:
 
 ```markdown

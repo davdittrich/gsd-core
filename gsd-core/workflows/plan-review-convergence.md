@@ -383,8 +383,6 @@ if [ -z "$ACTIONABLE_COUNT" ]; then
   exit 1
 fi
 
-UNRESOLVED_COUNT=$((HIGH_COUNT + ACTIONABLE_COUNT))
-
 # Extract the ## Current HIGH Concerns section from the agent's return message
 HIGH_LINES=$(echo "$REVIEW_AGENT_RETURN" | awk '/^## Current HIGH Concerns/{found=1; next} found && /^##/{exit} found{print}')
 ACTIONABLE_LINES=$(echo "$REVIEW_AGENT_RETURN" | awk '/^## Current Actionable Non-HIGH Concerns/{found=1; next} found && /^##/{exit} found{print}')
@@ -398,7 +396,126 @@ if [ "${ACTIONABLE_COUNT}" -gt 0 ] && [ -z "${ACTIONABLE_LINES}" ]; then
 fi
 ```
 
-**If HIGH_COUNT == 0 and ACTIONABLE_COUNT == 0 (converged):**
+**Open plan-revision conflicts are part of the converged condition (#3771).** An entry under
+`## Plan-Revision Conflicts` in REVIEWS.md is a checker `fix_hint` that contradicted a locked
+decision, capability guidance, or an existing plan constraint, recorded by `/gsd:plan-phase`
+together with the alternatives the planner considered. It is NOT counted by `CYCLE_SUMMARY`, so
+it must be read from the file directly — evaluate this BEFORE the converged branch below, or a
+run would write `planned-phase` and print the success banner over a conflict nobody resolved:
+
+```bash
+if [ ! -f "${REVIEWS_FILE}" ]; then
+  # Fail CLOSED. A missing/non-file REVIEWS.md is "I cannot tell", never "no conflicts".
+  echo "BLOCKED: cannot read REVIEWS.md ('${REVIEWS_FILE}') to check for open plan-revision conflicts. Refusing to declare convergence on an unverifiable gate." >&2
+  exit 1
+fi
+if CONFLICT_SCAN=$(awk '
+  BEGIN {
+    saw_title = 0; in_owned = 0; saw_heading = 0; done = 0; count = 0; record_count = 0
+    encoded = "([A-Za-z0-9._~-]|%[0-9A-F][0-9A-F])+"
+    open_record = "^[[:space:]]*-[[:space:]]+\\[[[:space:]]\\][[:space:]]+REVISION_CONFLICT[[:space:]]+" encoded "[[:space:]]+—[[:space:]]+required_property:[[:space:]]+" encoded "[[:space:]]+\\|[[:space:]]+conflicts with:[[:space:]]+" encoded "[[:space:]]+\\|[[:space:]]+alternatives:[[:space:]]+" encoded "[[:space:]]*$"
+    resolved_record = "^[[:space:]]*-[[:space:]]+\\[[xX]\\][[:space:]]+REVISION_CONFLICT[[:space:]]+" encoded "[[:space:]]+—[[:space:]]+required_property:[[:space:]]+" encoded "[[:space:]]+\\|[[:space:]]+conflicts with:[[:space:]]+" encoded "[[:space:]]+\\|[[:space:]]+alternatives:[[:space:]]+" encoded "[[:space:]]+\\|[[:space:]]+resolved:[[:space:]]+" encoded "[[:space:]]*$"
+  }
+  { sub(/\r$/, "") }
+  !saw_title && /^# Cross-AI Plan Review — Phase / { saw_title = 1; next }
+  saw_title && !in_owned && !done {
+    if ($0 == "") next
+    if ($0 == "<!-- gsd:plan-revision-conflicts:begin -->") { in_owned = 1; next }
+    exit 2
+  }
+  in_owned && $0 == "<!-- gsd:plan-revision-conflicts:begin -->" { exit 2 }
+  in_owned && !saw_heading && $0 == "## Plan-Revision Conflicts" { saw_heading = 1; next }
+  in_owned && !saw_heading { exit 2 }
+  in_owned && $0 == "<!-- gsd:plan-revision-conflicts:end -->" {
+    done = 1
+    in_owned = 0
+    print count
+    for (i = 1; i <= count; i++) print "OPEN:" open[i]
+    for (i = 1; i <= record_count; i++) print "VALIDATE:" records[i]
+    exit
+  }
+  in_owned && $0 ~ open_record {
+    open[++count] = $0
+    records[++record_count] = $0
+    next
+  }
+  in_owned && $0 ~ resolved_record { records[++record_count] = $0; next }
+  in_owned && $0 == "" { next }
+  in_owned { exit 2 }
+  END { if (!done) exit 2 }
+' "${REVIEWS_FILE}"); then
+  OPEN_CONFLICTS=$(printf '%s\n' "$CONFLICT_SCAN" | sed -n '1p')
+  OPEN_CONFLICT_LINES=$(printf '%s\n' "$CONFLICT_SCAN" | sed -n 's/^OPEN://p')
+  CONFLICT_RECORD_LINES=$(printf '%s\n' "$CONFLICT_SCAN" | sed -n 's/^VALIDATE://p')
+  if ! printf '%s\n' "$CONFLICT_RECORD_LINES" | node -e '
+const fs = require("fs");
+const encode = (value) => Array.from(Buffer.from(value, "utf8"), (byte) => {
+  const char = String.fromCharCode(byte);
+  return /[A-Za-z0-9._~-]/.test(char)
+    ? char
+    : "%" + byte.toString(16).toUpperCase().padStart(2, "0");
+}).join("");
+const splitOnce = (value, separator) => {
+  const at = value.indexOf(separator);
+  if (at < 0) throw new Error("missing conflict separator");
+  return [value.slice(0, at), value.slice(at + separator.length)];
+};
+try {
+  for (const line of fs.readFileSync(0, "utf8").split(/\r?\n/).filter(Boolean)) {
+    const marker = line.match(/REVISION_CONFLICT[ \t]+/);
+    if (!marker) throw new Error("missing conflict marker");
+    let rest = line.slice(marker.index + marker[0].length);
+    const [identity, afterIdentity] = splitOnce(rest, " — required_property: ");
+    const [property, afterProperty] = splitOnce(afterIdentity, " | conflicts with: ");
+    const [conflict, tail] = splitOnce(afterProperty, " | alternatives: ");
+    const tokens = [identity, property, conflict];
+    if (tail.includes(" | resolved: ")) {
+      const [alternatives, resolution] = splitOnce(tail, " | resolved: ");
+      tokens.push(alternatives, resolution);
+    } else {
+      tokens.push(tail);
+    }
+    for (const token of tokens) {
+      if (!token || encode(decodeURIComponent(token)) !== token) process.exit(1);
+    }
+  }
+} catch {
+  process.exit(1);
+}
+'; then
+    echo "BLOCKED: plan-revision conflict fields are not canonical UTF-8 percent encodings." >&2
+    exit 1
+  fi
+else
+  awk_status=$?
+  echo "BLOCKED: could not parse the writer-owned plan-revision conflict block in '${REVIEWS_FILE}' (awk exit ${awk_status}). Refusing to declare convergence on an unverifiable gate." >&2
+  exit 1
+fi
+UNRESOLVED_COUNT=$((HIGH_COUNT + ACTIONABLE_COUNT + OPEN_CONFLICTS))
+```
+
+`/gsd:review` emits exactly one writer-owned slot at the first nonblank line after the artifact title,
+between `<!-- gsd:plan-revision-conflicts:begin -->` and
+`<!-- gsd:plan-revision-conflicts:end -->`. Inside that slot, `/gsd:plan-phase` records each
+conflict as a `- [ ] REVISION_CONFLICT` checklist line and flips it to
+`- [x] REVISION_CONFLICT` when resolved. The reader counts only the first fixed slot at that
+position, and stops at its explicit end delimiter. The reader strictly decodes and canonically
+re-encodes every open and resolved record field; aliases, invalid UTF-8, raw delimiters, whitespace, malformed
+`%` escapes, and lowercase escapes fail the convergence gate closed. Decoded copies are display-only;
+encoded originals remain authoritative for keys, persistence, and prompt transport. Reviewer output is rendered after the slot, so
+raw reviewer text containing either the heading or an exact conflict-shaped checklist line cannot
+forge blocking state. There is deliberately no fallback to the prior global line-shape scan: that
+shape never merged to `next`, and accepting both grammars would recreate the reviewer collision.
+
+**Only `/gsd:plan-phase` mutates the contents of this slot.** The review agent preserves the
+existing `## Plan-Revision Conflicts` block byte-for-byte between its delimiters; every other
+agent with write access to REVIEWS.md must leave it alone. Appending, editing, reordering or
+deleting a line there forges the state of a blocking gate. Readers read. If `OPEN_CONFLICTS` > 0, convergence has NOT been
+achieved regardless of the counts: skip the converged branch and continue to 5c so the next cycle
+arbitrates. Escalation at `MAX_CYCLES` is unchanged and still terminates the loop, so an
+unresolvable conflict escalates rather than deadlocking.
+
+**If HIGH_COUNT == 0 and ACTIONABLE_COUNT == 0 and OPEN_CONFLICTS == 0 (converged):**
 
 ```bash
 gsd_run state planned-phase --phase "${PHASE}" --name "${phase_name}" --plans "${PLAN_COUNT}"
@@ -418,16 +535,16 @@ Display:
 
 Exit — convergence achieved.
 
-**If HIGH_COUNT > 0 or ACTIONABLE_COUNT > 0:** Continue to 5c.
+**If HIGH_COUNT > 0 or ACTIONABLE_COUNT > 0 or OPEN_CONFLICTS > 0:** Continue to 5c.
 
 ### 5c. Stall Detection + Escalation Check
 
-Display: `◆ Cycle {cycle}/{MAX_CYCLES} — {HIGH_COUNT} HIGH, {ACTIONABLE_COUNT} actionable non-HIGH review concerns found`
+Display: `◆ Cycle {cycle}/{MAX_CYCLES} — {HIGH_COUNT} HIGH, {ACTIONABLE_COUNT} actionable non-HIGH, {OPEN_CONFLICTS} open plan-revision conflicts found`
 
 **Stall detection:** If `UNRESOLVED_COUNT >= prev_unresolved_count`:
 ```text
-⚠ Convergence stalled — unresolved review concern count not decreasing
-  ({UNRESOLVED_COUNT} unresolved concerns, previous cycle had {prev_unresolved_count})
+⚠ Convergence stalled — unresolved item count not decreasing
+  ({UNRESOLVED_COUNT} unresolved items, previous cycle had {prev_unresolved_count})
 ```
 
 **Max cycles check:** If `cycle >= MAX_CYCLES`:
@@ -435,11 +552,14 @@ Display: `◆ Cycle {cycle}/{MAX_CYCLES} — {HIGH_COUNT} HIGH, {ACTIONABLE_COUN
 If `TEXT_MODE` is true, present as plain-text numbered list:
 ```text
 Plan convergence did not complete after {MAX_CYCLES} cycles.
-{HIGH_COUNT} HIGH concerns and {ACTIONABLE_COUNT} actionable non-HIGH concerns remain:
+{HIGH_COUNT} HIGH concerns, {ACTIONABLE_COUNT} actionable non-HIGH concerns, and
+{OPEN_CONFLICTS} open plan-revision conflicts remain:
 
 {HIGH_LINES}
 
 {ACTIONABLE_LINES}
+
+{OPEN_CONFLICT_LINES}
 
 How would you like to proceed?
 
@@ -453,7 +573,7 @@ Otherwise use AskUserQuestion:
 ```js
 AskUserQuestion([
   {
-    question: "Plan convergence did not complete after {MAX_CYCLES} cycles. {HIGH_COUNT} HIGH concerns and {ACTIONABLE_COUNT} actionable non-HIGH concerns remain:\n\n{HIGH_LINES}\n\n{ACTIONABLE_LINES}\n\nHow would you like to proceed?",
+    question: "Plan convergence did not complete after {MAX_CYCLES} cycles. {HIGH_COUNT} HIGH concerns, {ACTIONABLE_COUNT} actionable non-HIGH concerns, and {OPEN_CONFLICTS} open plan-revision conflicts remain:\n\n{HIGH_LINES}\n\n{ACTIONABLE_LINES}\n\n{OPEN_CONFLICT_LINES}\n\nHow would you like to proceed?",
     header: "Convergence",
     multiSelect: false,
     options: [
@@ -486,7 +606,7 @@ Display: `◆ Replanning inline with review feedback... (plan-phase runs here in
 Skill(skill="gsd-plan-phase", args="{PHASE} --reviews --skip-research {GSD_WS}")
 ```
 
-Run plan-phase **inline** (do NOT wrap it in Agent()). Same rationale as step 4: the convergence orchestrator runs at depth 0 with Agent available, so inline plan-phase can spawn gsd-planner and gsd-plan-checker at depth 1. Wrapping in Agent() pushes plan-phase to depth 1 where the Agent tool is absent — the replan loop can never produce a revised plan when HIGHs are found. This is the root cause of bug #936. Actionable MEDIUM/LOW findings must be incorporated into executable PLAN.md content or explicitly deferred/rejected in the relevant PLAN.md before convergence can complete. Wait until plan-phase completes (outputs '## PLANNING COMPLETE') and updated PLAN.md files are committed before continuing.
+Run plan-phase **inline** (do NOT wrap it in Agent()). Same rationale as step 4: the convergence orchestrator runs at depth 0 with Agent available, so inline plan-phase can spawn gsd-planner and gsd-plan-checker at depth 1. Wrapping in Agent() pushes plan-phase to depth 1 where the Agent tool is absent — the replan loop can never produce a revised plan when HIGHs are found. This is the root cause of bug #936. Actionable MEDIUM/LOW findings must be incorporated into executable PLAN.md content or explicitly deferred/rejected in the relevant PLAN.md before convergence can complete. The same holds for any open `## Plan-Revision Conflicts` entry (#3771): the replan must resolve it by adopting one of its recorded alternatives, overriding the named constraint, or amending the constraint — and mark the entry resolved. Re-running the planner against an unchanged conflict cannot resolve it and only burns a cycle. Wait until plan-phase completes (outputs '## PLANNING COMPLETE') and updated PLAN.md files are committed before continuing.
 
 After plan-phase completes → go back to **step 5a** (review again).
 
@@ -505,7 +625,8 @@ After plan-phase completes → go back to **step 5a** (review again).
 - [ ] Abort with clear error if current_actionable is absent or malformed
 - [ ] Warn if ACTIONABLE_COUNT > 0 but ## Current Actionable Non-HIGH Concerns section is absent from return message
 - [ ] The review Agent fully completes gsd-review before returning (plan-phase runs inline — no Agent wrap)
-- [ ] Loop exits on: no HIGH concerns and no actionable non-HIGH concerns (converged) OR max cycles (escalation)
+- [ ] Loop exits on: no HIGH concerns, no actionable non-HIGH concerns, and OPEN_CONFLICTS == 0 (converged) OR max cycles (escalation)
+- [ ] OPEN_CONFLICTS read from REVIEWS.md and evaluated BEFORE the converged branch writes state or prints the banner
 - [ ] Stall detection reported when total unresolved review concern count is not decreasing
 - [ ] STATE.md updated on convergence completion
 </success_criteria>

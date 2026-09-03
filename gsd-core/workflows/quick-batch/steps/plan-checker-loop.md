@@ -1,5 +1,8 @@
 **Step 4.5: Plan-checker loop (only when `$VALIDATE_MODE`, called from planner-wave.md)**
 
+Before executing this step, read the **Conflict Return (`REVISION_CONFLICT`)** section of
+`gsd-core/references/revision-loop.md`; it is the shared conflict-routing protocol.
+
 Runs once per DAG layer, for every item in that layer that produced a
 PLAN.md this round (row 17 of the design's behavior table). Per item, max 2
 iterations — identical cap to `/gsd:quick --validate`'s own loop
@@ -91,9 +94,15 @@ ${AGENT_SKILLS_PLANNER}
 </revision_context>
 
 <instructions>
-Make targeted updates to address checker issues. Do NOT replan from scratch
-unless issues are fundamental. Keep `depends_on`/`files_modified`
-frontmatter current with the revised plan. Return what changed.
+Make targeted updates to address checker issues. `required_property` + evidence + severity
+BIND; `fix_hint` is one non-binding example route. When a `fix_hint` conflicts, first apply
+the smallest constraint-compatible mechanism that satisfies `required_property`. Emit
+`REVISION_CONFLICT` only when no such mechanism can satisfy the property. Full contract:
+`gsd-core/references/planner-revision.md`, loaded in revision mode.
+
+Do NOT replan from scratch unless issues are fundamental. Keep
+`depends_on`/`files_modified` frontmatter current with the revised plan. Return
+`## REVISION COMPLETE` and what changed.
 </instructions>
 ",
   subagent_type="gsd-planner",
@@ -104,8 +113,14 @@ frontmatter current with the revised plan. Return what changed.
 
 > **ORCHESTRATOR RULE — CODEX RUNTIME**: after calling Agent() above, wait for it to return before continuing.
 
-After the planner returns, spawn the checker again for this item, increment
-the item's iteration count.
+After the planner returns, handle its marker before re-running the checker:
+
+- **On `## REVISION_CONFLICT`:** follow the shared Conflict Return protocol. Quick-batch has
+  no persistence channel. Do NOT increment the item iteration count or re-run the checker.
+- **Only on `## REVISION COMPLETE`:** require exact acknowledgement of every supplied conflict
+  resolution as the shared protocol specifies; then spawn the checker and increment the item's
+  iteration count.
+- **Otherwise (unknown, empty, or both markers):** offer Retry or Stop. Do not check or increment.
 
 **At iteration >= 2 with issues remaining:** do NOT block the whole batch.
 Display the remaining issues for this item and offer: 1) force-proceed with
