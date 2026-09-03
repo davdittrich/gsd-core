@@ -105,9 +105,9 @@ BEFORE the iteration counter and the stall check — a conflict is not resolvabl
 same loop, so spending retry budget on it only exhausts the cap:
 
 **This protocol is shared.** Every revision-bearing workflow follows it — `plan-phase`, `quick`,
-`ui-phase`, and `verify-work`'s gap-plan loop. `plan-phase` @-imports this reference and states
-only its own bindings (counter name, artifact path, next step). The other three do not import it,
-so they restate the operative rules inline; this section is the authority they must agree with.
+`quick-batch`, `ui-phase`, and `verify-work`'s gap-plan loop. `plan-phase` @-imports this reference;
+`quick-batch` explicitly loads this section. Both state only their host-specific bindings. The other
+three restate the operative rules inline; this section is the authority they must agree with.
 
 1. **Do not spend budget.** Do NOT increment the iteration counter and do NOT update
    `prev_issue_count`. Do NOT re-spawn the checker yet — the conflict is not a revised output.
