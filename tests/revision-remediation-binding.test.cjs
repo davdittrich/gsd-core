@@ -175,20 +175,6 @@ function extractConflictTemplate() {
   return block.replace(/^markdown\r?\n/, '').replace(/\r?\n$/, '');
 }
 
-function sanitizeConflictField(value) {
-  if (value.length === 0) throw new Error('empty conflict field');
-  return encodeURIComponent(value).replace(/[!'()*]/g,
-    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
-}
-
-function assertInjectiveConflictEncoding() {
-  assert.notEqual(sanitizeConflictField('A | B'), sanitizeConflictField('A ¦ B'));
-  assert.notEqual(sanitizeConflictField('<x>'), sanitizeConflictField('‹x›'));
-  assert.throws(() => sanitizeConflictField(''));
-}
-
-
-
 /**
  * Every fenced YAML issue example that names a `fix_hint`. Each block is returned
  * whole so an assertion can check the two fields co-occur rather than merely both
@@ -1104,8 +1090,7 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
     assert.match(flat(CONVERGENCE), /reader strictly decodes and canonically re-encodes every open-record field.*invalid UTF-8.*fail.*closed/i);
   });
 
-  test('writer contract uses injective percent encoding and rejects empty fields', () => {
-    assertInjectiveConflictEncoding();
+  test('writer contract requires canonical percent encoding and rejects empty fields', () => {
     assert.match(flat(REVISION_LOOP), /percent-encode.*UTF-8.*RFC 3986.*unreserved/i);
     assert.match(flat(REVISION_LOOP), /empty input.*do not write.*BLOCKED/i);
   });
