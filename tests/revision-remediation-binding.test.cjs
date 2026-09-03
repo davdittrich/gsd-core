@@ -86,6 +86,7 @@ const CONTRACTS = read('gsd-core', 'references', 'agent-contracts.md');
 const REVIEW = read('gsd-core', 'workflows', 'review.md');
 const COMMANDS = read('docs', 'COMMANDS.md');
 const AGENT_DOCS = read('docs', 'AGENTS.md');
+const CHANGESET = read('.changeset', 'quiet-otters-listen.md');
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -915,7 +916,7 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
       assert.equal(open.stdout, '1');
     });
     withReviews(reviewsArtifact(
-      `${rendered.replace('- [ ]', '- [x]')} | resolved: ${sanitizeConflictField('choose A | preserve B')}\n`
+      `${rendered.replace('- [ ]', '- [x]')} | resolved: choose%20A%20%7C%20preserve%20B\n`
     ), (file) => {
       const resolved = runConflictGate(file);
       assert.equal(resolved.exitCode, 0, resolved.stderr);
@@ -943,7 +944,7 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
       'closure must match identity, property, and choice');
   });
 
-  test('the reader rejects every noncanonical encoded field', { skip: !HAS_BASH }, () => {
+  test('the reader rejects structurally unsafe encoded-token fields', { skip: !HAS_BASH }, () => {
     const invalid = [
       '- [ ] REVISION_CONFLICT dimension/plan — required_property: p | conflicts with: D-1 | alternatives: a',
       '- [ ] REVISION_CONFLICT dimension%2fplan — required_property: p | conflicts with: D-1 | alternatives: a',
@@ -953,9 +954,19 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
     ];
     for (const record of invalid) {
       withReviews(reviewsArtifact(`${record}\n`), (file) => {
-        assert.notEqual(runConflictGate(file).exitCode, 0, `accepted noncanonical record: ${record}`);
+        assert.notEqual(runConflictGate(file).exitCode, 0, `accepted structurally unsafe record: ${record}`);
       });
     }
+
+    for (const record of [
+      '- [ ] REVISION_CONFLICT dimension%2F%70 — required_property: p | conflicts with: D-1 | alternatives: a',
+      '- [ ] REVISION_CONFLICT dimension%2F%FF — required_property: p | conflicts with: D-1 | alternatives: a',
+    ]) {
+      withReviews(reviewsArtifact(`${record}\n`), (file) => {
+        assert.equal(runConflictGate(file).exitCode, 0, `rejected delimiter-safe opaque record: ${record}`);
+      });
+    }
+    assert.match(flat(CONVERGENCE), /reader treats encoded fields as opaque delimiter-safe ASCII tokens and does not decode them/i);
   });
 
   test('writer contract uses injective percent encoding and rejects empty fields', () => {
@@ -1008,8 +1019,11 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
     assert.match(REVIEW, /<!-- gsd:plan-revision-conflicts:begin -->\n## Plan-Revision Conflicts\n\{preserved_plan_revision_conflict_entries\}\n<!-- gsd:plan-revision-conflicts:end -->/,
       'the first-write template must emit the canonical heading before preserved entries');
     assert.match(flat(REVIEW), /restore the captured bytes at the explicit slot below/i);
-    assert.match(flat(REVIEW), /inspect only.*canonical position.*immediately after.*title/i,
-      'slot ownership must be decided only at the canonical post-title position');
+    assert.match(flat(REVIEW), /inspect only.*first nonblank line after.*title/i,
+      'slot ownership must use the same first-nonblank position as the reader and template');
+    const templateTail = REVIEW.slice(REVIEW.indexOf('# Cross-AI Plan Review — Phase {N}'));
+    assert.equal(templateTail.split(/\r?\n/).slice(1).find((line) => line !== ''), CONFLICTS_BEGIN,
+      'the emitted template delimiter must be the first nonblank line after its title');
     assert.match(flat(REVIEW), /no begin delimiter.*canonical position.*legacy clean.*regardless.*reviewer output/i,
       'later reviewer prose must not prevent legacy migration');
     assert.match(flat(REVIEW), /begin delimiter.*canonical position.*malformed.*BLOCKED.*do not rewrite/i,
@@ -1142,6 +1156,11 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
 
   test('quick mode names locked decisions only when CONTEXT.md exists', () => {
     assert.match(QUICK_LOOP, /\$\{DISCUSS_MODE \? 'locked decisions in ' \+ quick_id \+ '-CONTEXT\.md, ' : ''\}capability guidance/);
+  });
+
+  test('the changeset names the actual conflict-key retry bound', () => {
+    assert.match(CHANGESET, /repeated-conflict-key and third-return caps/);
+    assert.doesNotMatch(CHANGESET, /repeated-property/);
   });
 
   test('the command docs include open conflicts in the exit condition', () => {
