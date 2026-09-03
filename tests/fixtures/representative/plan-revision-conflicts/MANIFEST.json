@@ -1,0 +1,12 @@
+{
+  "gate": "plan-review-convergence.open-conflicts",
+  "sourcePullRequest": "open-gsd/gsd-core#4115",
+  "fixtures": [
+    {
+      "file": "pre-conflict-slot-reviews.md",
+      "expectedExitCode": 1,
+      "expectedVerdict": "BLOCKED",
+      "note": "Faithful opening excerpt of the user-produced Phase 2 Cycle 4 review artifact from 2026-08-28. It predates the conflict-slot gate and therefore cannot have been shaped by its grammar."
+    }
+  ]
+}

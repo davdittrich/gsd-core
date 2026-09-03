@@ -106,6 +106,7 @@ let REVIEW;
 let COMMANDS;
 let AGENT_DOCS;
 let CHANGESET;
+let REPRESENTATIVE_CONFLICT_MANIFEST;
 
 before(() => {
   PLAN_CHECKER = read('agents', 'gsd-plan-checker.md');
@@ -127,6 +128,9 @@ before(() => {
   COMMANDS = read('docs', 'COMMANDS.md');
   AGENT_DOCS = read('docs', 'AGENTS.md');
   CHANGESET = read('.changeset', 'quiet-otters-listen.md');
+  REPRESENTATIVE_CONFLICT_MANIFEST = JSON.parse(read(
+    'tests', 'fixtures', 'representative', 'plan-revision-conflicts', 'MANIFEST.json',
+  ));
 });
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -693,6 +697,17 @@ describe('#3771 generic revision pattern carries the same separation', () => {
           assert.match(r.stderr, /BLOCKED/);
         });
       }
+    });
+
+    test('a representative pre-gate review artifact fails CLOSED', () => {
+      const fixture = REPRESENTATIVE_CONFLICT_MANIFEST.fixtures[0];
+      const fixturePath = path.join(
+        ROOT, 'tests', 'fixtures', 'representative', 'plan-revision-conflicts', fixture.file,
+      );
+      const r = runConflictGate(fixturePath);
+      assert.equal(r.exitCode, fixture.expectedExitCode);
+      assert.equal(fixture.expectedVerdict, 'BLOCKED');
+      assert.match(r.stderr, /BLOCKED/);
     });
 
     test('an empty owned block is a legitimate zero, not an error', () => {
