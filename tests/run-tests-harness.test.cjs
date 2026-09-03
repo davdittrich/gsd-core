@@ -1159,7 +1159,27 @@ test('hangs forever', () => new Promise(() => {}));
 // completeness / disjointness / balance / determinism, including a fast-check
 // property test (RULESET.TESTS.property-based-testing: partition is a
 // bijective transformation contract).
-const { parseShardArg, selectShard } = require('../scripts/run-tests.cjs');
+const { collectSweepProtectedPaths, parseShardArg, selectShard } = require('../scripts/run-tests.cjs');
+
+test('#3916 sweep-protection traversal terminates outside the run root', () => {
+  let driveRootCalls = 0;
+  const boundedWin32Dirname = (current) => {
+    if (current === 'D:\\') {
+      driveRootCalls += 1;
+      if (driveRootCalls > 1) throw new Error('non-advancing Windows drive root');
+    }
+    return path.win32.dirname(current);
+  };
+
+  const protectedPaths = collectSweepProtectedPaths(
+    ['D:\\a\\gsd-core\\tests\\revision-remediation-binding.test.cjs'],
+    'C:\\Users\\runneradmin\\AppData\\Local\\Temp\\gsd-test-run-probe',
+    boundedWin32Dirname,
+  );
+
+  assert.deepEqual([...protectedPaths], []);
+  assert.equal(driveRootCalls, 1, 'a self-parenting drive root must be inspected only once');
+});
 
 describe('selectShard round-robin partition (#1212)', () => {
   // A deterministic sorted file list; selectShard MUST NOT re-sort — the caller

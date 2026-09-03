@@ -957,6 +957,19 @@ function rankChunkFilesByWeight(files, weightOf, timingsTable) {
     });
 }
 
+function collectSweepProtectedPaths(selected, runTempRoot, dirname) {
+  const protectedPaths = new Set();
+  for (const file of selected) {
+    let current = file;
+    while (current && current !== runTempRoot && current.length > 1) {
+      protectedPaths.add(current);
+      current = dirname(current);
+    }
+    if (current === runTempRoot) protectedPaths.add(file);
+  }
+  return protectedPaths;
+}
+
 function main() {
   const args = process.argv.slice(2);
   const parsed = parseArgs(args);
@@ -1135,18 +1148,8 @@ function main() {
   // chunk still runs — a harness may stage synthetic test files under the run
   // root (tests/run-tests-harness.test.cjs's 30-file chunking fixture). Protect
   // every ancestor of every selected file that lies INSIDE the run root.
-  const sweepProtectSet = new Set();
-  {
-    const { dirname } = require('path');
-    for (const f of selected) {
-      let cur = f;
-      while (cur && cur !== runTempRoot && cur.length > 1) {
-        sweepProtectSet.add(cur);
-        cur = dirname(cur);
-      }
-      if (cur === runTempRoot) sweepProtectSet.add(f); // exact-file case
-    }
-  }
+  const { dirname } = require('path');
+  const sweepProtectSet = collectSweepProtectedPaths(selected, runTempRoot, dirname);
 
   // Sandbox the overlay home so the loader's global scan ($GSD_HOME/.gsd/capabilities)
   // cannot read a developer's real installed capabilities during tests (ADR-1244 D2).
@@ -1631,6 +1634,7 @@ module.exports = {
   makeFileWeigher,
   packChunks,
   analyzeChunkEvents,
+  collectSweepProtectedPaths,
   DEFAULT_TIMINGS_PATH,
   // Exported so callers (tests/ci-test-scope.test.cjs) can assert the
   // suite-token resolution contract in-process rather than through a timed
