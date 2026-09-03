@@ -988,6 +988,8 @@ describe('#3916 writer, persistence, reader and migration contracts agree', () =
       'resolved rows must enter the same canonical-validation stream before being skipped');
     assert.match(CONVERGENCE, /CONFLICT_RECORD_LINES=/,
       'the validator must receive both open and resolved records');
+    assert.match(CONVERGENCE, /tail\.includes\(" \| resolved: "\)[\s\S]*splitOnce\(tail, " \| resolved: "\)/,
+      'resolved choices must be split and validated as their own canonical field');
   });
 
   test('writer contract requires canonical percent encoding and rejects empty fields', () => {
