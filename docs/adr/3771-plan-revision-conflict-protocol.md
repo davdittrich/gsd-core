@@ -36,10 +36,11 @@ tries the smallest constraint-compatible mechanism that satisfies
 `required_property`. It returns `REVISION_CONFLICT` only when no such
 mechanism can satisfy the property.
 
-Conflict returns do not consume revision iterations. Consecutive repetition
-of the same canonical conflict key stalls immediately; the third conflict
-return stalls regardless of key, preventing alternating conflicts from making
-the loop unbounded.
+Conflict returns do not consume revision iterations. Each return is validated
+and idempotently persisted before either bound is evaluated, so the terminal
+third return remains visible. Consecutive repetition of the same canonical
+conflict key stalls immediately; the third conflict return stalls regardless of
+key, preventing alternating conflicts from making the loop unbounded.
 
 ### 2. One fixed slot in the existing review artifact owns persisted state
 

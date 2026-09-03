@@ -411,7 +411,7 @@ if [ ! -f "${REVIEWS_FILE}" ]; then
 fi
 if CONFLICT_SCAN=$(awk '
   BEGIN {
-    saw_title = 0; in_owned = 0; saw_heading = 0; done = 0; count = 0
+    saw_title = 0; in_owned = 0; saw_heading = 0; done = 0; count = 0; record_count = 0
     encoded = "([A-Za-z0-9._~-]|%[0-9A-F][0-9A-F])+"
     open_record = "^[[:space:]]*-[[:space:]]+\\[[[:space:]]\\][[:space:]]+REVISION_CONFLICT[[:space:]]+" encoded "[[:space:]]+—[[:space:]]+required_property:[[:space:]]+" encoded "[[:space:]]+\\|[[:space:]]+conflicts with:[[:space:]]+" encoded "[[:space:]]+\\|[[:space:]]+alternatives:[[:space:]]+" encoded "[[:space:]]*$"
     resolved_record = "^[[:space:]]*-[[:space:]]+\\[[xX]\\][[:space:]]+REVISION_CONFLICT[[:space:]]+" encoded "[[:space:]]+—[[:space:]]+required_property:[[:space:]]+" encoded "[[:space:]]+\\|[[:space:]]+conflicts with:[[:space:]]+" encoded "[[:space:]]+\\|[[:space:]]+alternatives:[[:space:]]+" encoded "[[:space:]]+\\|[[:space:]]+resolved:[[:space:]]+" encoded "[[:space:]]*$"
@@ -430,21 +430,24 @@ if CONFLICT_SCAN=$(awk '
     done = 1
     in_owned = 0
     print count
-    for (i = 1; i <= count; i++) print open[i]
+    for (i = 1; i <= count; i++) print "OPEN:" open[i]
+    for (i = 1; i <= record_count; i++) print "VALIDATE:" records[i]
     exit
   }
   in_owned && $0 ~ open_record {
     open[++count] = $0
+    records[++record_count] = $0
     next
   }
-  in_owned && $0 ~ resolved_record { next }
+  in_owned && $0 ~ resolved_record { records[++record_count] = $0; next }
   in_owned && $0 == "" { next }
   in_owned { exit 2 }
   END { if (!done) exit 2 }
 ' "${REVIEWS_FILE}"); then
   OPEN_CONFLICTS=$(printf '%s\n' "$CONFLICT_SCAN" | sed -n '1p')
-  OPEN_CONFLICT_LINES=$(printf '%s\n' "$CONFLICT_SCAN" | sed '1d')
-  if ! printf '%s\n' "$OPEN_CONFLICT_LINES" | node -e '
+  OPEN_CONFLICT_LINES=$(printf '%s\n' "$CONFLICT_SCAN" | sed -n 's/^OPEN://p')
+  CONFLICT_RECORD_LINES=$(printf '%s\n' "$CONFLICT_SCAN" | sed -n 's/^VALIDATE://p')
+  if ! printf '%s\n' "$CONFLICT_RECORD_LINES" | node -e '
 const fs = require("fs");
 const encode = (value) => Array.from(Buffer.from(value, "utf8"), (byte) => {
   const char = String.fromCharCode(byte);
@@ -464,8 +467,15 @@ try {
     let rest = line.slice(marker.index + marker[0].length);
     const [identity, afterIdentity] = splitOnce(rest, " — required_property: ");
     const [property, afterProperty] = splitOnce(afterIdentity, " | conflicts with: ");
-    const [conflict, alternatives] = splitOnce(afterProperty, " | alternatives: ");
-    for (const token of [identity, property, conflict, alternatives]) {
+    const [conflict, tail] = splitOnce(afterProperty, " | alternatives: ");
+    const tokens = [identity, property, conflict];
+    if (tail.includes(" | resolved: ")) {
+      const [alternatives, resolution] = splitOnce(tail, " | resolved: ");
+      tokens.push(alternatives, resolution);
+    } else {
+      tokens.push(tail);
+    }
+    for (const token of tokens) {
       if (!token || encode(decodeURIComponent(token)) !== token) process.exit(1);
     }
   }
@@ -490,7 +500,7 @@ between `<!-- gsd:plan-revision-conflicts:begin -->` and
 conflict as a `- [ ] REVISION_CONFLICT` checklist line and flips it to
 `- [x] REVISION_CONFLICT` when resolved. The reader counts only the first fixed slot at that
 position, and stops at its explicit end delimiter. The reader strictly decodes and canonically
-re-encodes every open-record field; aliases, invalid UTF-8, raw delimiters, whitespace, malformed
+re-encodes every open and resolved record field; aliases, invalid UTF-8, raw delimiters, whitespace, malformed
 `%` escapes, and lowercase escapes fail the convergence gate closed. Decoded copies are display-only;
 encoded originals remain authoritative for keys, persistence, and prompt transport. Reviewer output is rendered after the slot, so
 raw reviewer text containing either the heading or an exact conflict-shaped checklist line cannot

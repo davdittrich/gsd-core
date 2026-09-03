@@ -400,7 +400,7 @@ Verification is complete when:
 - [ ] All `<required_reading>` loaded before any action
 - [ ] All 7 dimensions evaluated (none skipped unless config disables)
 - [ ] Each dimension has PASS, FLAG, or BLOCK verdict
-- [ ] BLOCK verdicts have exact fix descriptions
+- [ ] BLOCK verdicts state the `required_property`, its evidence, and a non-binding example fix
 - [ ] FLAG verdicts have recommendations (non-blocking)
 - [ ] Overall status is APPROVED or BLOCKED
 - [ ] Structured return provided to orchestrator
@@ -408,7 +408,7 @@ Verification is complete when:
 
 Quality indicators:
 
-- **Specific fixes:** "Replace 'Submit' with 'Create Account'" not "use better labels"
+- **Property and evidence:** "Every interactive label is a specific verb + noun; evidence: primary CTA is 'Submit'; example fix (non-binding): 'Create Account'"
 - **Evidence-based:** Each verdict cites the exact UI-SPEC.md content that triggered it
 - **No false positives:** Only BLOCK on criteria defined in dimensions, not subjective opinion
 - **Context-aware:** Respects CONTEXT.md locked decisions (don't flag user's explicit choices)

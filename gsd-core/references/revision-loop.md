@@ -33,9 +33,10 @@ LOOP:
      d. Re-spawn the producing agent with checker feedback appended
      e. If the agent returns REVISION_CONFLICT:
         -> conflict_return_count += 1
+        -> current_conflict_keys = sorted unique (issue_identity, required_property) pairs
+        -> validate, sanitize, and idempotently persist the returned conflict where a channel exists
         -> If conflict_return_count >= 3:
              escalate through the iteration-cap gate
-        -> current_conflict_keys = sorted unique (issue_identity, required_property) pairs
         -> If current_conflict_keys intersects previous_conflict_keys:
              escalate as a stall (a chosen resolution did not take)
            Else: previous_conflict_keys = current_conflict_keys
