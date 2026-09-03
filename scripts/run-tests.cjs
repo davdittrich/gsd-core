@@ -416,7 +416,7 @@ function setupRunTempRoot() {
  *
  * Exported for in-process tests.
  */
-function sweepRunTempRoot(root, protect = new Set()) {
+function sweepRunTempRoot(root, protect = new Set(), pathKey = (value) => value) {
   let entries;
   try {
     entries = readdirSync(root);
@@ -427,7 +427,7 @@ function sweepRunTempRoot(root, protect = new Set()) {
   for (const name of entries) {
     if (RESERVED_TEMP_PREFIXES.some((p) => name.startsWith(p))) continue;
     const full = join(root, name);
-    if (protect.has(full)) continue;
+    if (protect.has(pathKey(full))) continue;
     try {
       rmSync(full, { recursive: true, force: true });
       removed++;
@@ -957,20 +957,21 @@ function rankChunkFilesByWeight(files, weightOf, timingsTable) {
     });
 }
 
-function collectSweepProtectedPaths(selected, runTempRoot, dirname) {
+function collectSweepProtectedPaths(selected, runTempRoot, dirname, pathKey = (value) => value) {
   const protectedPaths = new Set();
+  const rootKey = pathKey(runTempRoot);
   for (const file of selected) {
     const ancestors = [];
     let current = file;
-    while (current && current !== runTempRoot) {
+    while (current && pathKey(current) !== rootKey) {
       const parent = dirname(current);
-      if (parent === current) break;
+      if (pathKey(parent) === pathKey(current)) break;
       ancestors.push(current);
       current = parent;
     }
-    if (current !== runTempRoot) continue;
-    protectedPaths.add(file);
-    for (const ancestor of ancestors) protectedPaths.add(ancestor);
+    if (pathKey(current) !== rootKey) continue;
+    protectedPaths.add(pathKey(file));
+    for (const ancestor of ancestors) protectedPaths.add(pathKey(ancestor));
   }
   return protectedPaths;
 }
@@ -1154,7 +1155,10 @@ function main() {
   // root (tests/run-tests-harness.test.cjs's 30-file chunking fixture). Protect
   // every ancestor of every selected file that lies INSIDE the run root.
   const { dirname } = require('path');
-  const sweepProtectSet = collectSweepProtectedPaths(selected, runTempRoot, dirname);
+  const pathKey = process.platform === 'win32'
+    ? (value) => value.toLowerCase()
+    : (value) => value;
+  const sweepProtectSet = collectSweepProtectedPaths(selected, runTempRoot, dirname, pathKey);
 
   // Sandbox the overlay home so the loader's global scan ($GSD_HOME/.gsd/capabilities)
   // cannot read a developer's real installed capabilities during tests (ADR-1244 D2).
@@ -1479,7 +1483,7 @@ function main() {
       // root and later chunks still need them (tests/run-tests-harness.test.cjs
       // #3597).
       if (createdRunTempRoot) {
-        const swept = sweepRunTempRoot(runTempRoot, sweepProtectSet);
+        const swept = sweepRunTempRoot(runTempRoot, sweepProtectSet, pathKey);
         if (swept > 0) {
           console.error(`run-tests: temp sweep after chunk ${i + 1}/${chunks.length} — removed ${swept} leaked entr${swept === 1 ? 'y' : 'ies'}`);
         }
