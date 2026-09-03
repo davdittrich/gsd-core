@@ -43,7 +43,7 @@ the loop unbounded.
 
 ### 2. One fixed slot in the existing review artifact owns persisted state
 
-`REVIEWS.md` contains one writer-owned slot immediately after its title:
+`REVIEWS.md` contains one writer-owned slot at the first nonblank line after its title:
 
 ```markdown
 <!-- gsd:plan-revision-conflicts:begin -->
@@ -104,10 +104,11 @@ dependency and no general parser abstraction.
 
 ## Verification
 
-- `tests/revision-remediation-binding.test.cjs` executes the real embedded
-  gate against canonical, malformed, hostile, and resumed-resolution cases.
-- `tests/fixtures/representative/plan-revision-conflicts/` contributes a
-  pre-gate user artifact whose shape was not derived from this protocol.
+- `tests/revision-remediation-binding.test.cjs` executes the real embedded gate
+  against a pre-gate user artifact and missing or empty path boundaries; its
+  remaining protocol checks inspect the shipped source contract.
+- `tests/fixtures/representative/plan-revision-conflicts/` contributes the
+  user artifact, whose shape was not derived from this protocol.
 - Generated ADR index validation and the repository's full lint/test gates
   remain required before publication.
 
