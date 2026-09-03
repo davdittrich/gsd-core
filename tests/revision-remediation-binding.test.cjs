@@ -218,15 +218,33 @@ test('#3916 UI conflict templates preserve the canonical issue identity', () => 
   assert.doesNotMatch(conflict, /\| Dimension \{N\} \|/);
 });
 
+test('#3916 conflict prompts use physical lines and single-pass identity encoding', () => {
+  const conflictAt = UI_RESEARCHER.indexOf('## Revision Conflict');
+  assert.ok(conflictAt >= 0, 'UI researcher must retain its revision-conflict contract');
+  const conflict = UI_RESEARCHER.slice(conflictAt);
+  assert.doesNotMatch(conflict, /\\n/, 'UI conflict guidance must use physical Markdown lines');
+  assert.match(
+    flat(conflict),
+    /derive.*issue_identity.*checker fields.*encode.*once/i,
+    'new UI conflicts must derive the canonical identity from checker fields and encode it once',
+  );
+  assert.match(
+    flat(conflict),
+    /supplied encoded.*byte-for-byte.*do not encode again/i,
+    'completion acknowledgements must preserve supplied encoded triples exactly',
+  );
+});
+
 test('#3916 explicit completion resets only consecutive-conflict state', () => {
   const flowAt = REVISION_LOOP.indexOf('### Flow');
   const trackingAt = REVISION_LOOP.indexOf('### Issue Count Tracking', flowAt);
   assert.ok(flowAt >= 0 && trackingAt > flowAt, 'revision-loop flow anchors must exist');
   const flow = REVISION_LOOP.slice(flowAt, trackingAt);
+  assert.doesNotMatch(flow, /\\n/, 'revision-loop pseudocode must use physical lines');
   assert.match(
     flow,
-    /If the agent returns its explicit completion marker:[\s\S]*previous_conflict_keys = \[\][\s\S]*prev_issue_count = issue_count/,
-    'a completed revision must break conflict-return consecutiveness before the next checker pass',
+    /^\s*-> previous_conflict_keys = \[\]\r?\n\s*-> prev_issue_count = issue_count; iteration \+= 1; go to LOOP$/m,
+    'reset and baseline update must be distinct consecutive pseudocode operations',
   );
   assert.doesNotMatch(
     flow,
