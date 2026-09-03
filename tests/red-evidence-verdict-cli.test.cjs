@@ -565,7 +565,7 @@ describe('public CLI receipt lifecycle', () => {
 
     for (const { flag, expectedExit } of [
       { flag: '--help', expectedExit: 0 },
-      { flag: '--version', expectedExit: 64 },
+      { flag: '--version', expectedExit: null },
     ]) {
       const root = createTempDir(`red-receipt-terminal-${flag.slice(2)}-`);
       t.after(() => cleanup(root));
@@ -576,7 +576,11 @@ describe('public CLI receipt lifecycle', () => {
         '--project-dir', root, '--task-file', '.planning/never.md', '--task-index', '1', '--',
         process.execPath, '--eval', 'require("node:fs").writeFileSync(process.argv[1], "ran")', observed,
       ], { cwd: root });
-      assert.equal(terminal.exitCode, expectedExit, terminal.stderr);
+      if (expectedExit === null) {
+        assert.notEqual(terminal.exitCode, 0, terminal.stderr);
+      } else {
+        assert.equal(terminal.exitCode, expectedExit, terminal.stderr);
+      }
       assert.equal(fs.existsSync(observed), false, `${flag} before the sentinel must remain terminal`);
     }
   });

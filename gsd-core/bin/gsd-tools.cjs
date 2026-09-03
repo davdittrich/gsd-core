@@ -4278,9 +4278,9 @@ async function dispatchHostCommand({ command, args, cwd, raw, error, defaultValu
 //   • <secs> == 0                   → run with NO timer (matches `timeout 0`)
 //   • blank / negative / NaN <secs> → exit 2 (usage — fails SAFE, never unbounded)
 //
-// The wrapped command's argv is OPAQUE: this executes BEFORE gsd-tools' own
-// global-flag parsing (see main()), so a wrapped `--raw`/`--cwd`/`--pick` passes
-// through verbatim rather than being consumed by this dispatcher. stdio is
+// The wrapped command's argv is OPAQUE: main() splits at the first sentinel
+// before global parsing, parses only the prefix, and restores this suffix before
+// interception, so wrapped `--raw`/`--cwd`/`--pick` tokens pass through verbatim. stdio is
 // inherited so shell pipes (`echo x | gsd_run run-with-timeout …`) and redirects
 // keep working. No shell is spawned (argv array) — no injection surface beyond
 // the old `timeout … bash -c "$CMD"`.
@@ -4550,23 +4550,12 @@ function resolveMainWorktreeCwd(cwd, deps = {}) {
 async function main() {
   let args = process.argv.slice(2);
 
-  // `task red-evidence-capture` owns every token after its first `--`.
-  // Isolate that tail before position-independent global parsing so child flags
-  // remain opaque, then restore it only after command/global validation.
-  let captureTail = null;
-  const captureSeparator = args.indexOf('--');
-  const capturePrefix = captureSeparator === -1 ? args : args.slice(0, captureSeparator);
-  const captureDetectionArgs = capturePrefix.filter(arg =>
-    arg !== '--json-errors' && !arg.startsWith('--exit-contract='));
-  const captureArgs = captureDetectionArgs[0] === 'query'
-    ? captureDetectionArgs.slice(1)
-    : captureDetectionArgs;
-  const isRedEvidenceCapture = captureArgs[0] === 'task.red-evidence-capture'
-    || (captureArgs[0] === 'task' && captureArgs[1] === 'red-evidence-capture');
-  if (isRedEvidenceCapture && captureSeparator !== -1) {
-    captureTail = args.slice(captureSeparator);
-    args = args.slice(0, captureSeparator);
-  }
+  // The first `--` terminates top-level option parsing for every command.
+  // Preserve the sentinel and command-owned suffix byte-for-byte, parse only
+  // the prefix, then restore the suffix before command dispatch.
+  const globalSeparator = args.indexOf('--');
+  const commandTail = globalSeparator === -1 ? [] : args.slice(globalSeparator);
+  if (globalSeparator !== -1) args = args.slice(0, globalSeparator);
 
   // These two global-flag blocks (--json-errors, --exit-contract) MUST run
   // BEFORE the run-with-timeout interception below. run-with-timeout treats
@@ -4617,21 +4606,6 @@ async function main() {
   for (let i = args.length - 1; i >= 0; i--) {
     if (typeof args[i] === 'string' && args[i].startsWith('--exit-contract=')) {
       args.splice(i, 1);
-    }
-  }
-
-  // #2351: run-with-timeout bounds a spawned command's wall clock portably
-  // (coreutils-independent). It MUST intercept HERE, before the remaining
-  // flag parsing below — the wrapped command's argv is opaque and may itself
-  // contain --raw / --cwd / --pick that this dispatcher would otherwise
-  // consume. (--json-errors / --exit-contract are handled above this block,
-  // not below, precisely so they keep working with run-with-timeout.)
-  {
-    let rwt = args;
-    if (rwt[0] === 'query') rwt = rwt.slice(1);
-    if (rwt[0] === 'run-with-timeout') {
-      // Return the child's exit code; runMain() maps it to process.exitCode.
-      return runWithTimeout(rwt.slice(1));
     }
   }
 
@@ -4746,6 +4720,32 @@ async function main() {
     args.splice(defaultIdx, 2);
   }
 
+  // Help and version are terminal only while they remain in the global prefix.
+  const HELP_FLAGS = new Set(['-h', '--help', '-?', '--h', '--usage']);
+  if (args.some((arg) => HELP_FLAGS.has(arg))) {
+    process.stdout.write(TOP_LEVEL_USAGE + '\n');
+    return;
+  }
+  const NEVER_VALID_FLAGS = new Set(['--version', '-v']);
+  for (const arg of args) {
+    if (NEVER_VALID_FLAGS.has(arg)) {
+      error(`Unknown flag: ${arg}\ngsd-tools does not accept version flags. Run "gsd-tools" with no arguments for usage.`, ERROR_REASON.USAGE);
+    }
+  }
+
+  // Restore the first sentinel and its opaque suffix before either dispatch path.
+  args.push(...commandTail);
+
+  // #2351: run-with-timeout intercepts before normal command normalization, but
+  // after globals have been removed exclusively from the pre-sentinel prefix.
+  {
+    let rwt = args;
+    if (rwt[0] === 'query') rwt = rwt.slice(1);
+    if (rwt[0] === 'run-with-timeout') {
+      return runWithTimeout(rwt.slice(1));
+    }
+  }
+
   let command = args[0];
 
   // Accept `query` as a meta-prefix for canonical dotted/spaced commands.
@@ -4778,36 +4778,12 @@ async function main() {
     error(TOP_LEVEL_USAGE);
   }
 
-  // #3019: a `--help` / `-h` flag in argv must render the top-level usage
-  // and exit 0 — not error out with "Unknown flag". The previous shape
-  // erred on agent-hallucinated flags, but it also blocked humans from
-  // discovering the command surface via subcommand help requests routed
-  // through this dispatcher. Rendering top-level usage on --help is strictly
-  // better UX than the old short-circuit that printed unrelated usage text.
-  const HELP_FLAGS = new Set(['-h', '--help', '-?', '--h', '--usage']);
-  if (args.some((a) => HELP_FLAGS.has(a))) {
-    process.stdout.write(TOP_LEVEL_USAGE + '\n');
-    return;
-  }
-
-  // Reject version flags. AI agents sometimes hallucinate --version on tool
-  // invocations; silently ignoring it can cause destructive operations to
-  // proceed unchecked. (Help flags are handled above.)
-  const NEVER_VALID_FLAGS = new Set(['--version', '-v']);
-  for (const arg of args) {
-    if (NEVER_VALID_FLAGS.has(arg)) {
-      error(`Unknown flag: ${arg}\ngsd-tools does not accept version flags. Run "gsd-tools" with no arguments for usage.`, ERROR_REASON.USAGE);
-    }
-  }
-
   // #3881: an explicit --project-dir already IS the resolved project root
   // (validated above) — findProjectRoot's ancestor walk-up must not run
   // over it, per docs/CONFIGURATION.md's documented idempotence.
   if (!projectDirExplicit && !SKIP_ROOT_RESOLUTION.has(command)) {
     cwd = findProjectRoot(cwd);
   }
-
-  if (captureTail) args.push(...captureTail);
 
   // When --pick is active, capture stdout and extract the requested field.
   // ADR-3473 §8.4 (#3365, #3358): an absent field or non-JSON command output
