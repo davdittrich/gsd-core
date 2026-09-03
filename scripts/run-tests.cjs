@@ -1154,9 +1154,9 @@ function main() {
   // chunk still runs — a harness may stage synthetic test files under the run
   // root (tests/run-tests-harness.test.cjs's 30-file chunking fixture). Protect
   // every ancestor of every selected file that lies INSIDE the run root.
-  const { dirname } = require('path');
+  const { dirname, normalize } = require('path');
   const pathKey = process.platform === 'win32'
-    ? (value) => value.toLowerCase()
+    ? (value) => normalize(value).replace(/[\\/]+$/, '').toLowerCase()
     : (value) => value;
   const sweepProtectSet = collectSweepProtectedPaths(selected, runTempRoot, dirname, pathKey);
 
