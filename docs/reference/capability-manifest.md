@@ -163,7 +163,7 @@ A valid point is necessary but not sufficient: each host workflow decides, per p
 | `verify:post` | Verify | After the verify step completes |
 | `ship:pre` | Ship | Before the ship step executes |
 | `ship:post` | Ship | After the ship step completes |
-| `review:pre` | Review | Orthogonal to the discuss→ship pipeline — before `/gsd:review` (and `/gsd:plan-review-convergence`, which delegates to it) assembles the shared reviewer prompt. `into: "reviewer"` contributions only. |
+| `review:pre` | Review | Orthogonal to the discuss→ship pipeline — before `/gsd-review` (and `/gsd-plan-review-convergence`, which delegates to it) assembles the shared reviewer prompt. `into: "reviewer"` contributions only. |
 
 ---
 
