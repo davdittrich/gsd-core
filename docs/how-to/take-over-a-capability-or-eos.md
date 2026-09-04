@@ -51,7 +51,7 @@ Collect all of this before opening anything. Every later step reads from it.
 
 These fields are the user-visible contract. A takeover **preserves** them. If you intend to change them, do that afterward as a normal version bump under your own maintainership — never inside the ownership-change PR.
 
-**Feature Capability** — `interactions.loopExtensionPoints` (which of the 12 Loop Extension Points it registers on), `hookKinds`, `configKeys`, `requires`, `runtimeCompat`, `produces`, `consumes`; plus the manifest's `skills` and `agents` stems, which must stay unique across the merged first-party and overlay set.
+**Feature Capability** — `interactions.loopExtensionPoints` (which of the 13 Loop Extension Points it registers on), `hookKinds`, `configKeys`, `requires`, `runtimeCompat`, `produces`, `consumes`; plus the manifest's `skills` and `agents` stems, which must stay unique across the merged first-party and overlay set.
 
 **Reviewer lane** — `interactions.slug`, `flags`, `transport`, `evidenceClass`, `reviewsSection`, `requiresBinaries`, `configKeys`. The `slug`, `flags`, and `reviewsSection` must remain unique across the merged first-party and overlay set; a collision breaks `/gsd-review` for anyone running both lanes.
 

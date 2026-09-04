@@ -8,13 +8,13 @@
  * plan-phase.md/execute-phase.md shrink to the irreducible five steps.")
  *
  * Verified contracts:
- *   B1. All 12 canonical loop points return activeHooks:[] when every
+ *   B1. All 13 canonical loop points return activeHooks:[] when every
  *       capability when-key is explicitly false (real registry, all-caps-off config).
  *   B2. The CLI `loop render-hooks <point>` exits 0 and emits activeHooks:[],
  *       placeholder rendered for representative points with all-caps-off config.
  *   B3. Init bundles for the 5-step loop's entry seam (plan-phase, execute-phase,
  *       verify-work) resolve with exit 0 and valid JSON when capabilities are off.
- *   B4. An EMPTY registry (byLoopPoint:{}) at all 12 points → activeHooks:[]
+ *   B4. An EMPTY registry (byLoopPoint:{}) at all 13 points → activeHooks:[]
  *       (loop tolerates a capability-less install).
  *   B5. [BVA] Exactly one capability ON (tdd_mode) → that capability's points
  *       non-empty, all OTHER points still empty (caps are additive; core is baseline).
@@ -53,10 +53,10 @@ const GSD_TOOLS = path.join(__dirname, '..', 'gsd-core', 'bin', 'gsd-tools.cjs')
 // ── Config fixtures ───────────────────────────────────────────────────────────
 
 /**
- * All 12 canonical loop points. Derived from the exported constant so the
+ * All 13 canonical loop points. Derived from the exported constant so the
  * assertion set cannot drift from the resolver's own authoritative list.
  */
-const ALL_12_POINTS = [...CANONICAL_POINTS];
+const ALL_CANONICAL_POINTS = [...CANONICAL_POINTS];
 
 /**
  * All when-keys discovered from the real registry, set to false.
@@ -70,7 +70,7 @@ const ALL_12_POINTS = [...CANONICAL_POINTS];
 function buildAllFalseConfig() {
   const workflow = {};
   const intel = {};
-  for (const point of ALL_12_POINTS) {
+  for (const point of ALL_CANONICAL_POINTS) {
     const entry = realRegistry.byLoopPoint[point];
     if (!entry) continue;
     for (const kind of ['steps', 'contributions', 'gates']) {
@@ -143,13 +143,13 @@ function removeTmp(dir) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// B1. [happy/aggregate] All 12 points → activeHooks:[] with all-caps-off config
+// B1. [happy/aggregate] All 13 points → activeHooks:[] with all-caps-off config
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('B1 — real registry, all-caps-off config: every canonical point resolves to activeHooks:[]', () => {
-  test('all 12 CANONICAL_POINTS return activeHooks:[] simultaneously when every capability when-key is false', () => {
+  test('all 13 CANONICAL_POINTS return activeHooks:[] simultaneously when every capability when-key is false', () => {
     const failures = [];
-    for (const point of ALL_12_POINTS) {
+    for (const point of ALL_CANONICAL_POINTS) {
       const result = resolveLoopHooks({
         point,
         registry: realRegistry,
@@ -174,29 +174,30 @@ describe('B1 — real registry, all-caps-off config: every canonical point resol
     assert.deepStrictEqual(
       failures,
       [],
-      `Expected zero active hooks at all 12 points with all-caps-off config but got: ${JSON.stringify(failures)}`,
+      `Expected zero active hooks at all 13 points with all-caps-off config but got: ${JSON.stringify(failures)}`,
     );
   });
 
-  test('CANONICAL_POINTS exports exactly 12 points', () => {
+  test('CANONICAL_POINTS exports exactly 13 points', () => {
     assert.strictEqual(
-      ALL_12_POINTS.length,
-      12,
-      `CANONICAL_POINTS must have 12 entries (ADR-857 §"Loop Extension Points (the 12)"), got ${ALL_12_POINTS.length}`,
+      ALL_CANONICAL_POINTS.length,
+      13,
+      `CANONICAL_POINTS must have 13 entries (ADR-857's original 12, plus review:pre — gh-3997), got ${ALL_CANONICAL_POINTS.length}`,
     );
   });
 
-  test('each of the 12 known point names is present in CANONICAL_POINTS', () => {
+  test('each of the 13 known point names is present in CANONICAL_POINTS', () => {
     const expected = [
       'discuss:pre', 'discuss:post',
       'plan:pre', 'plan:post',
       'execute:pre', 'execute:wave:pre', 'execute:wave:post', 'execute:post',
       'verify:pre', 'verify:post',
       'ship:pre', 'ship:post',
+      'review:pre',
     ];
     for (const p of expected) {
       assert.ok(
-        ALL_12_POINTS.includes(p),
+        ALL_CANONICAL_POINTS.includes(p),
         `Expected canonical point "${p}" to be in CANONICAL_POINTS`,
       );
     }
@@ -385,10 +386,10 @@ describe('B3 — init bundles for 5-step loop entry seam: exit 0 and valid JSON 
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// B4. [negative] Empty registry → activeHooks:[] at all 12 points
+// B4. [negative] Empty registry → activeHooks:[] at all 13 points
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('B4 — empty registry (byLoopPoint:{}) at all 12 points → activeHooks:[]', () => {
+describe('B4 — empty registry (byLoopPoint:{}) at all 13 points → activeHooks:[]', () => {
   const EMPTY_REGISTRY = {
     byLoopPoint: {},
     capabilities: {},
@@ -397,9 +398,9 @@ describe('B4 — empty registry (byLoopPoint:{}) at all 12 points → activeHook
     commandFamilies: {},
   };
 
-  test('loop tolerates a capability-less install: all 12 points return activeHooks:[]', () => {
+  test('loop tolerates a capability-less install: all 13 points return activeHooks:[]', () => {
     const failures = [];
-    for (const point of ALL_12_POINTS) {
+    for (const point of ALL_CANONICAL_POINTS) {
       const result = resolveLoopHooks({
         point,
         registry: EMPTY_REGISTRY,
@@ -424,12 +425,12 @@ describe('B4 — empty registry (byLoopPoint:{}) at all 12 points → activeHook
     assert.deepStrictEqual(
       failures,
       [],
-      `Empty registry: expected zero active hooks at all 12 points, got non-empty at: ${JSON.stringify(failures)}`,
+      `Empty registry: expected zero active hooks at all 13 points, got non-empty at: ${JSON.stringify(failures)}`,
     );
   });
 
-  test('empty registry does not throw for any of the 12 canonical points', () => {
-    for (const point of ALL_12_POINTS) {
+  test('empty registry does not throw for any of the 13 canonical points', () => {
+    for (const point of ALL_CANONICAL_POINTS) {
       assert.doesNotThrow(
         () => resolveLoopHooks({ point, registry: EMPTY_REGISTRY, config: {} }),
         `resolveLoopHooks must not throw for empty registry at point "${point}"`,
@@ -459,7 +460,7 @@ describe('B4 — empty registry (byLoopPoint:{}) at all 12 points → activeHook
 describe('B5 — BVA: tdd_mode ON, all other caps OFF → additive: only tdd points active', () => {
   // tdd contributes at plan:pre and execute:post (verified from capability registry)
   const TDD_ACTIVE_POINTS = ['plan:pre', 'execute:post'];
-  const TDD_INACTIVE_POINTS = ALL_12_POINTS.filter(p => !TDD_ACTIVE_POINTS.includes(p));
+  const TDD_INACTIVE_POINTS = ALL_CANONICAL_POINTS.filter(p => !TDD_ACTIVE_POINTS.includes(p));
   const TDD_ON_CONFIG = buildTddOnlyConfig();
 
   test('plan:pre has exactly 1 active hook and it belongs to tdd', () => {

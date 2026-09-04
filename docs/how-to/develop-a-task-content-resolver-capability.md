@@ -111,7 +111,7 @@ prefix, and your resolver's stderr, and never proceeds to read the task's inline
 as a substitute. See [ADR-3646](../adr/3646-per-task-content-resolution-seam.md) for why this is
 the load-bearing safety property of the whole feature, and
 [`loop-hook-dispatch.md`](../../gsd-core/references/loop-hook-dispatch.md#the-executetask-point-a-different-shape)
-for how this call site differs from the twelve prose-dispatched loop extension points.
+for how this call site differs from the thirteen prose-dispatched loop extension points.
 
 ---
 
@@ -167,6 +167,6 @@ before spawning it.
 - [Capability manifest → `taskContentResolver`](../reference/capability-manifest.md#taskcontentresolver) —
   the full field table
 - [`loop-hook-dispatch.md`](../../gsd-core/references/loop-hook-dispatch.md#the-executetask-point-a-different-shape) —
-  how `execute:task` differs from the twelve loop extension points
+  how `execute:task` differs from the thirteen loop extension points
 - [Develop a Capability for GSD 1.5+](develop-a-capability.md) — manifests, registry generation,
   and federated config

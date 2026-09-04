@@ -23,22 +23,9 @@ const SCHEMA_VERSION = '1';
 
 // ─── Loop Host Contract ───────────────────────────────────────────────────────
 
-// Canonical point order — explicit constant (do NOT rely on Set insertion order).
-// Used for point-ordering semantics in consumes-satisfiability validation and topo-sort.
-const POINT_ORDER = [
-  'discuss:pre',
-  'discuss:post',
-  'plan:pre',
-  'plan:post',
-  'execute:pre',
-  'execute:wave:pre',
-  'execute:wave:post',
-  'execute:post',
-  'verify:pre',
-  'verify:post',
-  'ship:pre',
-  'ship:post',
-];
+// Canonical point order — derived from LOOP_HOST_CONTRACT (gh-3997), not a
+// sixth hand-maintained copy. Used for consumes-satisfiability ordering and topo-sort.
+const POINT_ORDER = LOOP_HOST_CONTRACT.flatMap((entry) => entry.points);
 
 // C1: Artifact availability — host-produced artifacts become available at their step's :post
 // point. Build a map: artifact → earliest POINT_ORDER index at which it is available.

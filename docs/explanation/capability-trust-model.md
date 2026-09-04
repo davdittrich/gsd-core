@@ -96,6 +96,12 @@ pluggable without a disclosure class would have opened a data-exfiltration path
 behind a manifest field, which is why the trust work gates the feature rather
 than following it.
 
+Since [gh-3997](../adr/3997-review-prompt-capability-contributions.md), an active
+`review:pre → into: "reviewer"` contribution rides this same egress channel,
+disclosed wholesale at install-consent time like every other point's
+contribution text — no new, per-field disclosure. `review:pre` widens *which*
+trusted role hears a capability, not what it can say.
+
 What is disclosed depends on how the lane is reached:
 
 - A **spawned** lane discloses its binary **and its full declared arguments**, in
@@ -528,4 +534,4 @@ the code at all.
 - [ADR-2363 — Instruction surfaces](../adr/2363-capability-instruction-surface-trust.md) — why skill bodies are trusted and unscanned, and why content scanning was rejected
 - [Capability matrix](../reference/capability-matrix.md) — the generated catalogue of all capabilities
 - [PRD-1244 §6 — Out of scope](../prd/1244-capability-ecosystem.md#6-scope-160) — why sandboxing is explicitly out of scope
-- [ADR-857](../adr/857-capability-system.md) — the 12 loop extension points; D7 and D8 extended by ADR-1244
+- [ADR-857](../adr/857-capability-system.md) — the original 12 loop extension points (13 with review:pre — gh-3997); D7 and D8 extended by ADR-1244

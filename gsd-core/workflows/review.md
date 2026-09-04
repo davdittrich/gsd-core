@@ -1,3 +1,11 @@
+<!-- gsd:loop-host
+step: review
+points: review:pre
+agent-roles: reviewer
+produces:
+consumes: PLAN.md
+-->
+<!-- gh-3997: empty produces and the unfiltered kind=="contribution" dispatch below are both deliberate — see docs/adr/3997-review-prompt-capability-contributions.md §3. -->
 <purpose>
 Cross-AI peer review — invoke external AI CLIs to independently review phase plans.
 Each CLI gets the same prompt (PROJECT.md context, phase plans, requirements) and
@@ -243,6 +251,8 @@ Focus on:
 - Security considerations
 - Performance implications
 - Whether the plans actually achieve the phase goals
+
+{Run `gsd_run loop render-hooks review:pre --raw`; for each entry with `kind == "contribution"`, in array order, inject `fragment.inline` verbatim here. Omit this block entirely if none are active.}
 
 Output your review in markdown format.
 ```

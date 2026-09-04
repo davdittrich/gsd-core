@@ -7,6 +7,7 @@
 - **Phase:** ADR-857 rollout phase 3a (design-only)
 - **Subsumed by:** [ADR-1239](1239-gsd-embeddable-orchestration-engine.md) (GSD as an Embeddable Orchestration Engine) — read it first; see the amendment below
 - **Amended by:** [ADR-2782](2782-reviewer-lane-capability-surface.md) (Reviewer Lane capability surface) — adds a `reviewer` role-typed body and a third `role` value (`"reviewer"`) to the declaration format.
+- **Amended by:** [ADR-3997](3997-review-prompt-capability-contributions.md) (Review-Prompt Capability Contributions) — registers a 13th canonical loop point, `review:pre`, and a `reviewer` agent-role additive to this format.
 
 ## Amendment (2026-07-16): subsumed by ADR-1239 (EoS); status is stale
 

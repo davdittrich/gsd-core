@@ -47,7 +47,7 @@ the inherited env.
 ## Step 2 — declare the gate
 
 Add a `gates` entry to your `capability.json`. Pick the loop `point` (one of
-the 12 canonical points), set `blocking` and `onError`, and gate it on a
+the 13 canonical points), set `blocking` and `onError`, and gate it on a
 config key with `when`:
 
 ```json

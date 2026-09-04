@@ -13,13 +13,13 @@
  * runtime/ADR closed vocabularies they describe — they are a documentation-
  * registry-scoped mirror, not the runtime source of truth:
  *
- *   - `LOOP_POINTS` mirrors ADR-857 "Loop Extension Points (the 12)"
- *     (docs/adr/857-capability-system.md §"Loop Extension Points (the 12)").
+ *   - `LOOP_POINTS` mirrors ADR-857 §"Loop Extension Points (the 12)" (docs/adr/857-capability-system.md),
+ *     amended by ADR-3997 to 13 points (adds `review:pre`).
  *     The canonical runtime set lives in `src/loop-resolver.cts`
  *     (`CANONICAL_POINTS` / `CANONICAL_POINTS_FALLBACK`, derived from
  *     `loop-host-contract.cjs`) — changing that set requires updating this
  *     list too, since a registry entry's `loopExtensionPoints` describes
- *     which of those 12 points a third-party capability extends.
+ *     which of those 13 points a third-party capability extends.
  *   - `HOOK_KINDS` mirrors ADR-857 Decision 4 "three hook kinds": `step`
  *     (runs as its own sequenced unit), `contribution` (injects into the
  *     core step's prompt/context), `gate` (checks and optionally blocks).
@@ -57,7 +57,7 @@
  * CLI wrappers that perform I/O around these functions.
  */
 
-// ─── ADR-857 "Loop Extension Points (the 12)" ────────────────────────────────
+// ─── ADR-857 "Loop Extension Points (the 12)", amended by ADR-3997 to 13 ──────
 const LOOP_POINTS = Object.freeze([
   'discuss:pre',
   'discuss:post',
@@ -71,6 +71,7 @@ const LOOP_POINTS = Object.freeze([
   'verify:post',
   'ship:pre',
   'ship:post',
+  'review:pre',
 ]);
 
 // ─── ADR-857 Decision 4 — three hook kinds ───────────────────────────────────
