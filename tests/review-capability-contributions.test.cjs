@@ -12,7 +12,7 @@ const { describe, test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 
-const { readFileNormalized } = require('./helpers.cjs');
+const { readFileNormalized, cleanup } = require('./helpers.cjs');
 const { getWiredKinds } = require('../scripts/gen-loop-host-contract.cjs');
 const { validateHooksWired } = require('../gsd-core/bin/lib/capability-validator.cjs');
 
@@ -125,7 +125,7 @@ describe('the injected contribution reaches every prompt transport (issue #3997 
   });
 
   after(() => {
-    fs.rmSync(tmp, { recursive: true, force: true });
+    cleanup(tmp);
   });
 
   test('gsd_run query prompt-budget preserves the marker verbatim, exactly once, at a small budget', () => {
