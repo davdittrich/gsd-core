@@ -87,6 +87,7 @@ function makeValidWorkflowFiles() {
     ),
     'verify-work.md': makeWorkflow('verify', ['verify:pre', 'verify:post'], ['orchestrator'], ['UAT.md'], ['SUMMARY.md']),
     'ship.md': makeWorkflow('ship', ['ship:pre', 'ship:post'], ['orchestrator'], [], ['UAT.md']),
+    'review.md': makeWorkflow('review', ['review:pre'], ['reviewer'], [], ['PLAN.md']),
   };
 }
 
@@ -182,6 +183,12 @@ describe('crossCheckRoles', () => {
     assert.deepEqual(errors, []);
   });
 
+  test('reviewer role is exempt only for review.md, not a blanket exemption like orchestrator (gh-3997)', () => {
+    assert.deepEqual(crossCheckRoles('anything', ['reviewer'], 'review.md'), []);
+    const elsewhere = crossCheckRoles('anything', ['reviewer'], 'ship.md');
+    assert.equal(elsewhere.length, 1, 'a workflow other than review.md must still get the real cross-check for reviewer');
+  });
+
   test('passes when agent name is present in content', () => {
     const content = 'Agent(subagent_type="gsd-planner") Agent(subagent_type="gsd-phase-researcher") gsd-plan-checker';
     const errors = crossCheckRoles(content, ['researcher', 'planner', 'checker'], 'plan-phase.md');
@@ -205,13 +212,14 @@ describe('crossCheckRoles', () => {
 // ─── 3. assertPointsCoverage ─────────────────────────────────────────────────
 
 describe('assertPointsCoverage', () => {
-  test('passes when all 12 canonical points are covered', () => {
+  test('passes when all 13 canonical points are covered', () => {
     const entries = [
       { step: 'discuss', points: ['discuss:pre', 'discuss:post'] },
       { step: 'plan', points: ['plan:pre', 'plan:post'] },
       { step: 'execute', points: ['execute:pre', 'execute:wave:pre', 'execute:wave:post', 'execute:post'] },
       { step: 'verify', points: ['verify:pre', 'verify:post'] },
       { step: 'ship', points: ['ship:pre', 'ship:post'] },
+      { step: 'review', points: ['review:pre'] },
     ];
     const errors = assertPointsCoverage(entries);
     assert.deepEqual(errors, []);
@@ -224,6 +232,7 @@ describe('assertPointsCoverage', () => {
       { step: 'execute', points: ['execute:pre', 'execute:wave:pre', 'execute:wave:post', 'execute:post'] },
       { step: 'verify', points: ['verify:pre', 'verify:post'] },
       { step: 'ship', points: ['ship:pre', 'ship:post'] },
+      { step: 'review', points: ['review:pre'] },
     ];
     const errors = assertPointsCoverage(entries);
     assert.ok(errors.some((e) => e.includes('discuss:post') && e.includes('not declared')));
@@ -236,6 +245,7 @@ describe('assertPointsCoverage', () => {
       { step: 'execute', points: ['execute:pre', 'execute:wave:pre', 'execute:wave:post', 'execute:post'] },
       { step: 'verify', points: ['verify:pre', 'verify:post'] },
       { step: 'ship', points: ['ship:pre', 'ship:post'] },
+      { step: 'review', points: ['review:pre'] },
     ];
     const errors = assertPointsCoverage(entries);
     assert.ok(errors.some((e) => e.includes('discuss:extra') && e.includes('not in the canonical')));
@@ -248,6 +258,7 @@ describe('assertPointsCoverage', () => {
       { step: 'execute', points: ['execute:pre', 'execute:wave:pre', 'execute:wave:post', 'execute:post'] },
       { step: 'verify', points: ['verify:pre', 'verify:post'] },
       { step: 'ship', points: ['ship:pre', 'ship:post'] },
+      { step: 'review', points: ['review:pre'] },
     ];
     const errors = assertPointsCoverage(entries);
     assert.ok(errors.some((e) => e.includes('discuss:pre') && e.includes('more than once')));
@@ -260,8 +271,8 @@ describe('buildContract from real workflows', () => {
   test('produces a contract matching the inline LOOP_HOST_CONTRACT shape', () => {
     const contract = buildContract(); // reads real gsd-core/workflows/
 
-    // Must be an array of 5 entries
-    assert.strictEqual(contract.length, 5, 'contract must have 5 step entries');
+    // Must be an array of 6 entries
+    assert.strictEqual(contract.length, 6, 'contract must have 6 step entries');
 
     // Each entry must have step, points, agentRoles, coreArtifacts
     for (const entry of contract) {
@@ -277,12 +288,12 @@ describe('buildContract from real workflows', () => {
     assert.deepEqual(contract, LOOP_HOST_CONTRACT, 'built contract must match committed LOOP_HOST_CONTRACT');
   });
 
-  test('covers exactly the 12 canonical points', () => {
+  test('covers exactly the 13 canonical points', () => {
     const contract = buildContract();
     const allPoints = contract.flatMap((e) => e.points);
-    assert.strictEqual(allPoints.length, 12, 'must cover exactly 12 points');
+    assert.strictEqual(allPoints.length, 13, 'must cover exactly 13 points');
     const pointSet = new Set(allPoints);
-    assert.strictEqual(pointSet.size, 12, 'all 12 points must be distinct');
+    assert.strictEqual(pointSet.size, 13, 'all 13 points must be distinct');
     for (const p of CANONICAL_POINTS) {
       assert.ok(pointSet.has(p), 'canonical point "' + p + '" must be declared');
     }
@@ -409,23 +420,28 @@ describe('normalizeLineEndings', () => {
 // ─── 7. STEP_WORKFLOWS and CANONICAL_POINTS exported constants ────────────────
 
 describe('module exports', () => {
-  test('STEP_WORKFLOWS has 5 entries in pipeline order', () => {
-    assert.strictEqual(STEP_WORKFLOWS.length, 5);
+  test('STEP_WORKFLOWS has 6 entries', () => {
+    assert.strictEqual(STEP_WORKFLOWS.length, 6);
     assert.strictEqual(STEP_WORKFLOWS[0].step, 'discuss');
     assert.strictEqual(STEP_WORKFLOWS[1].step, 'plan');
     assert.strictEqual(STEP_WORKFLOWS[2].step, 'execute');
     assert.strictEqual(STEP_WORKFLOWS[3].step, 'verify');
     assert.strictEqual(STEP_WORKFLOWS[4].step, 'ship');
+    // review:pre is orthogonal to the discuss->ship pipeline, not a sixth
+    // pipeline stage — see the comment on its STEP_WORKFLOWS entry.
+    assert.strictEqual(STEP_WORKFLOWS[5].step, 'review');
   });
 
-  test('CANONICAL_POINTS has exactly 12 entries', () => {
-    assert.strictEqual(CANONICAL_POINTS.length, 12);
+  test('CANONICAL_POINTS has exactly 13 entries', () => {
+    assert.strictEqual(CANONICAL_POINTS.length, 13);
   });
 
-  test('ROLE_TO_AGENT covers all non-orchestrator roles', () => {
-    // All non-orchestrator roles from the real contract
+  test('ROLE_TO_AGENT covers all non-orchestrator, non-reviewer roles', () => {
+    // All roles from the real contract except the two exempt from the
+    // agent-reference cross-check: orchestrator (the host itself) and
+    // reviewer (external AI CLI transports, never a gsd-* in-repo agent).
     const allRoles = new Set(
-      LOOP_HOST_CONTRACT.flatMap((e) => e.agentRoles).filter((r) => r !== 'orchestrator'),
+      LOOP_HOST_CONTRACT.flatMap((e) => e.agentRoles).filter((r) => r !== 'orchestrator' && r !== 'reviewer'),
     );
     for (const role of allRoles) {
       assert.ok(
@@ -435,11 +451,12 @@ describe('module exports', () => {
     }
   });
 
-  test('EXPECTED_POINTS_BY_STEP covers all 5 steps', () => {
+  test('EXPECTED_POINTS_BY_STEP covers all 6 steps', () => {
     assert.ok(EXPECTED_POINTS_BY_STEP, 'EXPECTED_POINTS_BY_STEP must be exported');
-    assert.strictEqual(Object.keys(EXPECTED_POINTS_BY_STEP).length, 5);
+    assert.strictEqual(Object.keys(EXPECTED_POINTS_BY_STEP).length, 6);
     assert.ok(Array.isArray(EXPECTED_POINTS_BY_STEP.execute));
     assert.strictEqual(EXPECTED_POINTS_BY_STEP.execute.length, 4);
+    assert.deepEqual(EXPECTED_POINTS_BY_STEP.review, ['review:pre']);
   });
 });
 
@@ -466,10 +483,10 @@ describe('Quick auxiliary loop-host contract (#3778)', () => {
     const tmpDir = makeTempWorkflowsDir(files);
     try {
       const contract = buildContract(tmpDir);
-      assert.strictEqual(contract.length, 5, 'auxiliary hosts must not create a sixth serialized step');
+      assert.strictEqual(contract.length, 6, 'auxiliary hosts must not create an extra serialized step');
       assert.strictEqual(
         new Set(contract.flatMap((entry) => entry.points)).size,
-        12,
+        13,
         'auxiliary hosts must not create a duplicate lifecycle point',
       );
     } finally {

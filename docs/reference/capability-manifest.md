@@ -75,7 +75,7 @@ Steps run at a loop extension point as independent units. Ordering within a poin
 
 | Sub-field | Type | Required | Description |
 |---|---|---|---|
-| `point` | string | Yes | One of the 12 valid loop extension point identifiers (see table below). |
+| `point` | string | Yes | One of the 13 valid loop extension point identifiers (see table below). |
 | `ref` | object | Yes | The dispatch target. Exactly one of `{ "skill": "<stem>" }`, `{ "agent": "<stem>" }`, or `{ "command": "<name>" }` (the three are mutually exclusive). A `skill`/`agent` stem must be declared in this capability's `skills`/`agents` array. |
 | `produces` | string[] | Yes | Artefact names this step produces. Must be present as an array (use `[]` when it produces none); an omitted `produces` fails validation. No two capability steps may produce the same artefact at the same point. |
 | `consumes` | string[] | Yes | Artefact names this step consumes. Must be present as an array (use `[]` when it consumes none); an omitted `consumes` fails validation. |
@@ -89,7 +89,7 @@ Contributions inject a fragment into a named agent role's prompt at a loop exten
 
 | Sub-field | Type | Required | Description |
 |---|---|---|---|
-| `point` | string | Yes | One of the 12 valid loop extension point identifiers. |
+| `point` | string | Yes | One of the 13 valid loop extension point identifiers. |
 | `into` | string | Yes | Agent role name. Must be a role published by that loop extension point in the host contract. |
 | `produces` | string[] | Yes | Artefact names this contribution produces. Use `[]` when it produces none. |
 | `consumes` | string[] | Yes | Artefact names this contribution reads. Use `[]` when it reads none. |
@@ -103,7 +103,7 @@ Gates check a condition at a loop extension point and optionally block progressi
 
 | Sub-field | Type | Required | Description |
 |---|---|---|---|
-| `point` | string | Yes | One of the 12 valid loop extension point identifiers. |
+| `point` | string | Yes | One of the 13 valid loop extension point identifiers. |
 | `check` | object | Yes | One of three forms (see table below). Must be present as an object; an omitted `check` fails validation. |
 | `blocking` | boolean | Yes | Must be present and a boolean; an omitted `blocking` fails validation. When `true`, a failed check halts the loop at this point. |
 | `onError` | `"skip"` \| `"halt"` | Yes | Behaviour when the check itself errors; must be present and one of `"skip"` or `"halt"` (an omitted `onError` fails validation). |
@@ -123,7 +123,7 @@ Declares that this capability resolves per-task content (`<action>`/`<verify>`/
 `<acceptance_criteria>`/`<read_first>`/`<done>`) from an external issue tracker instead of
 `execute-plan.md`'s per-task loop reading it inline from a task's `PLAN.md` body. This is **not**
 one of `steps` / `contributions` / `gates`, and it does not use a `point` value from the closed
-12-point vocabulary above — it is dispatched directly, once per task, by `execute-plan.md` before
+13-point vocabulary above — it is dispatched directly, once per task, by `execute-plan.md` before
 that task's `read_first` gate, documented separately in
 [`loop-hook-dispatch.md`](../../gsd-core/references/loop-hook-dispatch.md#the-executetask-point-a-different-shape).
 See [ADR-3646](../adr/3646-per-task-content-resolution-seam.md) for the full design and
@@ -143,7 +143,7 @@ for the authoring walkthrough.
 
 ## Valid `point` values
 
-The 12 loop extension points are a **closed, additive-only vocabulary**. Every `steps`, `contributions`, and `gates` entry must use one of these identifiers exactly.
+The 13 loop extension points are a **closed, additive-only vocabulary**. Every `steps`, `contributions`, and `gates` entry must use one of these identifiers exactly.
 
 A valid point is necessary but not sufficient: each host workflow decides, per point, which hook **kinds** its dispatch text handles, and a point may dispatch a subset. The registry build derives the real answer from the host workflows (`getWiredKinds()` in `scripts/gen-loop-host-contract.cjs`) and rejects a manifest declaring a kind the point does not dispatch — so an unsupported combination is a build-time error naming the point, the kind, and the kinds that point does cover. It is never a hook that renders and is then silently dropped.
 
@@ -163,6 +163,7 @@ A valid point is necessary but not sufficient: each host workflow decides, per p
 | `verify:post` | Verify | After the verify step completes |
 | `ship:pre` | Ship | Before the ship step executes |
 | `ship:post` | Ship | After the ship step completes |
+| `review:pre` | Review | Orthogonal to the discuss→ship pipeline — before `/gsd:review` (and `/gsd:plan-review-convergence`, which delegates to it) assembles the shared reviewer prompt. `into: "reviewer"` contributions only. |
 
 ---
 
@@ -306,7 +307,7 @@ The following invariants are enforced at **build time** by `scripts/gen-capabili
 - **Skill and agent stem uniqueness.** Exactly one capability may own each skill or agent stem across the entire merged registry.
 - **`requires` exist and are acyclic.** Every `id` listed in `requires` must exist in the registry; the dependency graph must be acyclic.
 - **`requires` is tier-monotone.** A `core` capability may not require a `standard` or `full` capability. A `standard` capability may not require a `full` capability.
-- **`point` values are from the closed set.** Every `point` in `steps`, `contributions`, and `gates` must be one of the 12 identifiers above.
+- **`point` values are from the closed set.** Every `point` in `steps`, `contributions`, and `gates` must be one of the 13 identifiers above.
 - **`contribution.into` is a published agent role.** The `into` value must be an agent role declared by the host contract for that loop extension point.
 - **Config key exclusivity.** A federated config key must be owned by exactly one capability and absent from the central `config-schema`. Presence in both is a collision; a half-migrated key fails the build gate.
 - **Artefact production uniqueness per point.** No two capability steps may `produces` the same artefact name at the same loop extension point.

@@ -3,7 +3,7 @@
 
 /**
  * gen-loop-host-contract.cjs — generates gsd-core/bin/lib/loop-host-contract.cjs
- * from the <!-- gsd:loop-host ... --> blocks in the five step workflows.
+ * from the <!-- gsd:loop-host ... --> blocks in the six host workflows.
  *
  * Usage:
  *   node scripts/gen-loop-host-contract.cjs              # print to stdout
@@ -12,7 +12,7 @@
  *
  * ADR-894 phase 3a-impl-2. Parses structured markers from workflow files,
  * cross-checks declared agent-roles against actual agent references in each
- * workflow, asserts that the union of all points equals the 12 canonical points,
+ * workflow, asserts that the union of all points equals the 13 canonical points,
  * and emits a committed CommonJS module exporting the contract array.
  */
 
@@ -27,7 +27,7 @@ const ROOT = path.resolve(__dirname, '..');
 const WORKFLOWS_DIR = path.join(ROOT, 'gsd-core', 'workflows');
 const CONTRACT_PATH = path.join(ROOT, 'gsd-core', 'bin', 'lib', 'loop-host-contract.cjs');
 
-// The five step workflows in pipeline order
+// The six host workflows (five pipeline steps + the orthogonal review host)
 const STEP_WORKFLOWS = [
   { file: 'discuss-phase.md', step: 'discuss' },
   {
@@ -40,9 +40,14 @@ const STEP_WORKFLOWS = [
   { file: 'execute-phase.md', step: 'execute' },
   { file: 'verify-work.md',   step: 'verify' },
   { file: 'ship.md',          step: 'ship' },
+  // review:pre is orthogonal to the discuss->ship pipeline (invoked ad hoc by
+  // /gsd:review and /gsd:plan-review-convergence, any phase state), not a
+  // sixth pipeline stage — hosted as its own step so it owns one canonical
+  // point without implying a fixed position between verify and ship.
+  { file: 'review.md',        step: 'review' },
 ];
 
-// Canonical 12 loop points in pipeline order
+// 12 pipeline points in order, plus the orthogonal review:pre (13 total).
 const CANONICAL_POINTS = [
   'discuss:pre',
   'discuss:post',
@@ -56,6 +61,7 @@ const CANONICAL_POINTS = [
   'verify:post',
   'ship:pre',
   'ship:post',
+  'review:pre',
 ];
 
 // FIX 1: Per-step canonical point ownership. Each step must declare exactly these points.
@@ -65,6 +71,7 @@ const EXPECTED_POINTS_BY_STEP = {
   execute: ['execute:pre', 'execute:wave:pre', 'execute:wave:post', 'execute:post'],
   verify:  ['verify:pre', 'verify:post'],
   ship:    ['ship:pre', 'ship:post'],
+  review:  ['review:pre'],
 };
 
 // Role → agent-name mapping used for cross-check.
@@ -203,6 +210,10 @@ function crossCheckRoles(content, agentRoles, fileName) {
   const errors = [];
   for (const role of agentRoles) {
     if (role === 'orchestrator') continue; // orchestrator = host itself; no agent file needed
+    // reviewer = external AI CLI transports (claude/gemini/codex/cursor/...), never a gsd-*
+    // in-repo agent — no ROLE_TO_AGENT mapping is possible. Scoped to review.md (not a blanket
+    // exemption like orchestrator's) so a future workflow can't claim the same free pass.
+    if (role === 'reviewer' && fileName === 'review.md') continue;
     const agentName = ROLE_TO_AGENT[role];
     if (!agentName) {
       errors.push(
@@ -228,11 +239,11 @@ function crossCheckRoles(content, agentRoles, fileName) {
   return errors;
 }
 
-// ─── 12-points coverage assertion ────────────────────────────────────────────
+// ─── 13-points coverage assertion ────────────────────────────────────────────
 
 /**
  * Assert that the union of all points across all contract entries equals
- * exactly the 12 canonical points (no more, no fewer), AND that each step
+ * exactly the 13 canonical points (no more, no fewer), AND that each step
  * declares exactly its own canonical points (FIX 1: per-step ownership).
  *
  * @param {{ step: string, points: string[] }[]} entries
@@ -276,7 +287,7 @@ function assertPointsCoverage(entries) {
   const canonical = new Set(CANONICAL_POINTS);
   for (const p of allPoints) {
     if (!canonical.has(p)) {
-      errors.push('declared point "' + p + '" is not in the canonical 12-point set');
+      errors.push('declared point "' + p + '" is not in the canonical 13-point set');
     }
   }
   for (const p of canonical) {
@@ -290,7 +301,7 @@ function assertPointsCoverage(entries) {
 // ─── Contract builder ─────────────────────────────────────────────────────────
 
 /**
- * Read and parse all five step workflows. Returns the contract array.
+ * Read and parse all six host workflows. Returns the contract array.
  * Throws on any parse or cross-check error.
  *
  * @param {string} [workflowsDir]  Override for testing
@@ -366,7 +377,7 @@ function buildContract(workflowsDir) {
     throw new Error('Loop host contract generation failed:\n' + allErrors.map((e) => '  ' + e).join('\n'));
   }
 
-  // Assert 12-points coverage
+  // Assert 13-points coverage
   const pointErrors = assertPointsCoverage(contract);
   if (pointErrors.length > 0) {
     throw new Error('Loop host contract points coverage failed:\n' + pointErrors.map((e) => '  ' + e).join('\n'));
@@ -392,8 +403,8 @@ function serializeContract(contract) {
   lines.push(' * loop-host-contract.cjs — generated by scripts/gen-loop-host-contract.cjs');
   lines.push(' * DO NOT EDIT BY HAND. Run: node scripts/gen-loop-host-contract.cjs --write');
   lines.push(' * ADR-894 §3 — Loop Host Contract, generated from workflow markers.');
-  lines.push(' * 12 points: discuss:pre/post, plan:pre/post, execute:pre/wave:pre/wave:post/post,');
-  lines.push(' * verify:pre/post, ship:pre/post. Per-step agentRoles and coreArtifacts.');
+  lines.push(' * 13 points: discuss:pre/post, plan:pre/post, execute:pre/wave:pre/wave:post/post,');
+  lines.push(' * verify:pre/post, ship:pre/post, review:pre. Per-step agentRoles and coreArtifacts.');
   lines.push(' */');
   lines.push('');
   lines.push('const LOOP_HOST_CONTRACT = ' + JSON.stringify(contract, null, 2) + ';');

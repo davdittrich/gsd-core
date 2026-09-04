@@ -1006,7 +1006,7 @@ describe('normalizeLineEndings', () => {
 // ─── 5. Registry shape from multiple capabilities ────────────────────────────
 
 describe('registry structure', () => {
-  test('byLoopPoint contains all 12 valid points', () => {
+  test('byLoopPoint contains all 13 valid points', () => {
     const capDir = makeTempCapDir({ ui: UI_CAP });
     const { capMap } = loadAndValidate(new Set(), capDir);
     const registry = buildRegistry(capMap);
@@ -1017,6 +1017,7 @@ describe('registry structure', () => {
       'execute:pre', 'execute:wave:pre', 'execute:wave:post', 'execute:post',
       'verify:pre', 'verify:post',
       'ship:pre', 'ship:post',
+      'review:pre',
     ];
     for (const point of expectedPoints) {
       assert.ok(
@@ -1093,13 +1094,13 @@ describe('#3778 — plan:pre contribution set feeding the quick.md planner dispa
     );
 
     const contract = buildContract();
-    assert.strictEqual(STEP_WORKFLOWS.length, 5, 'canonical step rows must stay at five');
-    assert.strictEqual(contract.length, 5, 'serialized contract must stay at five entries');
+    assert.strictEqual(STEP_WORKFLOWS.length, 6, 'canonical step rows must stay at six');
+    assert.strictEqual(contract.length, 6, 'serialized contract must stay at six entries');
     assert.deepEqual(contract, LOOP_HOST_CONTRACT, 'auxiliary metadata must not be serialized');
 
     const points = contract.flatMap((entry) => entry.points);
-    assert.strictEqual(points.length, 12, 'serialized contract must stay at 12 points');
-    assert.strictEqual(new Set(points).size, 12, 'serialized lifecycle points must remain unique');
+    assert.strictEqual(points.length, 13, 'serialized contract must stay at 13 points');
+    assert.strictEqual(new Set(points).size, 13, 'serialized lifecycle points must remain unique');
   });
 });
 
@@ -5540,22 +5541,12 @@ describe('#1196 — discuss loop wiring + wired-point guard', () => {
       );
     });
 
-    test('POINT_ORDER (capability-registry) === flattened LOOP_HOST_CONTRACT points — schema/contract drift guard', () => {
-      // Flatten all contract points in order
-      const contractPoints = [];
-      for (const entry of LOOP_HOST_CONTRACT) {
-        contractPoints.push(...entry.points);
-      }
-
-      assert.deepEqual(
-        POINT_ORDER,
-        contractPoints,
-        'POINT_ORDER in gen-capability-registry must equal the flattened LOOP_HOST_CONTRACT points in order. ' +
-        `POINT_ORDER: ${JSON.stringify(POINT_ORDER)}, contract flatten: ${JSON.stringify(contractPoints)}`,
-      );
-    });
-
-    test('CANONICAL_POINTS (gen-loop-host-contract) matches POINT_ORDER (gen-capability-registry)', () => {
+    // gh-3997: POINT_ORDER (capability-validator.cjs, re-exported via gen-capability-registry.cjs)
+    // now derives from LOOP_HOST_CONTRACT directly, so comparing it back to a fresh
+    // LOOP_HOST_CONTRACT flatten would be a tautology (removed). This is the real drift guard —
+    // CANONICAL_POINTS is an independently hand-authored array in gen-loop-host-contract.cjs, and
+    // this is what catches it disagreeing with the committed LOOP_HOST_CONTRACT artifact.
+    test('CANONICAL_POINTS (gen-loop-host-contract) matches POINT_ORDER (gen-capability-registry) — schema/contract drift guard', () => {
       assert.deepEqual(
         [...CANONICAL_POINTS],
         POINT_ORDER,
@@ -5568,7 +5559,7 @@ describe('#1196 — discuss loop wiring + wired-point guard', () => {
 
   describe('Property: scanWiredPoints is a correct extractor', () => {
     test('fc: scanWiredPoints(text) returns exactly the set of points whose call sites appear in text', () => {
-      // The canonical 12 points from CANONICAL_POINTS
+      // The canonical 13 points from CANONICAL_POINTS
       const allPoints = [...CANONICAL_POINTS];
 
       fc.assert(

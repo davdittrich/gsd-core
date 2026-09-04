@@ -60,7 +60,7 @@ Every entry is one JSON object in `docs/registries/capabilities.json`, `docs/reg
 
 | Field | Required | Meaning |
 |---|---|---|
-| `loopExtensionPoints` | yes, non-empty | Subset of the 12 Loop Extension Points the capability registers on: `discuss:pre`, `discuss:post`, `plan:pre`, `plan:post`, `execute:pre`, `execute:wave:pre`, `execute:wave:post`, `execute:post`, `verify:pre`, `verify:post`, `ship:pre`, `ship:post`. |
+| `loopExtensionPoints` | yes, non-empty | Subset of the 13 Loop Extension Points the capability registers on: `discuss:pre`, `discuss:post`, `plan:pre`, `plan:post`, `execute:pre`, `execute:wave:pre`, `execute:wave:post`, `execute:post`, `verify:pre`, `verify:post`, `ship:pre`, `ship:post`, `review:pre`. |
 | `hookKinds` | yes | Subset of `step`, `contribution`, `gate` — the hook kind registered at each point above. |
 | `configKeys` | yes | Array of federated config keys the capability owns (may be empty). |
 | `requires` | yes | Array of other Capability ids this capability depends on (may be empty). |

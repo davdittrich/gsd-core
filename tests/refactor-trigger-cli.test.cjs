@@ -977,7 +977,7 @@ describe('refactor-trigger: loop wiring', () => {
     }
 
     for (const step of refactorTriggerCapability.steps) {
-      assert.strictEqual(VALID_LOOP_POINTS.has(step.point), true, `step.point ${step.point} must be one of the closed 12 loop points`);
+      assert.strictEqual(VALID_LOOP_POINTS.has(step.point), true, `step.point ${step.point} must be one of the closed 13 loop points`);
     }
   });
 });

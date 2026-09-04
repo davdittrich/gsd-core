@@ -4259,7 +4259,7 @@ See [Develop a task-content resolver capability](../how-to/develop-a-task-conten
 for the authoring walkthrough, [Capability manifest → `taskContentResolver`](../reference/capability-manifest.md#taskcontentresolver)
 for the field reference, and
 [`loop-hook-dispatch.md`](../../gsd-core/references/loop-hook-dispatch.md#the-executetask-point-a-different-shape)
-for how `execute:task` differs from the twelve prose-dispatched points.
+for how `execute:task` differs from the thirteen prose-dispatched points.
 
 ---
 

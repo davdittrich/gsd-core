@@ -64,7 +64,7 @@ function spawnGsd(args, cwd) {
 }
 
 /**
- * Build a synthetic registry that has ALL 12 canonical byLoopPoint keys
+ * Build a synthetic registry that has ALL 13 canonical byLoopPoint keys
  * (required so resolveLoopHooks does not reject valid canonical points),
  * with a single step at `targetPoint` that activates on `when` config key.
  */

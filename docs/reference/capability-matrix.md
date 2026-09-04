@@ -183,6 +183,6 @@ and the [capability manifest reference](capability-manifest.md).
 
 - [ADR-1244 — Capability Ecosystem](../adr/1244-capability-ecosystem.md)
 - [The capability trust model](../explanation/capability-trust-model.md) — why the trust rules are structured as they are
-- [The phase loop](../explanation/the-phase-loop.md) — the 12 loop extension points in context
+- [The phase loop](../explanation/the-phase-loop.md) — the 13 loop extension points in context
 - [Capability manifest reference](capability-manifest.md) — the full `capability.json` schema
 - [ADR-857](../adr/857-capability-system.md) — the original capability architecture (D7/D8 extended by ADR-1244)

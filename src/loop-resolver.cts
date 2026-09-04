@@ -1,7 +1,7 @@
 /**
  * Loop Resolver — ADR-857 phase 3c registry-consuming query
  *
- * Given a loop point (one of the 12 canonical points from loop-host-contract.cjs),
+ * Given a loop point (one of the 13 canonical points from loop-host-contract.cjs),
  * filters the materialized Capability Registry by config activation and returns
  * the active hooks as a JSON envelope with a rendered-markdown field.
  *
@@ -45,43 +45,14 @@ const { resolveCapabilityRuntimeState } = capabilityStateModule;
 import capabilityActivationModule = require('./capability-activation.cjs');
 const { _getNestedConfigValue, _readRawConfigKey, _resolveActivationValue, _resolvePointGate, resolveConfigKey } = capabilityActivationModule;
 
-// ─── Canonical points (derived from LOOP_HOST_CONTRACT — authoritative 12) ───
+// ─── Canonical points (derived from LOOP_HOST_CONTRACT — authoritative 13) ───
 
 // FIX 2: Derive the authoritative canonical set from LOOP_HOST_CONTRACT so it
 // cannot drift from the host contract. CANONICAL_POINTS_FALLBACK is kept as an
 // alias for backward compatibility in tests and exports.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const _loopHostContract = require('./loop-host-contract.cjs') as { LOOP_HOST_CONTRACT: Array<{ points: string[] }> };
-const CANONICAL_POINTS: ReadonlyArray<string> = (() => {
-  try {
-    const contract = _loopHostContract.LOOP_HOST_CONTRACT;
-    if (Array.isArray(contract)) {
-      const pts: string[] = [];
-      for (const step of contract) {
-        if (step && Array.isArray(step.points)) {
-          for (const p of step.points) {
-            if (typeof p === 'string') pts.push(p);
-          }
-        }
-      }
-      if (pts.length > 0) return pts;
-    }
-  } catch { /* fall through to hardcoded fallback */ }
-  return [
-    'discuss:pre',
-    'discuss:post',
-    'plan:pre',
-    'plan:post',
-    'execute:pre',
-    'execute:wave:pre',
-    'execute:wave:post',
-    'execute:post',
-    'verify:pre',
-    'verify:post',
-    'ship:pre',
-    'ship:post',
-  ];
-})();
+const CANONICAL_POINTS: ReadonlyArray<string> = _loopHostContract.LOOP_HOST_CONTRACT.flatMap((step) => step.points);
 
 // Alias for backward compatibility (tests import this name)
 const CANONICAL_POINTS_FALLBACK: ReadonlyArray<string> = CANONICAL_POINTS;
@@ -163,7 +134,7 @@ interface ResolveLoopHooksResult {
 /**
  * Pure resolver: given a point, registry, and config, returns the active hooks.
  *
- * Throws if `point` is not one of the 12 canonical points (caller converts to
+ * Throws if `point` is not one of the 13 canonical points (caller converts to
  * io.error). Never throws for malformed registry/hook entries — skips and
  * continues.
  *

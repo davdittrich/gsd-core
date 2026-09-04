@@ -3,7 +3,7 @@
 Generic reference for consuming the `--raw` JSON output of `gsd_run loop render-hooks <point>`
 in any host-loop workflow. This document is point-agnostic — it applies to every loop
 extension point (discuss:pre, discuss:post, plan:pre, plan:post, execute:pre, execute:wave:pre,
-execute:wave:post, execute:post, verify:pre, verify:post, ship:pre, ship:post).
+execute:wave:post, execute:post, verify:pre, verify:post, ship:pre, ship:post, review:pre).
 
 ## Envelope shape
 
@@ -101,7 +101,7 @@ step in the workflow. No output to the user is needed.
 
 `execute:task` exists below wave granularity — it is evaluated once per task, inside the
 `execute:wave:pre` / `execute:wave:post` bracket, immediately before that task's `read_first`
-gate. It is **not** one of the 12 points documented above, does not appear in `steps` /
+gate. It is **not** one of the 13 points documented above, does not appear in `steps` /
 `contributions` / `gates`, and is never dispatched through `gsd_run loop render-hooks <point>` or
 this file's `activeHooks` envelope.
 
@@ -113,7 +113,7 @@ directly, an unconditional, required subprocess invocation with a real, binding 
 never a prose-dispatched `step`/`gate` entry chosen from an `activeHooks` array.
 
 This point always runs — there is no `when` config gate and no autonomous-mode elision. That is
-deliberate, not an oversight: the twelve points above are best-effort prose dispatch, which
+deliberate, not an oversight: the thirteen points above are best-effort prose dispatch, which
 `execute:task`'s hard-halt safety property cannot be built on top of (a missed dispatch is
 indistinguishable from a legitimate resolver-empty fallback). See
 [ADR-3646](../../docs/adr/3646-per-task-content-resolution-seam.md) for the full rationale,
