@@ -15,12 +15,23 @@ execute:wave:post, execute:post, verify:pre, verify:post, ship:pre, ship:post).
     { "kind": "step", "ref": { "skill": "my-skill" } },
     { "kind": "gate", "check": { "query": "..." }, "blocking": true, "onError": "skip" }
   ],
-  "rendered": "..."
+  "rendered": "...",
+  "context": { "phase": "05", "phaseDir": ".planning/phases/05-widgets" }
 }
 ```
 
 `activeHooks` is an array of enabled hook entries for the named point. It is empty (or absent)
 when no capability has registered an active hook at this point — treat that as a no-op.
+
+`context` is additive and optional (#4030): present only when the caller passed `--phase
+<token>` and it resolved to exactly one on-disk phase directory. It is the task-local phase
+the render-hooks invocation was scoped to — **authoritative over `STATE.current_phase` or
+artifact-order/mtime inference** for any dispatch below that needs a phase, since
+`STATE.current_phase` is project lifecycle status, not a claim about this invocation's scope,
+and the two diverge whenever one phase is being planned or verified while another still
+executes. Absent `context` means either `--phase` was omitted, or it did not resolve to a
+single directory (a warning is appended to `warnings` in that case) — dispatch exactly as if
+no phase were relevant.
 
 ## Dispatch rules by `kind`
 
@@ -33,8 +44,14 @@ Inject `fragment.inline` verbatim into the context for the role named in `into`
 
 Dispatch the referenced unit. Exactly one of `ref.skill`, `ref.agent`, or `ref.command` is set.
 
-- `ref.skill` present → dispatch via the Skill tool with skill id `gsd-<ref.skill>`.
-- `ref.agent` present → dispatch via the Agent tool with `subagent_type` = `ref.agent`.
+- `ref.skill` present → dispatch via the Skill tool with skill id `gsd-<ref.skill>`. If
+  `context` is present, pass it as the skill's args (e.g. `args="${context.phase} --auto
+  ${GSD_WS}"`) when the target skill accepts a phase argument — check the skill's own
+  `initialize` step; a skill that requires one and doesn't get it reports "Phase not found"
+  and exits, rather than silently using the wrong phase.
+- `ref.agent` present → dispatch via the Agent tool with `subagent_type` = `ref.agent`. If
+  `context` is present, include `context.phase` / `context.phaseDir` in the agent's prompt so
+  it operates on the task-local phase rather than inferring one.
   Before dispatching an agent, print the canonical liveness banner so users know silence
   is expected and do not kill a healthy agent:
 
@@ -49,10 +66,10 @@ Dispatch the referenced unit. Exactly one of `ref.skill`, `ref.agent`, or `ref.c
   `` ` ``, `$(`, or a newline would terminate the assignment and run as its own statement
   before any shell-side check could execute. A value that fails is a malformed manifest:
   record a warning, skip that hook, continue to the next entry. Only a value that has passed
-  is run, with the phase number appended:
+  is run, with `context` appended when present:
 
   ```bash
-  gsd_run ${ref.command} --phase "${PHASE_NUMBER}" --raw
+  gsd_run ${ref.command} --phase "${context.phase}" --phase-dir "${context.phaseDir}" --raw
   ```
 
 Wait for the result before continuing to the next hook or the next step.
@@ -91,6 +108,10 @@ Evaluate `check` (one of `query`, `predicate`, or `agentVerdict`). Then honor `b
 
 Honor `onError` if the check itself errors: `skip` means treat as non-blocking and continue;
 `halt` means surface the error and stop.
+
+When `context` is present and the check invocation needs a phase argument (e.g. `gsd_run
+check ${hook.check.query} "${context.phaseDir}" --raw`, or `--phase-dir "${context.phaseDir}"`
+for a `predicate` check per ADR-2008), source it from `context`, not an ambient variable.
 
 ## Empty / absent `activeHooks`
 
