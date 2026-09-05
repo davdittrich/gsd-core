@@ -203,8 +203,15 @@ describe('ADR-857 Phase 6 capstone conformance (#1139)', () => {
     // Decision #1) — NOT the optional-feature inline logic this budget ratchets
     // toward capabilities — so its footprint legitimately raises the host-loop
     // ceiling rather than signalling an un-extracted optional feature.
+    //
+    // #4030: the execute-phase.md ceiling was raised from 93600 to thread a typed
+    // `--phase`/workstream argument onto the existing `gsd_run loop render-hooks
+    // <point>` call sites (Decision 5's resolution seam) at execute:post and
+    // execute:wave:pre/post, so hook dispatch downstream (steps, gates) can resolve
+    // the task-local phase rather than inferring one. That is core dispatch-seam
+    // machinery, not optional-feature inline logic — see ADR-4030.
     const { lfByteCount } = require('../scripts/workflow-size.cjs');
-    const PRE_PHASE6 = { 'plan-phase.md': 94519, 'execute-phase.md': 93600 };
+    const PRE_PHASE6 = { 'plan-phase.md': 94519, 'execute-phase.md': 93800 };
     const notShrunk = [];
     for (const [file, frozen] of Object.entries(PRE_PHASE6)) {
       const now = lfByteCount(path.join(ROOT, 'gsd-core', 'workflows', file));
