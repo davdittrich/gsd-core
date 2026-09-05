@@ -1304,3 +1304,104 @@ describe('ADR-1244 D2: load-failed capability gates fail OPEN with a loud warnin
   });
 });
 
+// ─── #4030: --phase → derived context: { phase, phaseDir } ──────────────────
+
+describe('cmdLoopRenderHooks --phase (#4030)', () => {
+  function makePhaseProject(...phaseDirNames) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-phase-ctx-'));
+    for (const name of phaseDirNames) {
+      fs.mkdirSync(path.join(dir, '.planning', 'phases', name), { recursive: true });
+    }
+    return dir;
+  }
+
+  function renderWithPhase(projectDir, point, extraArgs = []) {
+    return runNode(
+      [GSD_TOOLS, 'loop', 'render-hooks', point, '--cwd', projectDir, ...extraArgs],
+      { cwd: ROOT, timeoutMs: 15000 },
+    );
+  }
+
+  test('[happy] --phase matching exactly one directory adds context:{phase,phaseDir}', (t) => {
+    const dir = makePhaseProject('05-widgets');
+    t.after(() => cleanup(dir));
+    const result = renderWithPhase(dir, 'plan:pre', ['--phase', '05', '--raw']);
+    assert.strictEqual(result.exitCode, 0, 'stderr: ' + result.stderr);
+    const envelope = JSON.parse(result.stdout.trim());
+    assert.strictEqual(envelope.point, 'plan:pre');
+    assert.ok(Array.isArray(envelope.activeHooks));
+    assert.strictEqual(typeof envelope.rendered, 'string');
+    assert.deepStrictEqual(envelope.context, { phase: '05', phaseDir: '.planning/phases/05-widgets' });
+    assert.strictEqual(envelope.warnings, undefined);
+  });
+
+  test('[bva] --phase omitted preserves the exact legacy envelope shape — no context key at all', (t) => {
+    const dir = makePhaseProject('05-widgets');
+    t.after(() => cleanup(dir));
+    const result = renderWithPhase(dir, 'plan:pre', ['--raw']);
+    assert.strictEqual(result.exitCode, 0, 'stderr: ' + result.stderr);
+    const envelope = JSON.parse(result.stdout.trim());
+    assert.ok(!Object.prototype.hasOwnProperty.call(envelope, 'context'),
+      'omitting --phase must not add a context key');
+  });
+
+  test('[negative] --phase with no matching directory omits context and appends a warning, still exits 0', (t) => {
+    const dir = makePhaseProject('05-widgets');
+    t.after(() => cleanup(dir));
+    const result = renderWithPhase(dir, 'plan:pre', ['--phase', '99', '--raw']);
+    assert.strictEqual(result.exitCode, 0, 'stderr: ' + result.stderr);
+    const envelope = JSON.parse(result.stdout.trim());
+    assert.ok(!Object.prototype.hasOwnProperty.call(envelope, 'context'));
+    assert.ok(Array.isArray(envelope.warnings) && envelope.warnings.length > 0);
+    assert.match(envelope.warnings.join('\n'), /did not match a phase directory/);
+  });
+
+  test('[bva] --phase matching two directories (ambiguous) omits context, warns with both names, exits 0 not thrown', (t) => {
+    const dir = makePhaseProject('05-widgets', '05-gadgets');
+    t.after(() => cleanup(dir));
+    const result = renderWithPhase(dir, 'plan:pre', ['--phase', '05', '--raw']);
+    assert.strictEqual(result.exitCode, 0, 'stderr: ' + result.stderr);
+    const envelope = JSON.parse(result.stdout.trim());
+    assert.ok(!Object.prototype.hasOwnProperty.call(envelope, 'context'));
+    const warningText = (envelope.warnings || []).join('\n');
+    assert.match(warningText, /ambiguous/);
+    assert.match(warningText, /05-widgets/);
+    assert.match(warningText, /05-gadgets/);
+  });
+
+  test('[negative] bare --phase with no value exits non-zero with a clear usage message', (t) => {
+    const dir = makePhaseProject('05-widgets');
+    t.after(() => cleanup(dir));
+    const result = renderWithPhase(dir, 'plan:pre', ['--phase']);
+    assert.notStrictEqual(result.exitCode, 0);
+    assert.match(result.stderr, /Missing value for --phase/);
+  });
+
+  test('[bva] --phase=05 equals-form parses identically to the space-separated form', (t) => {
+    const dir = makePhaseProject('05-widgets');
+    t.after(() => cleanup(dir));
+    const result = renderWithPhase(dir, 'plan:pre', ['--phase=05', '--raw']);
+    assert.strictEqual(result.exitCode, 0, 'stderr: ' + result.stderr);
+    const envelope = JSON.parse(result.stdout.trim());
+    assert.deepStrictEqual(envelope.context, { phase: '05', phaseDir: '.planning/phases/05-widgets' });
+  });
+
+  test('[happy] execute:post accepts --phase (point was missing from the original ADR scope, added after review)', (t) => {
+    const dir = makePhaseProject('05-widgets');
+    t.after(() => cleanup(dir));
+    const result = renderWithPhase(dir, 'execute:post', ['--phase', '05', '--raw']);
+    assert.strictEqual(result.exitCode, 0, 'stderr: ' + result.stderr);
+    const envelope = JSON.parse(result.stdout.trim());
+    assert.strictEqual(envelope.point, 'execute:post');
+    assert.deepStrictEqual(envelope.context, { phase: '05', phaseDir: '.planning/phases/05-widgets' });
+  });
+
+  test('[happy] --phase composes with --active-cap without interference', (t) => {
+    const dir = makePhaseProject('02-alpha');
+    t.after(() => cleanup(dir));
+    const result = renderWithPhase(dir, 'plan:pre', ['--phase', '02', '--active-cap', 'tdd']);
+    assert.strictEqual(result.exitCode, 0, 'stderr: ' + result.stderr);
+    assert.match(result.stdout, /^(true|false)\n$/);
+  });
+});
+
