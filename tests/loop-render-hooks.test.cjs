@@ -1403,5 +1403,17 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     assert.strictEqual(result.exitCode, 0, 'stderr: ' + result.stderr);
     assert.match(result.stdout, /^(true|false)\n$/);
   });
+
+  test('[hostile] a foreign-project-code-prefixed --phase token does not reopen #2237 — guardedFindPhase rejects it same as init.*', (t) => {
+    const dir = makePhaseProject('05-widgets');
+    fs.writeFileSync(path.join(dir, '.planning', 'config.json'), JSON.stringify({ project_code: 'MINE' }));
+    t.after(() => cleanup(dir));
+    const result = renderWithPhase(dir, 'plan:pre', ['--phase', 'OTHER-05', '--raw']);
+    assert.strictEqual(result.exitCode, 0, 'stderr: ' + result.stderr);
+    const envelope = JSON.parse(result.stdout.trim());
+    assert.ok(!Object.prototype.hasOwnProperty.call(envelope, 'context'),
+      'a foreign-prefixed token must not silently resolve to this project\'s same-numbered phase directory');
+    assert.match((envelope.warnings || []).join('\n'), /did not match a phase directory/);
+  });
 });
 

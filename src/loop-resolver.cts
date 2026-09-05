@@ -543,14 +543,17 @@ function cmdLoopRenderHooks(
   }
 
   // ── #4030: optional --phase <token> → derived context: { phase, phaseDir } ─────
-  // Resolves the SAME way `init.*` already does (findPhaseInternal), so a
-  // phase-scoped step/gate/contribution handler gets the task-local phase
-  // instead of inferring it from STATE.current_phase or an ambient shell
-  // variable. Never accepts a caller-supplied directory — phaseDir is always
-  // the literal on-disk directory name findPhaseInternal matched, so there is
-  // no path string to validate. A missing or ambiguous phase degrades to "no
-  // context" plus a warning (mirroring cmdInitPhaseOp's #2237 handling of the
-  // identical found:false/ambiguous_matches shape) rather than a hard error.
+  // Resolves the SAME way `init.*` already does — guardedFindPhase, not bare
+  // findPhaseInternal — so a project_code-scoped repo gets the identical
+  // #2237 foreign-prefix guard `init.*` applies, rather than reopening that
+  // bug for this new call site. A phase-scoped step/gate/contribution handler
+  // gets the task-local phase instead of inferring it from STATE.current_phase
+  // or an ambient shell variable. Never accepts a caller-supplied directory —
+  // phaseDir is always the literal on-disk directory name findPhaseInternal
+  // matched, so there is no path string to validate. A missing or ambiguous
+  // phase degrades to "no context" plus a warning (mirroring cmdInitPhaseOp's
+  // #2237 handling of the identical found:false/ambiguous_matches shape)
+  // rather than a hard error.
   const phaseArg = typeof options['phase'] === 'string' ? options['phase'] : undefined;
   if (phaseArg === '') {
     coreError('--phase requires a <token> value (e.g. --phase 05)');
@@ -560,15 +563,15 @@ function cmdLoopRenderHooks(
   const phaseWarnings: string[] = [];
   if (phaseArg !== undefined) {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { findPhaseInternal } = require('./phase-locator.cjs') as {
-      findPhaseInternal: (cwd: string, phase: unknown) => {
+    const { guardedFindPhase } = require('./init.cjs') as {
+      guardedFindPhase: (cwd: string, phase: string, projectCode: unknown) => {
         found: boolean;
         directory: string;
         phase_number: string;
         ambiguous_matches?: string[];
       } | null;
     };
-    const phaseResult = findPhaseInternal(cwd, phaseArg);
+    const phaseResult = guardedFindPhase(cwd, phaseArg, config['project_code']);
     if (phaseResult?.found) {
       phaseContext = { phase: phaseResult.phase_number, phaseDir: phaseResult.directory };
     } else if (phaseResult?.ambiguous_matches?.length) {

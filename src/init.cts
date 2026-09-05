@@ -4155,6 +4155,7 @@ function cmdSkillManifest(cwd: string, args: string[], raw: boolean): void {
 }
 
 export = {
+  guardedFindPhase,
   cmdInitExecutePhase,
   cmdInitPlanPhase,
   cmdInitNewProject,
