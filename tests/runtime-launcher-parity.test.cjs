@@ -13,11 +13,11 @@
  * (D) Loud guard behavioral: missing gsd-tools.cjs exits non-zero and emits
  *     "not found" to stderr.
  * (E) PATH fallback behavioral: when no local gsd-tools.cjs, the elif branch
- *     resolves to the gsd-tools binary on PATH (#3668).
+ *     resolves to the gsd_run binary on PATH (#3668).
  * (F) Regression locks: the snippet file contains no /gsd-tools substring; and
  *     no line in workflows/do.md matches /\/gsd[:-][a-z]/ (dispatcher-parity
  *     scanner must not read the preamble as a slash-command stub).
- * (H) Codex shim fallback: when PATH has no gsd-tools, $HOME/.codex/gsd-core/bin
+ * (H) Codex shim fallback: when PATH has no gsd_run, $HOME/.codex/gsd-core/bin
  *     can satisfy gsd_run for Codex shim-only installs.
  */
 
@@ -31,7 +31,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { runHook: runHookSeam } = require('./helpers/process-seam.cjs');
 const { throwIfFailed } = require('./helpers/git-fixture.cjs');
-const { cleanup } = require('./helpers.cjs');
+const { cleanup, TEST_ENV_BASE } = require('./helpers.cjs');
 const { escapeRegex } = require('../gsd-core/bin/lib/pattern.cjs');
 
 const WORKFLOWS_DIR = path.join(__dirname, '..', 'gsd-core', 'workflows');
@@ -39,12 +39,40 @@ const AGENTS_DIR = path.join(__dirname, '..', 'agents');
 const SNIPPET_FILE = path.join(WORKFLOWS_DIR, '_runtime-launcher.snippet.sh');
 
 /**
+ * Env for any fixture that sources the snippet (#4205).
+ *
+ * TEST_ENV_BASE is DERIVED from the same capability registry the resolver
+ * reads — see the note at tests/helpers.cjs, "#2665: this list is DERIVED,
+ * not hand-maintained. A hand-written list is exactly what reopened this bug
+ * twice". It was right: the hand-written list this replaces missed both
+ * CODEX_HOME and XDG_CONFIG_HOME, and adding a 17th runtime home would have
+ * left it silently stale — the exact shape of #4205.
+ *
+ * Two keys the derived set cannot supply, both still live in the snippet:
+ *  - GEMINI_CONFIG_DIR: the gemini runtime is retired (#1928) so the registry
+ *    no longer carries it, but the snippet still probes its arm.
+ *  - CLAUDE_ENV_FILE: a WRITE sink, not a read path. Left ambient, every
+ *    fixture that exits 0 appends `export PATH='<temp dir>'` to the
+ *    developer's real env file — 11 lines per suite run, each naming a
+ *    /tmp dir the fixture has already deleted.
+ *  - BASH_ENV: sourced by non-interactive bash BEFORE the script, which is
+ *    after this scrub is applied — so one inherited var re-injects any of
+ *    the others. Measured: a BASH_ENV exporting CODEX_HOME turns (H) red.
+ */
+const SNIPPET_SCRUB = { GEMINI_CONFIG_DIR: '', CLAUDE_ENV_FILE: '', BASH_ENV: '' };
+function snippetEnv(overrides = {}) {
+  return { ...process.env, ...TEST_ENV_BASE, ...SNIPPET_SCRUB, ...overrides };
+}
+
+/**
  * Run a bash script FILE via the process seam, preserving the throw-on-
  * nonzero-exit semantics of the execFileSync('bash', [path], ...) idiom
  * this replaces.
  */
 function runBashFile(scriptPath, options = {}) {
-  const r = runHookSeam(scriptPath, [], { interpreter: 'bash', ...options });
+  const r = runHookSeam(scriptPath, [], {
+    interpreter: 'bash', ...options, env: snippetEnv(options.env),
+  });
   throwIfFailed(r, `bash ${scriptPath}`);
   return r.stdout;
 }
@@ -360,12 +388,12 @@ describe('runtime-launcher-parity (#373)', () => {
   });
 
   // ─── (D) Loud guard: missing runtime is fatal ─────────────────────────────
-  test('(D) missing gsd-tools.cjs and no PATH gsd-tools causes loud non-zero exit with "not found" on stderr', () => {
+  test('(D) missing gsd-tools.cjs and no PATH gsd_run causes loud non-zero exit with "not found" on stderr', () => {
     // Create temp dir with a space in the name, but NO gsd-tools.cjs.
-    // We ensure gsd-tools is not on PATH by prepending a dir that has no
-    // gsd-tools binary (system binaries remain on PATH so bash/node work).
+    // We ensure gsd_run is not on PATH by prepending a dir that has no
+    // gsd_run binary (system binaries remain on PATH so bash/node work).
     const base = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd 373 notools '));
-    // Place a no-op dir first in PATH; no gsd-tools stub there.
+    // Place a no-op dir first in PATH; no gsd_run stub there.
     const noToolsBin = path.join(base, 'nobin');
     fs.mkdirSync(noToolsBin, { recursive: true });
     try {
@@ -380,24 +408,28 @@ describe('runtime-launcher-parity (#373)', () => {
       const scriptPath = path.join(base, 'test-guard.sh');
       fs.writeFileSync(scriptPath, scriptContent);
 
-      // Build a PATH that has noToolsBin first (no gsd-tools stub there) but retains
-      // system paths needed for bash. Exclude any PATH entry that contains a gsd-tools binary.
+      // Build a PATH that has noToolsBin first (no gsd_run stub there) but retains
+      // system paths needed for bash. Exclude any PATH entry that contains a gsd_run
+      // binary. See #4205 / buildIsolatedPath() below for why gsd_run.
       const systemPaths = (process.env.PATH || '/usr/bin:/bin')
         .split(path.delimiter)
         .filter((p) => {
-          try { fs.accessSync(path.join(p, 'gsd-tools'), fs.constants.X_OK); return false; }
+          try { fs.accessSync(path.join(p, 'gsd_run'), fs.constants.X_OK); return false; }
           catch { return true; }
         });
       const isolatedPath = [noToolsBin, ...systemPaths].join(path.delimiter);
 
       const r = runHookSeam(scriptPath, [], {
         interpreter: 'bash',
-        env: { ...process.env, PATH: isolatedPath, HOME: base },
+        // Loud-guard requires every runtime-home arm to genuinely miss, not
+        // just PATH (#4205 class: an ambient config-dir var pointing at a
+        // real install would resolve here instead of the hard error).
+        env: snippetEnv({ PATH: isolatedPath, HOME: base }),
       });
       const threw = r.exitCode !== 0;
       const stderrOutput = r.stderr || '';
 
-      assert.ok(threw, 'Expected the script to exit non-zero when gsd-tools.cjs is missing and gsd-tools is not on PATH');
+      assert.ok(threw, 'Expected the script to exit non-zero when gsd-tools.cjs is missing and gsd_run is not on PATH');
       assert.ok(
         stderrOutput.includes('not found') || stderrOutput.includes('ERROR'),
         `Expected stderr to contain "not found" or "ERROR", got: ${stderrOutput.trim()}`,
@@ -439,7 +471,7 @@ describe('runtime-launcher-parity (#373)', () => {
       fs.writeFileSync(scriptPath, scriptContent);
 
       const stdout = runBashFile(scriptPath, {
-        env: { ...process.env, PATH: `${pathBinDir}${path.delimiter}${process.env.PATH || ''}` },
+        env: { PATH: `${pathBinDir}${path.delimiter}${process.env.PATH || ''}` },
       });
 
       // The PATH fallback must have resolved GSD_TOOLS to the stub binary.
@@ -474,7 +506,7 @@ describe('runtime-launcher-parity (#373)', () => {
     // The resolution order must be:
     //   (1) local/RUNTIME_DIR  →  (2) PATH  →  (3) $HOME/.claude/gsd-core/bin  →  (4) hard error
     // We probe for .claude/gsd-core/bin (using ${_GSD_SHIM_NAME} indirection)
-    // between the `command -v gsd-tools` elif and the hard-error else branch.
+    // between the `command -v gsd_run` elif and the hard-error else branch.
     const CLAUDE_HOME_PROBE = '.claude/gsd-core/bin/';
 
     // Assert snippet itself contains the probe
@@ -518,7 +550,7 @@ describe('runtime-launcher-parity (#373)', () => {
   });
 
   // ─── (H) Codex shim fallback behavioral ------------------------------------
-  test('(H) gsd_run resolves $HOME/.codex/gsd-core/bin/ shim when PATH has no gsd-tools', () => {
+  test('(H) gsd_run resolves $HOME/.codex/gsd-core/bin/ shim when PATH has no gsd_run', () => {
     const CODEX_HOME_PROBE = '.codex/gsd-core/bin/';
 
     const snippetContent = fs.readFileSync(SNIPPET_FILE, 'utf8');
@@ -579,9 +611,10 @@ describe('runtime-launcher-parity (#373)', () => {
           return false;
         }
       };
+      // #4205: filter on gsd_run — see buildIsolatedPath() below for why.
       const systemPaths = (process.env.PATH || '/usr/bin:/bin')
         .split(path.delimiter)
-        .filter((p) => !hasExecutable(p, 'gsd-tools'));
+        .filter((p) => !hasExecutable(p, 'gsd_run'));
       if (!systemPaths.some((p) => hasExecutable(p, 'node'))) {
         const nodeShimDir = path.join(fakeRuntime, 'node-shim');
         fs.mkdirSync(nodeShimDir, { recursive: true });
@@ -590,7 +623,12 @@ describe('runtime-launcher-parity (#373)', () => {
       }
 
       const stdout = runBashFile(scriptPath, {
-        env: { ...process.env, PATH: systemPaths.join(path.delimiter), HOME: fakeHome },
+        // Ambient CLAUDE_CONFIG_DIR/HERMES_HOME/CURSOR_CONFIG_DIR resolve arms
+        // checked before CODEX_HOME, and an ambient CODEX_HOME overrides the
+        // $HOME/.codex default this test asserts (#4205 class: same env-leak
+        // bug, this time via config-dir vars rather than PATH) — clear all
+        // four so only HOME's default $HOME/.codex fallback can win.
+        env: { PATH: systemPaths.join(path.delimiter), HOME: fakeHome },
       });
 
       const normStdout = stdout.replace(/\\/g, '/');
@@ -880,7 +918,7 @@ describe('runtime-launcher-parity — agents (#1041)', () => {
  * Asserts:
  * (A) The canonical snippet file contains the ~/.claude fallback arm.
  * (B) A representative propagated workflow file contains the ~/.claude fallback arm.
- * (C) Behavioral: when RUNTIME_DIR misses and gsd-tools is NOT on PATH,
+ * (C) Behavioral: when RUNTIME_DIR misses and gsd_run is NOT on PATH,
  *     a stub at $HOME/.claude/gsd-core/bin/gsd-tools.cjs is resolved and invoked.
  * (D) The resolution order is preserved: local -> PATH -> ~/.claude -> hard error.
  *     When all three miss, exit non-zero.
@@ -911,7 +949,9 @@ const REPRESENTATIVE_FILE = path.join(WORKFLOWS_DIR, 'add-backlog.md');
  * this replaces.
  */
 function runBashFile(scriptPath, options = {}) {
-  const r = runHookSeam(scriptPath, [], { interpreter: 'bash', ...options });
+  const r = runHookSeam(scriptPath, [], {
+    interpreter: 'bash', ...options, env: snippetEnv(options.env),
+  });
   throwIfFailed(r, `bash ${scriptPath}`);
   return r.stdout;
 }
@@ -940,7 +980,7 @@ describe('bug-211: launcher ~/.claude home fallback', () => {
   });
 
   // --- (C) Behavioral: ~/.claude stub is resolved when local and PATH both miss
-  test('(C) gsd_run resolves $HOME/.claude/gsd-core/bin/ stub when no local install and gsd-tools not on PATH', () => {
+  test('(C) gsd_run resolves $HOME/.claude/gsd-core/bin/ stub when no local install and gsd_run not on PATH', () => {
     // Build a fake $HOME with a stub at .claude/gsd-core/bin/gsd-tools.cjs
     const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-211-home-'));
     // RUNTIME_DIR points to a directory with no gsd-tools.cjs
@@ -969,10 +1009,11 @@ describe('bug-211: launcher ~/.claude home fallback', () => {
       const scriptPath = path.join(fakeRuntime, 'test-home-fb.sh');
       fs.writeFileSync(scriptPath, scriptContent);
 
-      // Build a PATH with no gsd-tools binary to force the ~/.claude arm.
-      // Filter out directories that contain a gsd-tools executable. If node lives
-      // in the same directory as gsd-tools, create a dedicated shim dir with a
-      // symlink to node only (no gsd-tools there).
+      // Build a PATH with no gsd_run binary to force the ~/.claude arm.
+      // Filter out directories that contain a gsd_run executable (#4205; see
+      // buildIsolatedPath() below for why). If node lives in the same directory
+      // as gsd_run, create a dedicated shim dir with a symlink to node only
+      // (no gsd_run there).
       const nodeBinResult = runHookSeam('node', [], { interpreter: 'which' });
       throwIfFailed(nodeBinResult, 'which node');
       const nodeBin = nodeBinResult.stdout.trim();
@@ -980,13 +1021,13 @@ describe('bug-211: launcher ~/.claude home fallback', () => {
         .split(path.delimiter)
         .filter((p) => {
           try {
-            fs.accessSync(path.join(p, 'gsd-tools'), fs.constants.X_OK);
+            fs.accessSync(path.join(p, 'gsd_run'), fs.constants.X_OK);
             return false;
           } catch {
             return true;
           }
         });
-      // If node's dir was filtered (it contained gsd-tools), create a shim dir
+      // If node's dir was filtered (it contained gsd_run), create a shim dir
       // with just a node symlink so the stub's shebang (#!/usr/bin/env node) resolves.
       const nodeShimDir = path.join(fakeRuntime, 'node-shim');
       if (!systemPaths.some((p) => {
@@ -999,7 +1040,9 @@ describe('bug-211: launcher ~/.claude home fallback', () => {
       }
 
       const stdout = runBashFile(scriptPath, {
-        env: { ...process.env, PATH: systemPaths.join(path.delimiter), HOME: fakeHome },
+        // Ambient CLAUDE_CONFIG_DIR would override the $HOME/.claude default
+        // this test relies on (#4205 class: env-leak, not PATH-leak).
+        env: { PATH: systemPaths.join(path.delimiter), HOME: fakeHome },
       });
 
       // GSD_TOOLS must point into the fake ~/.claude dir
@@ -1039,11 +1082,12 @@ describe('bug-211: launcher ~/.claude home fallback', () => {
       const scriptPath = path.join(fakeRuntime, 'test-allfail.sh');
       fs.writeFileSync(scriptPath, scriptContent);
 
+      // #4205: filter on gsd_run — see buildIsolatedPath() below for why.
       const systemPaths = (process.env.PATH || '/usr/bin:/bin')
         .split(path.delimiter)
         .filter((p) => {
           try {
-            fs.accessSync(path.join(p, 'gsd-tools'), fs.constants.X_OK);
+            fs.accessSync(path.join(p, 'gsd_run'), fs.constants.X_OK);
             return false;
           } catch {
             return true;
@@ -1053,7 +1097,10 @@ describe('bug-211: launcher ~/.claude home fallback', () => {
 
       const r = runHookSeam(scriptPath, [], {
         interpreter: 'bash',
-        env: { ...process.env, PATH: isolatedPath, HOME: fakeHome },
+        // "All three miss" requires every runtime-home arm to genuinely miss,
+        // not just the first (#4205 class: an ambient config-dir var pointing
+        // at a real install would resolve here instead of the hard error).
+        env: snippetEnv({ PATH: isolatedPath, HOME: fakeHome }),
       });
       const threw = r.exitCode !== 0;
       const stderrOutput = r.stderr || '';
@@ -1088,12 +1135,15 @@ describe('bug-211: launcher ~/.claude home fallback', () => {
  * Every non-Claude runtime (Hermes, Cursor, Codex, Copilot, Windsurf, …)
  * installs gsd-core into a *different* directory that the shim never tried,
  * causing a false-positive fatal ERROR on all non-Claude runtimes when
- * RUNTIME_DIR is not set and gsd-tools is not on PATH.
+ * RUNTIME_DIR is not set and gsd_run is not on PATH.
  *
  * Asserts:
  * (A) Snippet contains all expected non-Claude runtime home probes (structural).
- * (B) HERMES_HOME behavioral: when RUNTIME_DIR misses and gsd-tools is NOT on
- *     PATH, a stub at ${HERMES_HOME}/gsd-core/bin/gsd-tools.cjs is invoked.
+ * (B0) buildIsolatedPath() co-location invariant (see below).
+ * (B) HERMES_HOME behavioral: when RUNTIME_DIR misses and gsd_run is NOT on
+ *     PATH, the stub at ${HERMES_HOME}/gsd-core/bin/gsd-tools.cjs is invoked.
+ *     On POSIX it also plants a leaked gsd_run on PATH first (#4205), which is
+ *     what makes it fail on a clean machine as well as a leaking one.
  * (C) Default Hermes path behavioral: stub at $HOME/.hermes/gsd-core/bin/
  *     gsd-tools.cjs is invoked when HERMES_HOME is not set.
  * (D) Resolution order: non-Claude homes are probed BEFORE the hard error,
@@ -1127,7 +1177,9 @@ const SNIPPET_FILE = path.join(WORKFLOWS_DIR, '_runtime-launcher.snippet.sh');
  * this replaces.
  */
 function runBashFile(scriptPath, options = {}) {
-  const r = runHookSeam(scriptPath, [], { interpreter: 'bash', ...options });
+  const r = runHookSeam(scriptPath, [], {
+    interpreter: 'bash', ...options, env: snippetEnv(options.env),
+  });
   throwIfFailed(r, `bash ${scriptPath}`);
   return r.stdout;
 }
@@ -1216,15 +1268,15 @@ function extractShellBlocks(content) {
 }
 
 /**
- * Build a PATH with no gsd-tools binary so the PATH fallback branch is skipped,
+ * Build a PATH with no gsd_run binary so the PATH fallback branch is skipped,
  * while guaranteeing that a bare `node` lookup still resolves regardless of whether
- * the real node binary co-locates with a global gsd-tools shim (e.g. fnm/nvm/Homebrew).
+ * the real node binary co-locates with a global gsd_run shim (e.g. fnm/nvm/Homebrew).
  *
  * Strategy (POSIX only): create a temp dir containing only a `node` symlink →
- * process.execPath, prepend it to the gsd-tools-filtered PATH.  The filtered
- * PATH excludes any directory that contains an executable `gsd-tools`.
+ * process.execPath, prepend it to the gsd_run-filtered PATH.  The filtered
+ * PATH excludes any directory that contains an executable `gsd_run`.
  *
- * On Windows the co-location bug does not apply (gsd-tools resolves via .cmd/.ps1,
+ * On Windows the co-location bug does not apply (gsd_run resolves via .cmd/.ps1,
  * not the bare binary probed here), and symlinks may require elevated privileges,
  * so we skip the symlink step entirely on that platform.
  *
@@ -1234,10 +1286,13 @@ function extractShellBlocks(content) {
  * @returns {{ isolatedPath: string, nodeBinDir: string|null }}
  */
 function buildIsolatedPath() {
+  // #4205: the resolver's PATH-fallback arm probes `command -v gsd_run` (not
+  // `gsd-tools`) — filter on the actual probe target so a real installed
+  // gsd_run can't leak through and shadow the runtime-home fallback.
   const filteredPath = (process.env.PATH || '/usr/bin:/bin')
     .split(path.delimiter)
     .filter((p) => {
-      try { fs.accessSync(path.join(p, 'gsd-tools'), fs.constants.X_OK); return false; }
+      try { fs.accessSync(path.join(p, 'gsd_run'), fs.constants.X_OK); return false; }
       catch { return true; }
     })
     .join(path.delimiter);
@@ -1304,10 +1359,10 @@ describe('bug-891: non-Claude runtime home fallback arms', () => {
   });
 
   // ── (B0) Regression: buildIsolatedPath keeps node resolvable when node and ──
-  //        gsd-tools co-locate in the same PATH directory.                     ─
+  //        gsd_run co-locate in the same PATH directory.                       ─
   //
   // Machine-independence guarantee: PATH is set to ONLY two controlled dirs —
-  // fakeBinDir (holds both fake gsd-tools AND a node symlink) plus a fresh
+  // fakeBinDir (holds both fake gsd_run AND a node symlink) plus a fresh
   // empty dir (no executables at all). The real system PATH is NOT appended.
   //
   //   Old logic: filters out fakeBinDir → only the empty dir remains → node
@@ -1315,24 +1370,24 @@ describe('bug-891: non-Claude runtime home fallback arms', () => {
   //   New logic: prepends its own nodeBinDir → node resolvable despite fakeBinDir
   //              being filtered → both assertions pass.
   test(
-    '(B0) buildIsolatedPath: node is resolvable and gsd-tools is not when they share a PATH dir',
+    '(B0) buildIsolatedPath: node is resolvable and gsd_run is not when they share a PATH dir',
     { skip: process.platform === 'win32' ? 'POSIX-only co-location scenario' : false },
     (t) => {
-      // Build a fake bin dir that contains BOTH a gsd-tools executable and a node
+      // Build a fake bin dir that contains BOTH a gsd_run executable and a node
       // symlink, simulating a dev setup (fnm/nvm/Homebrew) where both land in the
       // same bin directory.
       const fakeBinDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-891-colocated-'));
-      // A second fresh empty dir — contains neither gsd-tools nor node.
+      // A second fresh empty dir — contains neither gsd_run nor node.
       const emptyDir   = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-891-empty-'));
       t.after(() => cleanup(fakeBinDir));
       t.after(() => cleanup(emptyDir));
 
-      // Fake gsd-tools shim (executable file)
-      const fakeGsdTools = path.join(fakeBinDir, 'gsd-tools');
-      fs.writeFileSync(fakeGsdTools, '#!/bin/sh\necho fake-gsd-tools\n');
-      fs.chmodSync(fakeGsdTools, 0o755);
+      // Fake gsd_run shim (executable file). See #4205 / buildIsolatedPath() above.
+      const fakeGsdRun = path.join(fakeBinDir, 'gsd_run');
+      fs.writeFileSync(fakeGsdRun, '#!/bin/sh\necho fake-gsd-run\n');
+      fs.chmodSync(fakeGsdRun, 0o755);
 
-      // node symlink pointing at the real interpreter (co-located with gsd-tools)
+      // node symlink pointing at the real interpreter (co-located with gsd_run)
       fs.symlinkSync(process.execPath, path.join(fakeBinDir, 'node'));
 
       // Set PATH to ONLY the two controlled dirs (no real system dirs).
@@ -1350,15 +1405,15 @@ describe('bug-891: non-Claude runtime home fallback arms', () => {
 
       const returnedDirs = result.isolatedPath.split(path.delimiter);
 
-      // (i) gsd-tools must NOT be resolvable on the returned PATH
-      const gsdToolsResolvable = returnedDirs.some((dir) => {
-        try { fs.accessSync(path.join(dir, 'gsd-tools'), fs.constants.X_OK); return true; }
+      // (i) gsd_run must NOT be resolvable on the returned PATH
+      const gsdRunResolvable = returnedDirs.some((dir) => {
+        try { fs.accessSync(path.join(dir, 'gsd_run'), fs.constants.X_OK); return true; }
         catch { return false; }
       });
       assert.equal(
-        gsdToolsResolvable,
+        gsdRunResolvable,
         false,
-        'gsd-tools must not be resolvable on the isolated PATH (home-fallback would be bypassed)',
+        'gsd_run must not be resolvable on the isolated PATH (home-fallback would be bypassed)',
       );
 
       // (ii) node must BE resolvable on the returned PATH (the new nodeBinDir makes it so)
@@ -1374,57 +1429,84 @@ describe('bug-891: non-Claude runtime home fallback arms', () => {
     },
   );
 
-  // ── (B) Behavioral: HERMES_HOME stub is resolved ──────────────────────────
-  test('(B) gsd_run resolves ${HERMES_HOME}/gsd-core/bin/ stub when set and local+PATH both miss', () => {
+
+  // ── (B) Behavioral: HERMES_HOME stub is resolved, even past a leaked PATH ──
+  //
+  // #4205 regression, and the reason this asserts the sentinel rather than just
+  // the stub: on a CLEAN machine the bare HERMES_HOME assertion passes whether
+  // buildIsolatedPath() filters gsd_run or gsd-tools, so it only catches the bug
+  // on a machine that already has the leak. Planting the sentinel makes it fail
+  // on any machine. The sentinel is POSIX-only (an extensionless sh script), so
+  // it is skipped on Windows — where this test still covers the HERMES_HOME arm
+  // itself, which is why it is not gated behind the platform check wholesale.
+  // Windows-native coverage of the leak is tracked in #4344.
+  test('(B) buildIsolatedPath strips a leaked PATH gsd_run; the ${HERMES_HOME} stub wins', (t) => {
     const fakeHome       = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-891-home-b-'));
     const fakeHermesHome = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-891-hermes-'));
     const fakeRuntime    = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-891-rt-'));
-    const { isolatedPath, nodeBinDir } = buildIsolatedPath();
-    try {
-      const hermesBinDir = path.join(fakeHermesHome, 'gsd-core', 'bin');
-      fs.mkdirSync(hermesBinDir, { recursive: true });
+    t.after(() => cleanup(fakeHome));
+    t.after(() => cleanup(fakeHermesHome));
+    t.after(() => cleanup(fakeRuntime));
 
-      const stubPath = path.join(hermesBinDir, 'gsd-tools.cjs');
-      fs.writeFileSync(
-        stubPath,
-        '#!/usr/bin/env node\nconsole.log("HERMES_HOME_STUB:" + process.argv.slice(2).join(","));\n',
-      );
-      fs.chmodSync(stubPath, 0o755);
-
-      const snippet = fs.readFileSync(SNIPPET_FILE, 'utf8');
-      // Export HOME to an isolated temp dir (no .claude install there) so the
-      // $HOME/.claude arm is skipped and we fall through to the HERMES_HOME arm.
-      const scriptContent =
-        `unset GSD_TOOLS\n` +
-        `export HOME=${JSON.stringify(fakeHome)}\n` +
-        `export RUNTIME_DIR=${JSON.stringify(fakeRuntime)}\n` +
-        `export HERMES_HOME=${JSON.stringify(fakeHermesHome)}\n` +
-        snippet +
-        `\nprintf "GSD_TOOLS=%s\\n" "$GSD_TOOLS"\n` +
-        `gsd_run ping test\n`;
-
-      const scriptPath = path.join(fakeRuntime, 'test-hermes-home.sh');
-      fs.writeFileSync(scriptPath, scriptContent);
-
-      const stdout = runBashFile(scriptPath, {
-        env: { ...process.env, PATH: isolatedPath, HOME: fakeHome, HERMES_HOME: fakeHermesHome },
-      });
-
-      const normStdout = stdout.replace(/\\/g, '/');
-      assert.ok(
-        normStdout.includes('gsd-core/bin/'),
-        `Expected GSD_TOOLS to resolve into hermes gsd-core/bin/, got:\n${stdout.trim()}`,
-      );
-      assert.ok(
-        stdout.includes('HERMES_HOME_STUB:ping,test'),
-        `Expected stub output "HERMES_HOME_STUB:ping,test", got:\n${stdout.trim()}`,
-      );
-    } finally {
-      cleanup(fakeHome);
-      cleanup(fakeHermesHome);
-      cleanup(fakeRuntime);
-      if (nodeBinDir) cleanup(nodeBinDir);
+    if (process.platform !== 'win32') {
+      const sentinelBinDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-4205-sentinel-'));
+      t.after(() => cleanup(sentinelBinDir));
+      const sentinelPath = path.join(sentinelBinDir, 'gsd_run');
+      fs.writeFileSync(sentinelPath, '#!/bin/sh\necho "SENTINEL_INVOKED:$*"\n');
+      fs.chmodSync(sentinelPath, 0o755);
+      // Simulate the reported leak: a real gsd_run reachable on PATH.
+      const prevPath = process.env.PATH;
+      process.env.PATH = `${sentinelBinDir}${path.delimiter}${process.env.PATH}`;
+      t.after(() => { process.env.PATH = prevPath; });
     }
+
+    const { isolatedPath, nodeBinDir } = buildIsolatedPath();
+    t.after(() => { if (nodeBinDir) cleanup(nodeBinDir); });
+
+    const hermesBinDir = path.join(fakeHermesHome, 'gsd-core', 'bin');
+    fs.mkdirSync(hermesBinDir, { recursive: true });
+
+    const stubPath = path.join(hermesBinDir, 'gsd-tools.cjs');
+    fs.writeFileSync(
+      stubPath,
+      '#!/usr/bin/env node\nconsole.log("HERMES_HOME_STUB:" + process.argv.slice(2).join(","));\n',
+    );
+    fs.chmodSync(stubPath, 0o755);
+
+    const snippet = fs.readFileSync(SNIPPET_FILE, 'utf8');
+    // HOME points at an isolated temp dir with no .claude install, so the
+    // $HOME/.claude arm misses and the HERMES_HOME arm is the one under test.
+    const scriptContent =
+      `unset GSD_TOOLS\n` +
+      `export HOME=${JSON.stringify(fakeHome)}\n` +
+      `export RUNTIME_DIR=${JSON.stringify(fakeRuntime)}\n` +
+      `export HERMES_HOME=${JSON.stringify(fakeHermesHome)}\n` +
+      snippet +
+      `\nprintf "GSD_TOOLS=%s\\n" "$GSD_TOOLS"\n` +
+      `gsd_run ping test\n`;
+
+    const scriptPath = path.join(fakeRuntime, 'test-hermes-home.sh');
+    fs.writeFileSync(scriptPath, scriptContent);
+
+    const stdout = runBashFile(scriptPath, {
+      env: { PATH: isolatedPath, HOME: fakeHome, HERMES_HOME: fakeHermesHome },
+    });
+
+    const normStdout = stdout.replace(/\\/g, '/');
+    assert.ok(
+      !normStdout.includes('SENTINEL_INVOKED'),
+      `Expected the leaked PATH gsd_run to never be invoked, got:\n${stdout.trim()}`,
+    );
+    // Assert the hermes dir itself: every arm of the resolver ends in
+    // gsd-core/bin/, so that substring alone cannot tell them apart.
+    assert.ok(
+      normStdout.includes(fakeHermesHome.replace(/\\/g, '/')),
+      `Expected GSD_TOOLS to resolve into ${fakeHermesHome}, got:\n${stdout.trim()}`,
+    );
+    assert.ok(
+      normStdout.includes('HERMES_HOME_STUB:ping,test'),
+      `Expected stub output "HERMES_HOME_STUB:ping,test", got:\n${stdout.trim()}`,
+    );
   });
 
   // ── (C) Behavioral: default .hermes path used when HERMES_HOME not set ────
@@ -1456,7 +1538,11 @@ describe('bug-891: non-Claude runtime home fallback arms', () => {
       fs.writeFileSync(scriptPath, scriptContent);
 
       const stdout = runBashFile(scriptPath, {
-        env: { ...process.env, PATH: isolatedPath, HOME: fakeHome },
+        // CLAUDE_CONFIG_DIR resolves before the HERMES_HOME arm under test
+        // (#4205 class, env vector); script-level `unset HERMES_HOME` above
+        // already handles that var, but Node's env spread still needs to
+        // clear CLAUDE_CONFIG_DIR before bash ever sees it.
+        env: { PATH: isolatedPath, HOME: fakeHome },
       });
 
       const normStdout = stdout.replace(/\\/g, '/');
@@ -1540,7 +1626,7 @@ describe('bug-891: non-Claude runtime home fallback arms', () => {
  *
  * A user project normally does not contain gsd-core/bin/gsd-tools.cjs.
  * The snippets should still prefer RUNTIME_DIR for local/dev installs, then
- * fall back to the installed gsd-tools binary on PATH.
+ * fall back to the installed gsd_run binary on PATH.
  */
 'use strict';
 
@@ -1620,6 +1706,11 @@ function makeTempDir() {
 }
 
 function runResolver({ cwd, runtimeDir, pathDir }) {
+  // RUNTIME_DIR='' is INDISTINGUISHABLE from unset to the resolver's
+  // ${RUNTIME_DIR:-$(git rev-parse --show-toplevel)} — an empty value silently
+  // falls back to the real repo root and resolves its real install. Fail loudly
+  // instead; every caller passes one.
+  if (!runtimeDir) throw new Error('runResolver requires runtimeDir: an empty value resolves the real repo root');
   const script = [
     'set -e',
     extractResolverSnippet(),
@@ -1628,7 +1719,7 @@ function runResolver({ cwd, runtimeDir, pathDir }) {
   ].join('\n');
 
   // Consolidation #1969: POSIX-shell resolver. These tests create an
-  // extension-less `gsd-tools` PATH stub (mode 0o755) and exec it via `bash -c`;
+  // extension-less `gsd_run` PATH stub (mode 0o755) and exec it via `bash -c`;
   // Windows Git Bash ignores the exec bit for extension-less PATH scripts, so the
   // suite is guarded to POSIX (matches the host suite's own bash -c guard).
   if (process.platform === 'win32') return '';
@@ -1636,11 +1727,10 @@ function runResolver({ cwd, runtimeDir, pathDir }) {
   const r = runHookSeam('-c', [script], {
     interpreter: 'bash',
     cwd,
-    env: {
-      ...process.env,
+    env: snippetEnv({
       PATH: `${pathDir}${path.delimiter}${process.env.PATH || ''}`,
-      RUNTIME_DIR: runtimeDir || '',
-    },
+      RUNTIME_DIR: runtimeDir,
+    }),
   });
   throwIfFailed(r, 'bash -c <runtime resolver snippet>');
   return r.stdout;
@@ -1758,7 +1848,9 @@ const SNIPPET_FILE = path.join(WORKFLOWS_DIR, '_runtime-launcher.snippet.sh');
  * this replaces.
  */
 function runBashFile(scriptPath, options = {}) {
-  const r = runHookSeam(scriptPath, [], { interpreter: 'bash', ...options });
+  const r = runHookSeam(scriptPath, [], {
+    interpreter: 'bash', ...options, env: snippetEnv(options.env),
+  });
   throwIfFailed(r, `bash ${scriptPath}`);
   return r.stdout;
 }
@@ -1768,31 +1860,26 @@ function runBashFile(scriptPath, options = {}) {
 const LOCAL_CLAUDE_PROBE = '_GSD_RUNTIME_ROOT}/.claude/gsd-core/bin/';
 
 /**
- * Build a PATH that strips gsd-tools but keeps node and system binaries.
- * Accepts additional bin dirs to prepend.
+ * Return the full system PATH with extra bin dirs prepended. Deliberately does
+ * NOT filter gsd_run — unlike buildIsolatedPath() above, which does.
  *
- * We cannot simply remove the whole directory that contains gsd-tools because
- * that directory may also contain node (e.g. /opt/homebrew/bin on macOS).
- * Instead, we keep the system PATH as-is and rely on the test's RUNTIME_DIR
- * having no gsd-core/bin/ sub-path, so the resolver's first two checks
- * (RUNTIME_DIR/gsd-core/bin/ and RUNTIME_DIR/.claude/gsd-core/bin/)
- * are the only ones exercised before we hit our stub.
+ * The isolation here comes from resolution ORDER, not from the PATH contents.
+ * Callers give RUNTIME_DIR a .claude/gsd-core/bin/ stub, and the resolver
+ * checks RUNTIME_DIR/gsd-core/bin/ then RUNTIME_DIR/.claude/gsd-core/bin/
+ * before it ever reaches `command -v gsd_run`, so an ambient gsd_run on PATH
+ * is unreachable for these tests. Keeping PATH whole is what keeps node
+ * resolvable when node co-locates with a global gsd_run (e.g. /opt/homebrew/bin).
  *
- * The extra extraBefore dirs (e.g. noToolsBin) sit first but have no gsd-tools
- * binary, so command -v gsd-tools still falls back to PATH lookup. However,
- * the snippet's elif arm that uses `command -v gsd-tools` will find the real
- * installed one unless we mask it. To mask it without losing node, we create
- * a noToolsBin dir that shadows gsd-tools with a sentinel that must NOT be
- * called — and we only call makeIsolatedPath for tests where the .claude stub
- * must win before PATH is consulted (i.e. the elif PATH arm is never reached).
+ * That makes this helper safe ONLY for tests whose stub wins before the PATH
+ * arm. Any test that must prove the PATH arm itself misses needs
+ * buildIsolatedPath(), which excludes gsd_run-bearing directories outright.
  *
- * For B: stub is at RUNTIME_DIR/.claude/... so resolver picks it at elif-1 (before command -v).
- * For C: same — local .claude/ is checked before command -v and before $HOME/.claude.
+ * For B and C: the stub sits at RUNTIME_DIR/.claude/..., picked at elif-1.
  */
 function makeIsolatedPath(extraBefore = []) {
   // Keep full system PATH so node remains accessible.
   // Tests B and C exercise only the RUNTIME_DIR/.claude arm which fires
-  // before command -v gsd-tools — so the real gsd-tools on PATH is never reached.
+  // before command -v gsd_run — so the real gsd_run on PATH is never reached.
   const systemPaths = (process.env.PATH || '/usr/bin:/bin').split(path.delimiter);
   return [...extraBefore, ...systemPaths].join(path.delimiter);
 }
@@ -1867,11 +1954,12 @@ describe('bug-444: resolver finds repo-local .claude install', () => {
       const scriptPath = path.join(fakeRoot, 'test-local-claude.sh');
       fs.writeFileSync(scriptPath, scriptContent);
 
-      // Keep node in PATH (needed to run the .cjs stub); remove gsd-tools
+      // Keep node in PATH (needed to run the .cjs stub); the .claude arm
+      // resolves before the PATH arm, so gsd_run is never probed here.
       const isolatedPath = makeIsolatedPath([noToolsBin]);
 
       const stdout = runBashFile(scriptPath, {
-        env: { ...process.env, PATH: isolatedPath, HOME: fakeHome },
+        env: { PATH: isolatedPath, HOME: fakeHome },
       });
 
       // Must have resolved to the local .claude stub
@@ -1934,7 +2022,7 @@ describe('bug-444: resolver finds repo-local .claude install', () => {
       const isolatedPath = makeIsolatedPath([noToolsBin]);
 
       const stdout = runBashFile(scriptPath, {
-        env: { ...process.env, PATH: isolatedPath, HOME: fakeHome },
+        env: { PATH: isolatedPath, HOME: fakeHome },
       });
 
       assert.ok(
