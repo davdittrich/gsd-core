@@ -47,8 +47,12 @@ Dispatch the referenced unit. Exactly one of `ref.skill`, `ref.agent`, or `ref.c
 - `ref.skill` present → dispatch via the Skill tool with skill id `gsd-<ref.skill>`. If
   `context` is present, pass it as the skill's args (e.g. `args="${context.phase} --auto
   ${GSD_WS}"`) when the target skill accepts a phase argument — check the skill's own
-  `initialize` step; a skill that requires one and doesn't get it reports "Phase not found"
-  and exits, rather than silently using the wrong phase.
+  argument contract first. Do not assume a skill fails loudly when the argument is
+  omitted: some (e.g. `code-review`) exit with "Phase not found"; others (e.g.
+  `validate-phase`, whose `argument-hint` documents "optional, defaults to last
+  completed phase") silently fall back to artifact-order inference — exactly the failure
+  mode this field exists to close. Pass `context.phase` whenever it is present, in both
+  cases.
 - `ref.agent` present → dispatch via the Agent tool with `subagent_type` = `ref.agent`. If
   `context` is present, include `context.phase` / `context.phaseDir` in the agent's prompt so
   it operates on the task-local phase rather than inferring one.
@@ -66,11 +70,17 @@ Dispatch the referenced unit. Exactly one of `ref.skill`, `ref.agent`, or `ref.c
   `` ` ``, `$(`, or a newline would terminate the assignment and run as its own statement
   before any shell-side check could execute. A value that fails is a malformed manifest:
   record a warning, skip that hook, continue to the next entry. Only a value that has passed
-  is run, with `context` appended when present:
+  is run, with `context.phase` appended when present:
 
   ```bash
-  gsd_run ${ref.command} --phase "${context.phase}" --phase-dir "${context.phaseDir}" --raw
+  gsd_run ${ref.command} --phase "${context.phase}" --raw
   ```
+
+  `context.phaseDir` is not passed here: no first-party `ref.command` consumer
+  (`intel api-surface`, `refactor evaluate`) parses a `--phase-dir` flag today. A
+  capability that needs the directory, not just the token, resolves it itself from
+  `--phase` the same way `init.*` does, rather than this contract inventing an
+  unconsumed flag.
 
 Wait for the result before continuing to the next hook or the next step.
 
@@ -109,9 +119,12 @@ Evaluate `check` (one of `query`, `predicate`, or `agentVerdict`). Then honor `b
 Honor `onError` if the check itself errors: `skip` means treat as non-blocking and continue;
 `halt` means surface the error and stop.
 
-When `context` is present and the check invocation needs a phase argument (e.g. `gsd_run
-check ${hook.check.query} "${context.phaseDir}" --raw`, or `--phase-dir "${context.phaseDir}"`
-for a `predicate` check per ADR-2008), source it from `context`, not an ambient variable.
+When `context` is present and the check invocation needs a phase argument, source it from
+`context`, not an ambient variable — and match the subcommand's own argument shape, they
+differ: a `query` check's phase-taking subcommands (e.g. `verify-context-drift`,
+`verify-schema-drift`) take the phase **token** as a positional argument (`gsd_run check
+${hook.check.query} "${context.phase}" --raw`); a `predicate` check's `gate-predicate-evaluator.cts`
+(per ADR-2008) takes the **directory** as a named flag (`--phase-dir "${context.phaseDir}"`).
 
 ## Empty / absent `activeHooks`
 

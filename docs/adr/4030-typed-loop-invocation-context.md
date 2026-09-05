@@ -20,23 +20,29 @@ modified call site passes `${GSD_WS}` alongside `--phase`, exactly as these
 same workflows already do for `query init.*`.
 
 The resolver does not accept a caller-supplied directory. It resolves
-`phaseDir` itself by calling the already-exported `findPhaseInternal(cwd,
-phase)` (`src/phase-locator.cts`) — the same function `init.*` already uses —
-and surfaces both as an additive `context: { phase, phaseDir }` field, where
-`phaseDir` is the literal on-disk directory name `findPhaseInternal` matched
+`phaseDir` itself by calling the now-exported `guardedFindPhase(cwd, phase,
+config.project_code)` (`src/init.cts`) — the same function `init.*` already
+uses, not the bare `findPhaseInternal` it wraps — and surfaces both as an
+additive `context: { phase, phaseDir }` field, where `phaseDir` is the
+literal on-disk directory name the underlying `findPhaseInternal` matched
 (`toPosixPath(path.join(relBase, match))`), never a caller-supplied string.
 Because the result is drawn from a `readdirSync` listing filtered by
 `matchPhaseDirs`, path traversal, absolute-path substitution, and symlink
 escape are structurally unreachable — there is no path string to validate.
+Going through `guardedFindPhase` rather than the bare primitive also carries
+its `isForeignPrefixedPhaseQuery` check (`src/phase-id.cts`, the #2056/#2105
+guard): a `project_code`-scoped repo gets the identical #2237 foreign-prefix
+protection `init.*` already has, rather than reopening it for this new call
+site — confirmed with a hostile-token test (`tests/loop-render-hooks.test.cjs`).
 
-`findPhaseInternal` does not throw on a missing or ambiguous phase — it
-returns `found: false` (with `ambiguous_matches` when more than one directory
-matches). `cmdLoopRenderHooks` mirrors `cmdInitPhaseOp`'s existing #2237
-handling of that same shape: `context` is omitted and a warning is appended
-to the envelope's existing `warnings` array, not thrown or exited non-zero —
-`--phase` degrades to "no context", it does not fail the render. Omitting
-`--phase` entirely preserves today's `{ point, activeHooks, rendered,
-warnings? }` shape exactly.
+`guardedFindPhase` does not throw on a missing, ambiguous, or foreign-prefixed
+phase — it returns `null`/`found: false` (with `ambiguous_matches` when more
+than one directory matches). `cmdLoopRenderHooks` mirrors `cmdInitPhaseOp`'s
+existing #2237 handling of that same shape: `context` is omitted and a
+warning is appended to the envelope's existing `warnings` array, not thrown
+or exited non-zero — `--phase` degrades to "no context", it does not fail
+the render. Omitting `--phase` entirely preserves today's `{ point,
+activeHooks, rendered, warnings? }` shape exactly.
 
 Generic `step`/`gate`/`contribution` dispatch (`gsd-core/references/loop-hook-dispatch.md`)
 projects `context.phase` / `context.phaseDir` into the dispatched handler's
@@ -54,13 +60,28 @@ diverges from it whenever one phase plans/verifies while another executes.
   already does `gsd_run ${ref.command} --phase "${PHASE_NUMBER}" --raw` today
   — but `${PHASE_NUMBER}` is whatever shell variable the host workflow
   happens to hold at that call site, unvalidated and uncorrelated with the
-  resolved point. `ref.skill` and `ref.agent` steps — the shape every
-  first-party phase-scoped capability actually uses (e.g.
-  `capabilities/pattern-mapper/capability.json`'s `plan:pre` step is
-  `{"ref":{"agent":"gsd-pattern-mapper"}}`) — get no phase argument at all.
-  Formalizing this as a resolver-derived, validated envelope field closes
-  both gaps with one seam: it replaces the ad hoc `${PHASE_NUMBER}` handling
-  for `ref.command` and adds the missing argument for `ref.skill`/`ref.agent`.
+  resolved point. Before this ADR, the `ref.skill`/`ref.agent` bullets in
+  `loop-hook-dispatch.md` said nothing about a phase argument at all — so any
+  point without its own bespoke, per-workflow phase-filling prose gets no
+  phase argument, silently. This is not hypothetical: `nyquist`'s
+  `verify:post` step (`capabilities/nyquist/capability.json`) is
+  `{"ref":{"skill":"validate-phase"}}`, dispatched through `verify-work.md`'s
+  generic `kind == "step"` loop (no bespoke phase-filling there, unlike
+  `plan-phase.md`). `gsd-validate-phase`'s own argument contract —
+  `argument-hint: "[phase number]", "Phase: $ARGUMENTS — optional, defaults
+  to last completed phase"` — silently falls back to artifact-order inference
+  exactly like the originating issue describes, precisely because the
+  generic dispatch path gave it nothing else to use. `plan-phase.md`'s
+  `plan:pre`/`plan:post`
+  points are the exception, not the rule: its own "Generic step hook
+  dispatch contract" (§5.6) already hand-fills `${PHASE}` for `ref.skill`
+  args and `ref.agent` prompts, and does so correctly, since `$PHASE` there
+  is the same already-`guardedFindPhase`-resolved value this ADR's `context`
+  field independently re-derives — so it is unaffected by this ADR either
+  way and is left as-is. Formalizing `context` as a resolver-derived,
+  validated envelope field closes the gap with one seam that every point can
+  rely on, instead of requiring each workflow to hand-roll its own
+  phase-filling prose the way `plan-phase.md` happened to.
 - **Rejected: doc-only convention (no code change).** Extend the
   `ref.skill`/`ref.agent` bullets in `loop-hook-dispatch.md` to instruct each
   host workflow to pass its own already-known `$PHASE`/`$PHASE_DIR` into the
