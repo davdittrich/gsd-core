@@ -10,9 +10,14 @@
 `cmdLoopRenderHooks` (`src/loop-resolver.cts`) accepts one new optional flag,
 `--phase <token>`, supplied by the invoking workflow at phase-scoped points
 (`plan:pre`, `plan:post`, `execute:wave:pre`, `execute:wave:post`,
-`verify:pre`, `verify:post`). `<token>` uses the same bare-tolerant grammar
-every phase-scoped workflow already holds (`phase_number` from its own
-`init.*` query — e.g. `"05"`), not the bracket display form.
+`execute:post`, `verify:pre`, `verify:post`). `<token>` uses the same
+bare-tolerant grammar every phase-scoped workflow already holds
+(`phase_number` from its own `init.*` query — e.g. `"05"`), not the bracket
+display form. Workstream scoping needs no new plumbing: `gsd-tools.cjs`
+already resolves `--ws`/`GSD_WORKSTREAM` generically for every command before
+dispatch (`resolveActiveWorkstream` / `applyResolvedWorkstreamEnv`); each
+modified call site passes `${GSD_WS}` alongside `--phase`, exactly as these
+same workflows already do for `query init.*`.
 
 The resolver does not accept a caller-supplied directory. It resolves
 `phaseDir` itself by calling the already-exported `findPhaseInternal(cwd,
@@ -22,10 +27,16 @@ and surfaces both as an additive `context: { phase, phaseDir }` field, where
 (`toPosixPath(path.join(relBase, match))`), never a caller-supplied string.
 Because the result is drawn from a `readdirSync` listing filtered by
 `matchPhaseDirs`, path traversal, absolute-path substitution, and symlink
-escape are structurally unreachable — there is no path string to validate,
-only a directory-name match to fail loud on (mirroring `searchPhaseInDir`'s
-existing #2237 ambiguous-match handling). Omitting `--phase` preserves
-today's `{ point, activeHooks, rendered, warnings? }` shape exactly.
+escape are structurally unreachable — there is no path string to validate.
+
+`findPhaseInternal` does not throw on a missing or ambiguous phase — it
+returns `found: false` (with `ambiguous_matches` when more than one directory
+matches). `cmdLoopRenderHooks` mirrors `cmdInitPhaseOp`'s existing #2237
+handling of that same shape: `context` is omitted and a warning is appended
+to the envelope's existing `warnings` array, not thrown or exited non-zero —
+`--phase` degrades to "no context", it does not fail the render. Omitting
+`--phase` entirely preserves today's `{ point, activeHooks, rendered,
+warnings? }` shape exactly.
 
 Generic `step`/`gate`/`contribution` dispatch (`gsd-core/references/loop-hook-dispatch.md`)
 projects `context.phase` / `context.phaseDir` into the dispatched handler's
