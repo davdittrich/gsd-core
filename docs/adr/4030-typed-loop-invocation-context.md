@@ -34,7 +34,7 @@ diverges from it whenever one phase plans/verifies while another executes.
   whatever shell variable the host workflow happens to hold at the call site,
   unvalidated and uncorrelated with the resolved point. Making it a typed,
   validated envelope field removes the silent-wrong-phase failure mode
-  (davdittrich/gsd-beads#5) without changing any non-phase-scoped caller.
+  (cited in #4030) without changing any non-phase-scoped caller.
 - `gate-predicate-evaluator.cts` already consumes a `phaseDir` context field
   today but never validates it — this ADR's confinement check is new, not a
   fork of an existing one (none exists for this shape); it reuses the
@@ -57,4 +57,3 @@ be replaced, since the additive-envelope shape already accommodates new keys.
 - [ADR-857](857-capability-system.md) — capability system / loop extension points this field extends.
 - [ADR-2008](2008-command-exit-zero-gate.md) — generic gate-predicate evaluator; the existing unvalidated `phaseDir` consumer.
 - `gsd-core/references/loop-hook-dispatch.md` — generic dispatch contract this ADR's `context` field extends.
-- davdittrich/gsd-beads#5 — concrete consumer bug motivating this proposal.
