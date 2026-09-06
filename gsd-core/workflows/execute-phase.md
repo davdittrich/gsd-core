@@ -664,7 +664,7 @@ increases monotonically across waves. `{status}` is `complete` (success),
    WAVE_PRE_HOOKS_JSON=$(gsd_run loop render-hooks execute:wave:pre --raw)
    ```
 
-   **Contribution dispatch:** inject every `kind == "contribution"` fragment per @gsd-core/references/loop-hook-dispatch.md (skip when none); one naming an alternate wave dispatch replaces step 3's inline loop.
+   **Contribution dispatch:** per @gsd-core/references/loop-hook-dispatch.md; concatenate `into == "executor"` fragments into `WAVE_CONTRIBUTIONS` for step 3; one naming an alternate wave dispatch replaces step 3's inline loop.
 
    **Step dispatch:** `kind == "step"` per @gsd-core/references/loop-hook-dispatch.md; never blocks or redirects executor spawning. ⚠ Validate `ref.command` in-context before any shell use.
 
@@ -791,6 +791,8 @@ increases monotonically across waves. `{status}` is `complete` (success),
        MCP tools often save significant tokens by providing structured code indexes.
        Check tool availability first — if MCP tools are not accessible, fall back to Grep/Glob.
        </mcp_tools>
+
+       ${WAVE_CONTRIBUTIONS}
 
        <success_criteria>
        - [ ] All tasks executed

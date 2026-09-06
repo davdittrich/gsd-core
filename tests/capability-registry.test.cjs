@@ -5217,6 +5217,67 @@ describe('#1196 — discuss loop wiring + wired-point guard', () => {
       );
     });
 
+    // ─── #4350: execute:wave:pre publishes `executor` — it must be reachable ───
+    //
+    // The host contract publishes `executor` as an admissible `into` role for the
+    // execute step, and `execute:wave:pre` resolves and renders contributions
+    // declared into it. Until #4350 the executor dispatch prompt had no landing
+    // site for them, so every such fragment was rendered and then silently dropped
+    // — no error, no warning, `onError: skip` never firing because nothing failed.
+    // This is the contribution counterpart to the step guard above: the marker must
+    // sit inside the prompt that step 3 actually dispatches, on every isolation
+    // surface, or delivery is not delivery.
+    test('boundary: an execute:wave:pre executor contribution reaches the dispatched executor prompt (#4350)', () => {
+      const cap = makeCapWithContribution('execute:wave:pre');
+      const { getWiredKinds } = require('../scripts/gen-loop-host-contract.cjs');
+      const errs = validateHooksWired(cap, getWiredKinds(ROOT));
+      assert.deepEqual(
+        errs, [],
+        `execute:wave:pre must dispatch contribution hooks. Errors: ${errs.join('; ')}`,
+      );
+
+      const workflow = fs.readFileSync(path.join(ROOT, 'gsd-core', 'workflows', 'execute-phase.md'), 'utf8');
+      const wavePre = workflow.indexOf('WAVE_PRE_HOOKS_JSON=$(gsd_run loop render-hooks execute:wave:pre');
+      const contribDispatch = workflow.indexOf('**Contribution dispatch:**', wavePre);
+      const executorSpawn = workflow.indexOf('3. **Spawn executor agents:**', wavePre);
+      assert.ok(
+        wavePre !== -1 && contribDispatch > wavePre && executorSpawn > contribDispatch,
+        'wave-pre contribution dispatch must occur after hook rendering and before executor spawning',
+      );
+
+      // The host step must select the executor-targeted entries by role and name
+      // the variable the prompt below substitutes — not inject a single hardcoded
+      // capId, the Fix C failure mode plan-phase.md is guarded against.
+      const contribContract = workflow.slice(contribDispatch, executorSpawn);
+      assert.match(contribContract, /into == "executor"/, 'wave-pre must select executor-targeted contributions by role');
+      assert.match(contribContract, /WAVE_CONTRIBUTIONS/, 'wave-pre must bind executor contributions to the prompt marker');
+      assert.match(contribContract, /loop-hook-dispatch/, 'wave-pre must use the shared dispatch contract');
+
+      // The landing site itself: the marker must live INSIDE the executor prompt
+      // that step 3 dispatches, not merely somewhere in the file.
+      const promptStart = workflow.indexOf('<objective>', executorSpawn);
+      const promptEnd = workflow.indexOf('</success_criteria>', promptStart);
+      assert.ok(promptStart !== -1 && promptEnd > promptStart, 'step 3 must dispatch an executor prompt');
+      assert.match(
+        workflow.slice(promptStart, promptEnd),
+        /\$\{WAVE_CONTRIBUTIONS\}/,
+        'the executor prompt must carry the ${WAVE_CONTRIBUTIONS} landing site (#4350) — without it, resolved executor contributions are silently dropped',
+      );
+
+      // Same guarantee on the orchestrator-worktree surface, which composes its own
+      // prompt rather than reusing step 3's Agent() call.
+      const isolation = fs.readFileSync(
+        path.join(ROOT, 'gsd-core', 'workflows', 'execute-phase', 'steps', 'executor-isolation-dispatch.md'),
+        'utf8',
+      );
+      const composed = isolation.slice(isolation.indexOf("EXECUTOR_PROMPT='"));
+      assert.match(
+        composed.slice(0, composed.indexOf("'", 17)),
+        /\$\{WAVE_CONTRIBUTIONS\}/,
+        'the orchestrator-worktree EXECUTOR_PROMPT must carry the same landing site, or isolation mode decides whether a contribution is delivered',
+      );
+    });
+
     // ─── #3866: the verify lane must be open to every hook kind ────────────────
     //
     // verify-work.md's verify_pre_hooks step historically dispatched only
