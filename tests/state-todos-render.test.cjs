@@ -193,16 +193,25 @@ test('cmdInitTodos: pending_read_ok is true and pending_todos_markdown present f
   assert.equal(json.todo_count, 0);
 });
 
+// This test covers ONE thing: that the CLI lifts the first line of `## Solution`
+// into the bullet's needs clause. The bullet is also length-capped
+// (PENDING_TODO_BULLET_MAX_CHARS in src/init.cts), and the needs clause is the
+// first thing that cap drops — so every field below is kept short enough that
+// the rendered bullet stays well under it even when the absolute todo path is
+// long. macOS is the case that matters: os.tmpdir() there is
+// /private/var/folders/<...>/T/, which makes the path alone ~145 chars. Cap
+// behaviour itself is covered by the renderPendingTodosMarkdown truncation
+// tests above, with paths this test has no control over.
 test('cmdInitTodos: real todo file produces a rendered bullet via the CLI', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-2618-'));
   t.after(() => cleanup(dir));
   const pendingDir = path.join(dir, '.planning', 'todos', 'pending');
   fs.mkdirSync(pendingDir, { recursive: true });
   fs.writeFileSync(
-    path.join(pendingDir, '2026-09-01-fix-retry-logic.md'),
+    path.join(pendingDir, '2026-09-01-r.md'),
     [
       '---',
-      'created: 2026-09-01T00:00:00.000Z',
+      'created: 2026-09-01',
       'title: Fix retry logic',
       'area: api',
       'severity: major',
@@ -216,7 +225,7 @@ test('cmdInitTodos: real todo file produces a rendered bullet via the CLI', (t) 
       '',
       '## Solution',
       '',
-      'Add a max-attempts cap.',
+      'Cap attempts.',
       '',
     ].join('\n'),
   );
@@ -225,7 +234,7 @@ test('cmdInitTodos: real todo file produces a rendered bullet via the CLI', (t) 
   assert.equal(json.pending_read_ok, true);
   assert.equal(json.todo_count, 1);
   assert.match(json.pending_todos_markdown, /Fix retry logic/);
-  assert.match(json.pending_todos_markdown, /Needs Add a max-attempts cap\.$/m);
+  assert.match(json.pending_todos_markdown, /Needs Cap attempts\.$/m);
 });
 
 test('cmdInitTodos: bullet order is filename-sorted regardless of write/insertion order', (t) => {
