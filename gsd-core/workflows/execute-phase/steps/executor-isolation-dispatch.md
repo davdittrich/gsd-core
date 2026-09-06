@@ -130,7 +130,7 @@ Run the loop below once per runnable plan in the wave, **one plan at a time** (`
 
 **Before running the bash block, substitute the plan's identifiers into it** exactly as you do for the `Agent()` prompt on the harness path: replace `{plan_number}` and `{phase_number}` with this plan's values. They are template placeholders, not shell variables. `$ORCH_ROOT` and `$EXPECTED_BASE` are real shell variables, already assigned earlier in this step; `$WAVE_WORKTREE_MANIFEST` was initialized above.
 
-First build the executor prompt. It is the **same prompt text the harness path's `Agent()` call uses** — same executor identity, same execution context, same required-reading contract — with only the harness-only framing removed: drop the `<worktree_branch_check>` build-time embed note (this backend pins the base itself via `worktree create --base` and verifies it at merge) and the `<parallel_execution>` harness block (its SUMMARY-commit semantics ride inside the embedded `execute-plan.md` worktree mode). Keep `<objective>`, `<execution_context>`, `<required_reading>`, `${AGENT_SKILLS}`, and `<success_criteria>` from the harness prompt — substituting the worktree-specific `<execution_context>` framing below. The checkpoint gate rule (#3370, in `per-plan-executor-routing.md`) applies here too: add no prompt text refusing or overriding auto-approval for the default `gate="blocking"` — only `blocking-human` always surfaces.
+First build the executor prompt. It is the **same prompt text the harness path's `Agent()` call uses** — same executor identity, same execution context, same required-reading contract — with only the harness-only framing removed: drop the `<worktree_branch_check>` build-time embed note (this backend pins the base itself via `worktree create --base` and verifies it at merge) and the `<parallel_execution>` harness block (its SUMMARY-commit semantics ride inside the embedded `execute-plan.md` worktree mode). Keep `<objective>`, `<execution_context>`, `<required_reading>`, `${AGENT_SKILLS}`, `${WAVE_CONTRIBUTIONS}` (the #4350 executor contribution landing site — same fragments, same array order the harness path substitutes), and `<success_criteria>` from the harness prompt — substituting the worktree-specific `<execution_context>` framing below. The checkpoint gate rule (#3370, in `per-plan-executor-routing.md`) applies here too: add no prompt text refusing or overriding auto-approval for the default `gate="blocking"` — only `blocking-human` always surfaces.
 
 #3637: the process-spawned child has NO host subagent machinery — nothing loads the `gsd-executor` agent definition or the execute-plan workflow unless THIS prompt carries them. A short objective-only prompt forces the child to reconstruct its role from the repository (skill discovery, inference) and leaves it unaware of the gitignored-planning skip semantics, which is how executors ended up force-staging gitignored `SUMMARY.md` files to satisfy an unconditional commit criterion. Build-time embeds below are therefore MANDATORY, and the resolution check after the assignment fails closed: if any embed source cannot be read, do NOT spawn a generic process and hope — halt the wave (the fail-closed check after `dispatch-isolation` handles the worktree teardown).
 
@@ -161,6 +161,16 @@ Assign the composed prompt to a shell variable so it can be passed as one argume
 #      no host subagent machinery, so the role definition must ride the prompt
 #      (#3637 acceptance: resolved agent instructions as launch-level
 #      instructions + provenance of which role definition was used).
+#   4. Substitute ${WAVE_CONTRIBUTIONS} with the execute:wave:pre
+#      contributions resolved for the `executor` role (#4350), concatenated in
+#      activeHooks array order — the same text the harness path substitutes.
+#      ESCAPE IT FIRST: this is third-party capability content and routinely
+#      contains apostrophes (the one execute:wave:pre executor contribution in
+#      the shipped registry today carries 46 of them), so replace every `'` in
+#      it with `'\''` before it enters the single-quoted assignment below. An
+#      unescaped apostrophe closes the string mid-prompt and the child is
+#      spawned with a truncated one. Substitute the empty string when no
+#      active contribution targets `executor`.
 # Resolve TDD-applicability for THIS plan (#4266/#4272) — fail closed on
 # command failure, mirroring the ISOLATION resolution above: an absent
 # verdict must never silently resolve to "not TDD" (ADR-3473 §8.4), since
@@ -229,6 +239,8 @@ first — fall back to Grep/Glob if not accessible.
 
 ${AGENT_SKILLS}
 
+${WAVE_CONTRIBUTIONS}
+
 <success_criteria>
 - [ ] All tasks executed
 - [ ] Each task committed individually
@@ -267,6 +279,10 @@ printf '%s' "$EXECUTOR_PROMPT" | grep -q 'Inline the actual contents' && {
 }
 printf '%s' "$EXECUTOR_PROMPT" | grep -q '\${AGENT_SKILLS}' && {
   echo "FATAL: executor prompt for plan {plan_number} still contains the un-substituted \${AGENT_SKILLS} marker — the role definition was not spliced in (#3637). Halting." >&2
+  exit 1
+}
+printf '%s' "$EXECUTOR_PROMPT" | grep -q '\${WAVE_CONTRIBUTIONS}' && {
+  echo "FATAL: executor prompt for plan {plan_number} still contains the un-substituted \${WAVE_CONTRIBUTIONS} marker — the execute:wave:pre executor contributions were not spliced in (#4350). Halting." >&2
   exit 1
 }
 printf '%s' "$EXECUTOR_PROMPT" | grep -q '\${TDD_APPLICABLE' && {
