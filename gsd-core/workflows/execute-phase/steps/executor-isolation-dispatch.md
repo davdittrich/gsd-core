@@ -161,6 +161,16 @@ Assign the composed prompt to a shell variable so it can be passed as one argume
 #      no host subagent machinery, so the role definition must ride the prompt
 #      (#3637 acceptance: resolved agent instructions as launch-level
 #      instructions + provenance of which role definition was used).
+#   4. Substitute ${WAVE_CONTRIBUTIONS} with the execute:wave:pre
+#      contributions resolved for the `executor` role (#4350), concatenated in
+#      activeHooks array order — the same text the harness path substitutes.
+#      ESCAPE IT FIRST: this is third-party capability content and routinely
+#      contains apostrophes (the one execute:wave:pre executor contribution in
+#      the shipped registry today carries 46 of them), so replace every `'` in
+#      it with `'\''` before it enters the single-quoted assignment below. An
+#      unescaped apostrophe closes the string mid-prompt and the child is
+#      spawned with a truncated one. Substitute the empty string when no
+#      active contribution targets `executor`.
 # Resolve TDD-applicability for THIS plan (#4266/#4272) — fail closed on
 # command failure, mirroring the ISOLATION resolution above: an absent
 # verdict must never silently resolve to "not TDD" (ADR-3473 §8.4), since

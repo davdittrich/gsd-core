@@ -5102,12 +5102,12 @@ describe('#1196 — discuss loop wiring + wired-point guard', () => {
       };
     }
 
-    function makeCapWithContribution(point) {
+    function makeCapWithContribution(point, into = 'orchestrator') {
       return {
         id: 'test-cap',
         role: 'feature',
         steps: [],
-        contributions: [{ point, into: 'orchestrator', fragment: { inline: 'hi' }, produces: [], consumes: [] }],
+        contributions: [{ point, into, fragment: { inline: 'hi' }, produces: [], consumes: [] }],
         gates: [],
         config: {},
       };
@@ -5228,12 +5228,22 @@ describe('#1196 — discuss loop wiring + wired-point guard', () => {
     // sit inside the prompt that step 3 actually dispatches, on every isolation
     // surface, or delivery is not delivery.
     test('boundary: an execute:wave:pre executor contribution reaches the dispatched executor prompt (#4350)', () => {
-      const cap = makeCapWithContribution('execute:wave:pre');
+      const cap = makeCapWithContribution('execute:wave:pre', 'executor');
       const { getWiredKinds } = require('../scripts/gen-loop-host-contract.cjs');
       const errs = validateHooksWired(cap, getWiredKinds(ROOT));
       assert.deepEqual(
         errs, [],
         `execute:wave:pre must dispatch contribution hooks. Errors: ${errs.join('; ')}`,
+      );
+
+      // The role this fixture targets must be one the host contract actually
+      // publishes for this point — otherwise the landing site below is checked
+      // against a role no capability may legally declare into.
+      const { LOOP_HOST_CONTRACT } = require('../gsd-core/bin/lib/loop-host-contract.cjs');
+      const executeStep = LOOP_HOST_CONTRACT.find((s) => s.points.includes('execute:wave:pre'));
+      assert.ok(
+        executeStep && executeStep.agentRoles.includes('executor'),
+        'the host contract must publish `executor` as an admissible into role at execute:wave:pre',
       );
 
       const workflow = fs.readFileSync(path.join(ROOT, 'gsd-core', 'workflows', 'execute-phase.md'), 'utf8');
