@@ -11018,12 +11018,17 @@ function install(isGlobal, runtime = DEFAULT_RUNTIME, options = {}) {
   //       destroyed by a wholesale delete whose snapshot lacked it.
   let codexManagedSnapshotCaptured = false;
   // null = the gate never ran; true/false = the gate ran and hooks/ (did|did
-  // not) exist as a directory pre-install. Three states are load-bearing: a
+  // not) exist as a directory pre-install. Two states are load-bearing: a
   // clean first install records false, so its rollback removes the staged
-  // hooks/ tree entirely; minimal mode records null, so rollback does nothing.
+  // hooks/ tree entirely; a non-Codex runtime records null, so rollback does
+  // nothing.
   let codexPreInstallHooksDirPreExisted = null;
   let codexPreInstallHooksCaptureIncomplete = false;
-  if (_hostBehaviors(runtime).tomlConfigInstall && !isMinimalMode(_effectiveInstallMode)) {
+  // #4249 CR: not gated on install mode. restoreCodexSnapshot is reachable for
+  // a core/--minimal install too (#2695), and its pass-2 sweeps remove every
+  // gsd-* skill dir / agent file the snapshot does not claim — so an empty
+  // minimal-mode snapshot deleted the whole surface with nothing to restore.
+  if (_hostBehaviors(runtime).tomlConfigInstall) {
     codexManagedSnapshotCaptured = true;
     const _preSkillsDir = _resolveSkillsRootDir(runtime, targetDir, _installScopeId);
     if (fs.existsSync(_preSkillsDir)) {
