@@ -273,19 +273,21 @@ Full roster at `gsd-core/workflows/*.md`. Workflows are thin orchestrators that 
 
 ### Workflow Sub-Files
 
-A workflow may own two kinds of sub-file. Both live under `gsd-core/workflows/<workflow>/` and
-neither is separately invocable — the parent workflow reaches them.
+A workflow may own four kinds of sub-file. All live under `gsd-core/workflows/<workflow>/` and
+none is separately invocable — the parent workflow reaches them.
 
 | Subdirectory | What it holds | Manifest family | Roster |
 |---|---|---|---|
 | `<workflow>/steps/*.md` | Gated section bodies extracted by the fragment model (ADR-1671, epic #1671 Phases 6.1–6.3). The parent carries a `section_manifest`-gated stub; `gsd-core/workflows/section-manifest.json` names which step a given invocation reads. | `workflow_steps` | See `docs/INVENTORY-MANIFEST.json` for the authoritative per-file list |
 | `<workflow>/modes/*.md` | Progressive-disclosure mode files (#717). The parent dispatches to exactly one; `discuss-phase/modes/` is the canonical example. | `workflow_modes` | `discuss-phase`, `help` |
+| `<workflow>/detail/*.md` | Elaboration content deferred from a workflow spine, read at runtime only when `workflow.compact_content` is `false` (ADR-4139; epic #4139 Phase 2 #4402 established the first example, Phase 3 #4403 added the CI guard). | `workflow_detail` | `plan-phase` |
+| `<workflow>/templates/*.md` | Fill-in template bodies the parent workflow renders at runtime; also referenced as a `FRAGMENT_DIRS` entry in `scripts/lint-response-language-coverage.cjs`. | `workflow_templates` | `discuss-phase` |
 
-Both families are keyed by `<workflow>/<subdir>/<file>.md` rather than a bare filename, because two
-workflows may each own a step of the same name — `families.workflows` uses bare basenames and
+All four families are keyed by `<workflow>/<subdir>/<file>.md` rather than a bare filename, because
+two workflows may each own a step of the same name — `families.workflows` uses bare basenames and
 cannot represent these without collision.
 
-**Adding a step or mode file requires no hand-written row here.** Run
+**Adding a step, mode, detail, or template file requires no hand-written row here.** Run
 `node scripts/gen-inventory-manifest.cjs --write` (after `build:lib`) and the manifest picks it up;
 `tests/inventory-manifest-sync.test.cjs` fails if you forget. The per-file roster deliberately lives
 in `docs/INVENTORY-MANIFEST.json` rather than being duplicated in this table — 60 rows that must be
@@ -388,7 +390,6 @@ Full roster at `gsd-core/references/*.md`. References are shared knowledge docum
 | `mvp-concepts.md` | Cross-reference index for the six MVP-related reference files; maps each file to its purpose and which workflow loads it. |
 | `verify-mvp-mode.md` | UAT framing rules for MVP-mode phases — user-flow-first ordering, deferred technical checks, user-story-format guard. |
 | `compact-content-gate.md` | Shared compact-content gate (ADR-4139 Decision 3/4) — the `workflow.compact_content` check and detail-file resolution rule every compact-split workflow spine references, stated once. |
-| `compact-content-protected-content.md` | Compact-content protected-content list (ADR-4139 Decision 5) — the five categories a workflow spine must never move to a `detail/*.md` part, and the `<!-- gsd:protected -->` sentinel syntax that marks them; drafted here for Phase 3 (#4403) to relocate unchanged. |
 
 ### Sketch References
 
@@ -626,6 +627,7 @@ Full listing: `gsd-core/bin/lib/*.cjs`.
 | `review-lane-descriptor.cjs` | Declared reviewer-lane contract (compiled from `src/review-lane-descriptor.cts`, gitignored; ADR-2782) — the frozen `REVIEWER_LANES` roster, the lane slug grammar, and two pure parity gates: `checkReviewerLaneParity` (descriptor ↔ roster ↔ registry, plus anti-parity against re-added bespoke workflow legs) and `checkReviewerDocsParity` (declared flags and section titles ↔ `docs/COMMANDS.md`, `docs/FEATURES.md` and their locale mirrors; #2800, closes #2781/#2272); exports `REVIEWER_LANES`, `PARITY_VIOLATION`, `DOCS_PARITY_VIOLATION`, `LANE_SLUG_RE` |
 | `review-lane-invocation.cjs` | Pure projection from a declared reviewer lane plus resolved config to a concrete invocation plan (compiled from `src/review-lane-invocation.cts`, gitignored; ADR-2782 Phase 5b) — no filesystem, network or clock; config arrives through a `configGet` seam; exports `resolveLanePlan`, `LANE_UNAVAILABLE` |
 | `review-lane-runner.cjs` | Execution of a reviewer-lane invocation plan (compiled from `src/review-lane-runner.cts`, gitignored; ADR-2782 Phase 5b) — probe, spawn or HTTP call, empty-output policy, egress-host check, and dispatch of the three first-party `handler` modules; exports `runLane`, `probeLane`, `checkEgressHost`, `writeReviewOrStub` |
+| `reviewer-step-dispatch.cjs` | Shared reviewer-step interpreter (compiled from `src/reviewer-step-dispatch.cts`, gitignored; #4209) — reuses `resolveReviewerSelection`/`resolveLanePlan`, builds a metadata-only source-review prompt, fails closed on path/provenance/budget violations before any lane invoke; exports `dispatchReviewerLanes`, `buildSourceReviewPrompt` |
 | `review-reviewer-selection.cjs` | Reviewer selection/normalization helpers for `/gsd-review` default reviewer policy and precedence |
 | `roadmap-command-router.cjs` | Thin CJS subcommand router adapter for `gsd-tools roadmap` |
 | `health-diagnostic-rules/roadmap-disk-consistency.cjs` | Health-diagnostic rules: ROADMAP-vs-disk phase directory consistency checks (W006, W007), both resolved through the shared `matchPhaseDirs` matcher, ported behavior-preserving from `cmdValidateHealth` (ADR-3180 §8.2/§8.3/§8.5, Phase 11, #3309) |
