@@ -396,9 +396,16 @@ describe('runtime-launcher-parity (#373)', () => {
     const CALLER_OR_SELF_ASSIGNED = new Set(['RUNTIME_DIR', 'GSD_TOOLS']);
     const snippetContent = fs.readFileSync(SNIPPET_FILE, 'utf8');
     const covered = new Set([...Object.keys(TEST_ENV_BASE), ...Object.keys(SNIPPET_SCRUB), ...CALLER_OR_SELF_ASSIGNED]);
-    const uncovered = [...new Set(
+    const extracted = [...new Set(
       [...snippetContent.matchAll(/\$\{([A-Z_][A-Z0-9_]*):-/g)].map((m) => m[1]),
-    )].filter((name) => !covered.has(name));
+    )];
+    // Guards the guard: a truncated/renamed/unreadable snippet would make
+    // `extracted` empty, and an empty `uncovered` below would pass vacuously.
+    assert.ok(
+      extracted.length >= 15,
+      `expected the snippet to yield many distinct \${VAR:-default} arms, got ${extracted.length}`,
+    );
+    const uncovered = extracted.filter((name) => !covered.has(name));
 
     assert.deepStrictEqual(
       uncovered,
