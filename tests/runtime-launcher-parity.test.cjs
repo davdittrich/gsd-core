@@ -390,6 +390,9 @@ describe('runtime-launcher-parity (#373)', () => {
     // fixture that sources the snippet sets it in-script before doing so.
     // GSD_TOOLS: the snippet assigns this one itself, before this arm's
     // ${GSD_TOOLS:-} check runs.
+    // Any addition here must justify, in a comment like the two above, why the
+    // var is genuinely caller-supplied/self-assigned — not a real coverage gap
+    // silenced by exemption. When in doubt, add a SNIPPET_SCRUB entry instead.
     const CALLER_OR_SELF_ASSIGNED = new Set(['RUNTIME_DIR', 'GSD_TOOLS']);
     const snippetContent = fs.readFileSync(SNIPPET_FILE, 'utf8');
     const covered = new Set([...Object.keys(TEST_ENV_BASE), ...Object.keys(SNIPPET_SCRUB), ...CALLER_OR_SELF_ASSIGNED]);
