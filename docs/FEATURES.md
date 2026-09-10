@@ -42,6 +42,7 @@
   - [Session Reporting](#24-session-reporting)
   - [Multi-Agent Orchestration](#25-multi-agent-orchestration)
   - [Model Profiles](#26-model-profiles)
+  - [Compact Content Mode](#4139-compact-content-mode)
 - [Brownfield Features](#brownfield-features)
   - [Codebase Mapping](#27-codebase-mapping)
   - [Existing Codebase Onboarding](#27b-existing-codebase-onboarding)
@@ -210,6 +211,7 @@
   - [Reachable Lint Rules and a Non-Destructive Quick-Task Append](#3951-reachable-lint-rules-and-a-non-destructive-quick-task-append)
   - [Per-Task External-Tracker Content-Resolution Seam](#3970-per-task-external-tracker-content-resolution-seam)
   - [Unreadable-Directory Scope Signal](#4014-unreadable-directory-scope-signal)
+  - [Typed Phase Context for Lifecycle Hooks](#4030-typed-phase-context-for-lifecycle-hooks)
 
 ---
 
@@ -809,8 +811,8 @@ phase of the same epic.
 
 **Requirements:**
 - REQ-CTX-01: Statusline MUST display context usage percentage to user
-- REQ-CTX-02: Context monitor MUST inject agent-facing warnings at ≤35% remaining (WARNING)
-- REQ-CTX-03: Context monitor MUST inject agent-facing warnings at ≤25% remaining (CRITICAL)
+- REQ-CTX-02: Context monitor MUST inject agent-facing warnings at the WARNING fire-point — ≤35% remaining by default, overridable per project via `hooks.context_warning_threshold`
+- REQ-CTX-03: Context monitor MUST inject agent-facing warnings at the CRITICAL fire-point — ≤25% remaining by default, overridable per project via `hooks.context_critical_threshold`
 - REQ-CTX-04: Warnings MUST debounce (5 tool uses between repeated warnings)
 - REQ-CTX-05: Severity escalation (WARNING→CRITICAL) MUST bypass debounce
 - REQ-CTX-06: Context monitor MUST differentiate GSD-active vs non-GSD-active projects
@@ -910,6 +912,46 @@ phase of the same epic.
 | gsd-plan-checker | Sonnet | Sonnet | Haiku | Inherit |
 | gsd-integration-checker | Sonnet | Sonnet | Haiku | Inherit |
 | gsd-nyquist-auditor | Sonnet | Sonnet | Haiku | Inherit |
+
+---
+
+### 4139. Compact Content Mode
+
+**Config:** `workflow.compact_content: false`
+
+**Purpose:** Per-project opt-in to token-minimized variants of GSD's own shipped prompt
+content — workflow instructions, planning-artifact templates, and non-Claude agent-persona
+payloads — so the always-loaded instruction window leaves more of the model's attention on
+the developer's own code (ADR-4139 Decision 2: finite attention, not per-invocation price,
+since prompt caching already discounts the latter).
+
+Nothing is compressed at runtime. Compact variants are hand-authored, reviewed files sitting
+beside their canonical siblings; the config key only chooses which one gets read. With the
+key off (the default), every covered workflow, template, and agent persona behaves exactly as
+it did before this feature existed.
+
+**Requirements:**
+- REQ-COMPACT-01: System MUST default `workflow.compact_content` to `false` — off costs
+  nothing and changes no existing behavior
+- REQ-COMPACT-02: Eagerly `@`-included workflow files MUST keep their host-guaranteed load;
+  compactness on this stream comes from a spine + deferred `detail/*.md` elaboration, never
+  from converting the `@`-include itself
+- REQ-COMPACT-03: A missed runtime `Read` of a deferred elaboration or compact variant MUST
+  degrade to a complete, correct, terser state — never to a state with no instructions
+- REQ-COMPACT-04: No compact variant MAY weaken or remove protected content (guardrails,
+  output-format contracts, few-shot examples, security language, structural headings)
+- REQ-COMPACT-05: An agent with no compact persona variant registered MUST fall back to its
+  canonical persona and disclose the fallback inside the served payload, never fail or serve
+  nothing
+- REQ-COMPACT-06: `/gsd-new-project` MUST ask the question and persist the answer;
+  `/gsd-settings` and `/gsd-config` MUST toggle it on an already-initialized project
+
+**Config:**
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `workflow.compact_content` | boolean | `false` | When `true`, loads token-minimized instruction/template/agent-persona variants wherever one is registered; falls back to canonical content everywhere else |
+
+**See also:** [ADR-4139](../adr/4139-compact-content-seam.md), [CONFIGURATION.md](../CONFIGURATION.md#workflow-toggles), [USER-GUIDE.md](../USER-GUIDE.md)
 
 
 ---
@@ -3554,6 +3596,8 @@ The load-bearing wire is the `plan-phase` lift into `must_haves.prohibitions`, s
 
 **Backward compatibility:** A project with no `.planning/WINDOWS.md` reports `open_count: 0` and ships cleanly; the gate only activates once windows are recorded.
 
+**Milestone attribution (#4487):** each entry carries a `milestone` field, stamped at record time from the workstream's resolved milestone version (STATE.md `milestone:` frontmatter, or the ROADMAP.md in-progress marker as a fallback). Phase numbers are unique only within one active `phases/` directory — `milestone complete` frees them for reuse — so this is what lets an entry be attributed to the milestone it was actually recorded under, even after that milestone is archived and its phase numbers reused. `null` when no milestone could be resolved, including every entry recorded before this field existed.
+
 **Configuration:** `graphify.graph_path`
 
 ---
@@ -4351,6 +4395,65 @@ phase directory.
   path for the rest of their output — an intentional, additive-only choice
   to avoid altering already-complex failure control-flow at those sites,
   not a performance optimization.
+
+---
+
+### 4030. Typed Phase Context for Lifecycle Hooks
+
+**Purpose:** a capability hook fired at a phase-scoped loop point knew the
+point and the project directory, but not which phase the invocation was
+*for*. The envelope from `gsd_run loop render-hooks <point>` carried
+`{point, activeHooks, rendered, warnings?}` and nothing else, so a
+phase-scoped extension had to infer the phase from `STATE.current_phase`
+or from artifact order and mtimes. Those disagree with the invocation
+whenever one phase is planned or verified while another is still
+executing — `STATE.current_phase` is project lifecycle status, not a claim
+about what this call is scoped to.
+
+**`loop render-hooks` accepts `--phase <token>` and returns a typed
+`context`.** The envelope gains an additive, optional member:
+
+```json
+{ "point": "plan:pre", "activeHooks": [], "rendered": "...",
+  "context": { "phase": "05", "phaseDir": ".planning/phases/05-widgets" } }
+```
+
+`context` is **authoritative for task-local phase identity** — a capability
+must prefer it over `STATE.current_phase` or artifact inference when both
+are available. All 20 phase-scoped call sites now pass the phase they are
+operating on, across `plan-phase.md`, `execute-phase.md`, `verify-work.md`,
+`secure-phase.md`, `validate-phase.md`, `discuss-phase.md`, `autonomous.md`
+and `code-review-fix.md`, and `gsd-core/references/loop-hook-dispatch.md`
+tells every `step` / `gate` dispatch how to project it onto the unit it
+invokes.
+
+**The resolver derives the directory; a supplied one is only ever a check.**
+`--phase` takes the bare token every workflow already holds (`"05"`,
+including decimal phases like `"07.5"`), and `phaseDir` is whatever on-disk
+directory `guardedFindPhase` matched. Path traversal, absolute-path
+substitution and symlink escape therefore have no input to travel through.
+Resolution goes through the same `project_code` foreign-prefix guard `init.*`
+applies, so a token like `OTHER-05` does not resolve to this project's
+Phase 5.
+
+`--phase-dir <dir>` is accepted alongside `--phase` and compared against that
+resolution. Any spelling of the same directory matches — relative, absolute or
+`./`-prefixed — since sibling commands take absolute paths too; anything naming
+a *different* directory omits `context` with a warning quoting both, and
+`--phase-dir` on its own is refused. The emitted `phaseDir` is always the
+locator's, never the supplied string. This catches the mismatch a containment
+check cannot: `--phase 05 --phase-dir .planning/phases/07-other` names two
+different phases that are *both* inside the project.
+
+**Known limits:**
+- Omitting `--phase` reproduces the previous envelope exactly — no
+  `context` key appears and no fallback phase is invented.
+- A token that matches no phase directory, matches more than one, or
+  carries a foreign project-code prefix omits `context` and appends to the
+  existing `warnings` array. `--phase` degrades; it never fails a render.
+- `ship:*` is not a phase-scoped point and is unchanged (shipping runs at
+  the milestone/project level); `audit-milestone.md` and `quick.md` hold no
+  phase to pass either.
 
 ---
 

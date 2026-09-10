@@ -287,7 +287,7 @@ Runtime hooks that integrate with the host AI agent:
 | Hook | Event | Purpose |
 |------|-------|---------|
 | `gsd-statusline.js` | `statusLine` | Displays model (long-context suffixes like `(1M context)` collapse to a compact `(1M)` badge), task, directory, and context usage bar |
-| `gsd-context-monitor.js` | `PostToolUse` / `AfterTool` | Injects agent-facing context warnings at 35%/25% remaining |
+| `gsd-context-monitor.js` | `PostToolUse` / `AfterTool` | Injects agent-facing context warnings at 35%/25% remaining by default (configurable — see [CONFIGURATION.md](CONFIGURATION.md)) |
 | `gsd-check-update.js` | `SessionStart` | Foreground trigger for the background update check |
 | `gsd-ensure-canonical-path.js` | `SessionStart` | For Claude Code plugin installs, symlinks `~/.claude/gsd-core/{bin,contexts,references,templates,workflows}` to the plugin's bundled tree so `@~/.claude/gsd-core/...` includes resolve; runs first in `SessionStart`, no-op in classic installs, self-heals after `claude plugin update` (#997) |
 | `gsd-check-update-worker.js` | (helper) | Background worker spawned by `gsd-check-update.js`; no direct event registration |
@@ -470,7 +470,7 @@ Node.js CLI utility (`gsd-tools.cjs`) with domain modules split across `gsd-core
 | `loop-host-contract.cjs`   | Generated Loop Host Contract — 12 loop points, per-step agent roles, and core artifacts; emitted by `scripts/gen-loop-host-contract.cjs` from workflow markers (ADR-894 §3); consumed by `gen-capability-registry.cjs` |
 | `capability-loader.cjs`    | Runtime registry overlay loader (ADR-1244 D2) — `loadRegistry({ includeInstalled })` composes the frozen first-party registry with a validated installed overlay of third-party capability manifests read from global `$GSD_HOME/.gsd/capabilities/` and project `<projectRoot>/.gsd/capabilities/`; first-party always wins; load-time `engines.gsd` re-gate skips incompatible overlays with a warning; gate-kind hooks on skipped capabilities fail OPEN — no gate is injected; a loud warning (stderr + envelope `warnings`) names the load failure and the `gsd capability remove <id>` remediation (#2009) |
 | `capability-registry.cjs`  | Generated central Capability Registry — role-partitioned index of all co-located capability declarations; emitted by `scripts/gen-capability-registry.cjs` (ADR-894 §5) |
-| `loop-resolver.cjs`        | Loop Extension Point resolver — ADR-857 phase 3c registry-consuming query; consumes resolved Capability State, filters `byLoopPoint` by capability enablement plus config activation, renders active hooks as markdown, emits `{ point, activeHooks, rendered }` envelope; `gsd-tools loop render-hooks <point> [--config-dir <path>]` |
+| `loop-resolver.cjs`        | Loop Extension Point resolver — ADR-857 phase 3c registry-consuming query; consumes resolved Capability State, filters `byLoopPoint` by capability enablement plus config activation, renders active hooks as markdown, emits `{ point, activeHooks, rendered }` envelope plus additive `context: { phase, phaseDir }` when `--phase` resolves; `gsd-tools loop render-hooks <point> [--config-dir <path>] [--phase <token>] [--phase-dir <dir>]` |
 | `capability-state.cjs`     | Unified capability-state resolver — ADR-857 phase 4b/6; composes install profile, runtime surface, and config activation into one per-capability view consumed by workflow hook rendering; pure `resolveCapabilityState`, reusable `resolveCapabilityRuntimeState`, I/O `cmdCapabilityState`, and convenience predicate `isCapabilityActive(capId, cwd)`; `gsd-tools capability state [--config-dir <path>]` emits `{ runtimeConfigDir, capabilities[] }` where each entry carries `enabled` (installed && surfaced) and `active` (enabled && configActivation via the capability's `activationKey`; absent key → active===enabled) |
 | `capability-validator.cjs` | Shared capability conformance validator (ADR-1244 D2) — extracted from `scripts/gen-capability-registry.cjs` so the build-time generator and the runtime overlay loader share one `validateCapability(manifest)` implementation; generative-parity is CI-guarded |
 | `graphify-command-router.cjs` | ADR-959 capability command router — first real capability command cutover (phase 4d-impl-2); extracted from the `case 'graphify':` arm in `gsd-tools.cjs`; dispatches build/query/status/diff subcommands; discovered via `commandFamilies` in the capability registry |
@@ -792,6 +792,22 @@ verification.
 `.planning/codebase/*.md` file; `bin/lib/drift.cjs` provides
 `readMappedCommit` and `writeMappedCommit` round-trip helpers.
 
+The baseline is written by `gsd-tools stamp-codebase-map`, a shell step in the
+map-codebase workflow, not by the mapper agent. The mapper's own freshness
+markers (`**Analysis Date:**`, `<!-- refreshed: ... -->`) are restamped
+unconditionally on an Update run, so an agent that rewrites only the dates still
+looks current to a reader; the machine-readable stamp is the one marker that
+cannot be satisfied by a date-only rewrite, which is exactly why it is not the
+agent's to write. `--files a.md,b.md` narrows the stamp to the documents a
+caller actually refreshed, as the auto-remap path does.
+
+An absent or unresolvable baseline is reported as `skipped` with reason
+`no-mapped-commit` or `unresolvable-mapped-commit`, never as drift. Diffing
+HEAD against the empty tree would report every tracked file as newly added,
+which makes a stale map indistinguishable from a fresh one. Files under
+`.planning/` are excluded from the diff: the map's own commit is a planning
+artifact, not codebase structure.
+
 ---
 
 ## Installer Architecture
@@ -887,6 +903,11 @@ Runtime Engine (Claude Code / Antigravity CLI)
 | > 35%             | Normal   | No warning injected                     |
 | ≤ 35%             | WARNING  | "Avoid starting new complex work"       |
 | ≤ 25%             | CRITICAL | "Context nearly exhausted, inform user" |
+
+The two fire-points are defaults. `hooks.context_warning_threshold` and
+`hooks.context_critical_threshold` in `.planning/config.json` move them per
+project; see [context-monitor.md](context-monitor.md) for the resolution and
+fallback rules.
 
 
 Debounce: 5 tool uses between repeated warnings. Severity escalation (WARNING→CRITICAL) bypasses debounce.
