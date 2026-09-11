@@ -342,4 +342,53 @@ describe('check predicate — --phase-dir project confinement (#4354)', () => {
     assert.strictEqual(verdict.block, true);
     assert.strictEqual(verdict.details.artifactNotFound, true);
   });
+
+  test('[security] shell metacharacters in --phase-number/--phase-req-ids stay inert through the real CLI seam, not just the pure evaluator', (t) => {
+    const fx = makeFixture(t);
+    // gate-predicate-evaluator.test.cjs already proves this at the pure-function
+    // level (env-passthrough property test); this proves it end-to-end through
+    // cmdCheckPredicate + a real sh -c subprocess, the seam --phase-dir's own
+    // injection tests above exercise (antigravity review, #4414). The values
+    // are only ever REFERENCED via $PHASE_NUMBER/$PHASE_REQ_IDS below, never
+    // spliced into the command string itself — that would test the test
+    // harness's own string concatenation, not the seam under test.
+    const evilNumber = '$(touch INJECTED_NUM)`touch INJECTED_NUM2`;touch INJECTED_NUM3|touch INJECTED_NUM4';
+    const evilReqIds = '$(touch INJECTED_REQ)`touch INJECTED_REQ2`;touch INJECTED_REQ3|touch INJECTED_REQ4';
+    const predicate = JSON.stringify({
+      kind: 'command-exit-zero',
+      command: 'printf %s "$PHASE_NUMBER" > out_num.txt; printf %s "$PHASE_REQ_IDS" > out_req.txt',
+    });
+    const result = runGsdTools(
+      ['check', 'predicate',
+        '--predicate', predicate,
+        '--phase-dir', fx.inside,
+        '--phase-number', evilNumber,
+        '--phase-req-ids', evilReqIds,
+        '--cwd', fx.project,
+        '--raw'],
+      fx.project,
+    );
+    for (const marker of ['INJECTED_NUM', 'INJECTED_NUM2', 'INJECTED_NUM3', 'INJECTED_NUM4', 'INJECTED_REQ', 'INJECTED_REQ2', 'INJECTED_REQ3', 'INJECTED_REQ4']) {
+      assert.strictEqual(
+        fs.existsSync(path.join(fx.project, marker)), false,
+        `--phase-number/--phase-req-ids metacharacters must never execute code (found ${marker})`,
+      );
+    }
+    assert.strictEqual(result.success, true, `check command itself must still run; stderr: ${result.error}`);
+    assert.strictEqual(fs.readFileSync(path.join(fx.project, 'out_num.txt'), 'utf8'), evilNumber,
+      '$PHASE_NUMBER must reach the shell byte-for-byte as a real env var');
+    assert.strictEqual(fs.readFileSync(path.join(fx.project, 'out_req.txt'), 'utf8'), evilReqIds,
+      '$PHASE_REQ_IDS must reach the shell byte-for-byte as a real env var');
+  });
+
+  test('[negative] a non-existent out-of-project relative traversal path is rejected (ancestor-walk fallback, not just the existing-dir realpath check)', (t) => {
+    const fx = makeFixture(t);
+    // The existing "[negative] an unrelated outside directory" test above only
+    // exercises validatePath's direct fs.realpathSync(resolvedPath) branch,
+    // since fx.outside already exists on disk. A relative path segment that
+    // does NOT exist takes validatePath's ancestor-walk fallback (security.cts
+    // ~L86-97) instead — this proves that branch also confines correctly.
+    const traversal = path.join(path.relative(fx.project, fx.outside), 'uncreated-child-dir');
+    assertRejected(runPredicate(fx, traversal), 'non-existent relative traversal');
+  });
 });
