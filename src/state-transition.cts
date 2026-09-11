@@ -20,7 +20,7 @@ import { stateReplaceField, stateExtractField, stateReplaceFieldIfTemplate, stat
 import { KNOWN_TEMPLATE_DEFAULTS, toFiniteNumber, computeProgressPercent } from './state-document.cjs';
 import { tokenizeHeadings } from './markdown-sectionizer.cjs';
 import type { HeadingToken } from './markdown-sectionizer.cjs';
-import { deriveProgressFromRoadmap, clampPercent, clampPercentFromFraction } from './phase-lifecycle.cjs';
+import { deriveProgressFromRoadmap, clampPercent, clampPercentFromFraction, renderProgressBar } from './phase-lifecycle.cjs';
 import { escapeRegex } from './pattern.cjs';
 // #4129: the completion-ratio kernel for the resync-arm ratchet's percent
 // (planning-scope's SCOPE — state-document's own dependency, no cycle here:
@@ -38,12 +38,13 @@ export function formatProgressMachineSegment(percent: number): string {
   // ADR-3180 Decision 7: rounding and the 100 ceiling belong to the
   // completion-ratio kernel. The floor is added here because this helper is
   // also fed persisted frontmatter values (hand-editable, unlike the
-  // count-shaped entries into that kernel), and `'░'.repeat` throws on a
-  // negative count. Bar and printed percent use the clamped value so the two
-  // halves of the segment can never disagree.
+  // count-shaped entries into that kernel). Bar and printed percent use the
+  // clamped value so the two halves of the segment can never disagree.
+  // #4294: the CELL count is the render kernel's — `renderProgressBar` holds a
+  // sub-100 percent one cell short of full, so `[██████████]` beside `95%`
+  // cannot recur here as a seventh inline copy of the rounding.
   const clamped = Math.max(0, clampPercentFromFraction(percent / 100));
-  const filled = Math.round(clamped / 10);
-  return `[${'█'.repeat(filled)}${'░'.repeat(10 - filled)}] ${clamped}%`;
+  return `[${renderProgressBar(clamped, 10)}] ${clamped}%`;
 }
 
 // Consumers (a future STATE.md writer that bypasses all three reintroduces the
@@ -1252,7 +1253,17 @@ function beginPhaseCore(
     const focusLabel = intent.phaseName
       ? `Phase ${intent.phaseNumber} — ${intent.phaseName}`
       : `Phase ${intent.phaseNumber}`;
-    const focusPattern = /(\*\*Current focus:\*\*\s*).*/i;
+    // #4469: anchored to line start with same-line whitespace only, mirroring
+    // #4243/PR #4453's fix to stateReplaceField's bold branch. The pre-fix
+    // pattern carried no `^`/`m` and used `\s*` (crosses newlines), so a bold
+    // `**Current focus:**` quoted mid-sentence elsewhere in the body (e.g. an
+    // Accumulated Context bullet) matched first and had the rest of its line
+    // silently overwritten with the new focus label -- the same #4010
+    // data-loss class. `[ \t]*` (not `\s*`) avoids consuming the newlines
+    // before the label into the match; `$` documents the match ends at
+    // end-of-line (inert here since `.` never crosses line terminators
+    // without `/s`, which is not set).
+    const focusPattern = /^([ \t]*\*\*Current focus:\*\*[ \t]*)(.*)$/im;
     if (focusPattern.test(body)) {
       body = body.replace(focusPattern, (_match, prefix: string) => `${prefix}${focusLabel}`);
       updated.push('Current focus');
