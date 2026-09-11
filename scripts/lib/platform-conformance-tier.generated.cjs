@@ -60,6 +60,7 @@ module.exports = {
   "tests/check-env.test.cjs",
   "tests/check-gap-analysis-plan-post-e2e.test.cjs",
   "tests/check-glossary-refs.test.cjs",
+  "tests/check-predicate.test.cjs",
   "tests/check-tdd-review-checkpoint-e2e.test.cjs",
   "tests/check-ui-plan-gate.test.cjs",
   "tests/check-ui-safety-gate.test.cjs",
