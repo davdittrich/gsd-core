@@ -470,8 +470,8 @@ test('an aggregate entrypoint validation failure leaves Cline\'s own config file
   withSandboxedHome(t, 'configured-entrypoint-unreverted-', () => {
     // Cline is one of the four runtimes (Cursor/Windsurf/Kimi/Cline) that
     // write their config file inside install(), ahead of the validation
-    // gate, with no snapshot/restore path — docs/how-to/update-gsd.md's
-    // rollback-matrix paragraph. Unlike the Codex companion test above,
+    // gate, with no snapshot/restore path — see the rollback-matrix
+    // paragraph in the update-gsd how-to. Unlike the Codex companion test above,
     // this asserts the POSITIVE case that same paragraph discloses in
     // prose but no prior test proved: the file the failing runtime itself
     // just wrote is still there afterward, broken and unreverted.
