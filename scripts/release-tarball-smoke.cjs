@@ -53,6 +53,8 @@ const os = require('os');
 const path = require('path');
 const { PACKAGE_NAME } = require('../gsd-core/bin/lib/package-identity.cjs');
 const { ExitError, runMain } = require('./lib/cli-exit.cjs');
+const shellCmdProjection = require('../gsd-core/bin/lib/shell-command-projection.cjs');
+const { escapeRegex } = require('../gsd-core/bin/lib/pattern.cjs');
 // 120 s proved too tight for cold-cache `npm install -g` of a 1499-file tarball:
 // spawnSync fires SIGTERM at the deadline and returns { status: null, stdout: '',
 // stderr: '' } (Node docs: status is null when a subprocess is terminated by a
@@ -305,29 +307,40 @@ function scanWorkflowColonLeak(filePath, cmdNames) {
 const RUNTIME_CONFIG_FILES = Object.freeze(['settings.json', 'hooks.json', 'config.toml']);
 
 /**
- * An absolute path token ending in a launchable-script extension. The first
- * alternative matches a Windows drive prefix (C:\ or C:/), the second a POSIX
- * root. Non-greedy so it stops at the first extension rather than swallowing
- * the rest of a shell command; the excluded quote characters keep it inside a
- * single JSON/TOML string value.
- */
-const SCRIPT_PATH_RE = /(?:[A-Za-z]:[\\/]|\/)[^"'\s]{0,400}?\.(?:js|cjs|mjs|sh|cmd|ps1)/g;
-
-/**
  * Extract every script path `text` names underneath `configDir`.
+ *
+ * #4249 (antigravity review): anchored on the literal, already-known
+ * `configDir` prefix instead of a generic "any absolute path" character
+ * class. The prior version excluded whitespace from the match to avoid
+ * swallowing a shell command's trailing args, which also truncated any
+ * legitimate path containing a space (e.g. `/Users/John Doe/.claude`) —
+ * `scanConfiguredEntrypoints` would then silently report zero checked
+ * paths. Anchoring on `configDir` removes the ambiguity outright: a match
+ * can only start where the known prefix literally occurs in the text, so
+ * an interpreter path concatenated ahead of it (`"/usr/bin/node
+ * /configDir/hooks/foo.js"`) is never swallowed either, and interior
+ * whitespace inside `configDir` or the script's own path segments is safe
+ * to allow. This still scans raw, unparsed config text on purpose (see
+ * scanConfiguredEntrypoints's doc comment) — it catches a writer that
+ * embeds a launch path without registering it, which a structured
+ * JSON.parse of the expected schema would miss entirely.
  *
  * Windows configs store paths with backslashes, which JSON/TOML doubles on
  * write; collapsing `\\` to `\` first makes the raw text scan work on both
  * platforms without parsing each config format separately (POSIX text has no
  * backslashes, so the collapse is a no-op there).
+ *
+ * Every writer bakes `configDir` through the same posixNormalize seam
+ * (src/runtime-hooks-surface.cts) before writing it into config text, on
+ * every platform — so the anchor must match that projection, not the
+ * OS-native `configDir` string this function receives.
  */
 function configuredEntrypointsIn(text, configDir) {
-  const prefix = configDir.endsWith(path.sep) ? configDir : configDir + path.sep;
-  const fold = (value) => (process.platform === 'win32' ? value.toLowerCase() : value);
+  const normalizedPrefix = shellCmdProjection.posixNormalize(configDir).replace(/\/+$/, '') + '/';
+  const scriptPathRe = new RegExp(`${escapeRegex(normalizedPrefix)}[^"']{0,400}?\\.(?:js|cjs|mjs|sh|cmd|ps1)`, 'g');
   const found = new Set();
-  for (const match of text.replace(/\\\\/g, '\\').matchAll(SCRIPT_PATH_RE)) {
-    const resolved = path.resolve(match[0]);
-    if (fold(resolved).startsWith(fold(prefix))) found.add(resolved);
+  for (const match of text.replace(/\\\\/g, '\\').matchAll(scriptPathRe)) {
+    found.add(path.resolve(match[0]));
   }
   return [...found];
 }
@@ -693,8 +706,13 @@ function runSmoke({
       );
 
       if (installResult.status !== 0) {
+        // #4249 (antigravity review): this is the Cycle 4 per-runtime install,
+        // not Cycle 1's `gsd init` — SMOKE.INSTALL_FAILED is the code Cycle 2's
+        // identical spawnSync-failure check already uses for the same failure
+        // class; reusing SMOKE.INIT_FAILED here conflated the two lifecycle
+        // stages in the reported code.
         return {
-          code: SMOKE.INIT_FAILED,
+          code: SMOKE.INSTALL_FAILED,
           details: {
             ...details,
             runtime,
@@ -809,6 +827,7 @@ module.exports = {
   binInvocation,
   entrypointFixtureHome,
   CHILD_TIMEOUT_MS,
+  configuredEntrypointsIn,
 };
 
 if (require.main === module) {

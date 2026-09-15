@@ -1520,7 +1520,19 @@ function buildHookCommand(configDir: string, hookName: string, opts?: BuildHookC
   // (the absolute Git-Bash discovery covers win32 — #580/#3393).
   if (isShellHook) {
     const runner = resolveBashRunner(opts);
-    if (runner === null) return null;
+    if (runner === null) {
+      // #4249 (antigravity review): this early return skips `track()` below,
+      // so an unresolved bash on win32 (no Git Bash found) previously left
+      // this hook silently unregistered with nothing for
+      // validateConfiguredEntrypoints to reject — configuredEntrypointsForHook's
+      // own 'unresolved bash must still surface' comment describes intent this
+      // return never reached. Push the entry directly (no `command`, since
+      // none was ever built) so the gate actually sees it.
+      if (opts.configuredEntrypoints) {
+        opts.configuredEntrypoints.push(...configuredEntrypointsForHook(configDir, hookName, opts));
+      }
+      return null;
+    }
 
     if (opts.portableHooks) {
       const portableBaseDir = projectPortableHookBaseDir({

@@ -10,13 +10,14 @@ process.env.GSD_TEST_MODE = '1';
 const { describe, test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 
 const { cleanup, createTempDir, runNpm, isolatedNpmEnv } = require('./helpers.cjs');
 const { ensureHooksDist } = require('./helpers/hooks-dist.cjs');
-const { SMOKE, runSmoke, entrypointFixtureHome, CHILD_TIMEOUT_MS } = require('../scripts/release-tarball-smoke.cjs');
+const { SMOKE, runSmoke, entrypointFixtureHome, CHILD_TIMEOUT_MS, configuredEntrypointsIn } = require('../scripts/release-tarball-smoke.cjs');
 
 const smokeMsg = (label, result) =>
   `${label}: code=${result.code} details=${JSON.stringify(result.details)}`;
@@ -522,6 +523,43 @@ describe('release-tarball-smoke', () => {
       [{ configPath: path.join(configDir, 'settings.json'), scriptPath: ghostHook }],
       smokeMsg('I', result),
     );
+  });
+
+  // ── J: configuredEntrypointsIn tolerates whitespace in configDir ──────────
+  //
+  // #4249 (antigravity review): the prior SCRIPT_PATH_RE excluded `\s` from
+  // the path match to avoid swallowing a shell command's trailing args, which
+  // also truncated any legitimate path containing a space — e.g. a real
+  // `/Users/John Doe/.claude` home — so the scan silently returned zero
+  // checked paths there. A direct unit test on the exported pure function:
+  // no packed install needed to prove this property.
+  test('J: configuredEntrypointsIn resolves a script path even when configDir contains a space', () => {
+    const configDir = path.join(os.tmpdir(), 'John Doe', '.claude');
+    const scriptPath = path.join(configDir, 'hooks', 'gsd-write-guard.js');
+    const text = JSON.stringify({
+      hooks: {
+        PreToolUse: [
+          { matcher: 'Bash', hooks: [{ type: 'command', command: `node "${scriptPath}"` }] },
+        ],
+      },
+    });
+
+    assert.deepEqual(configuredEntrypointsIn(text, configDir), [path.resolve(scriptPath)]);
+  });
+
+  // ── K: configuredEntrypointsIn does not swallow a preceding interpreter path ──
+  //
+  // #4249 (antigravity review): anchoring on the literal configDir prefix (a
+  // fix for J) must not regress the original "don't swallow the rest of a
+  // shell command" property — a command string that concatenates an
+  // interpreter path ahead of the real script path must resolve to the
+  // script path alone, not a combined interpreter+script string.
+  test('K: configuredEntrypointsIn does not include a preceding interpreter path', () => {
+    const configDir = path.join(os.tmpdir(), '.claude');
+    const scriptPath = path.join(configDir, 'hooks', 'gsd-write-guard.js');
+    const text = `"command": "/usr/local/bin/node ${scriptPath} --flag"`;
+
+    assert.deepEqual(configuredEntrypointsIn(text, configDir), [path.resolve(scriptPath)]);
   });
 });
 

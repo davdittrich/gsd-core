@@ -12959,7 +12959,13 @@ function install(isGlobal, runtime = DEFAULT_RUNTIME, options = {}) {
     // so this runtime genuinely launches no GSD-managed script and has no
     // interpreter to resolve. Stated explicitly like every other branch rather
     // than leaning on installAllRuntimes' `|| []` defence.
-    return { settingsPath: null, settings: null, statuslineCommand: null, updateBannerCommand: null, runtime, configDir: targetDir, configuredEntrypoints: [] };
+    // #4249 (antigravity review): `rollbackInstallerMigrations` was missing here
+    // — every other branch returns it. This PR's own aggregate entrypoint gate
+    // is what makes the gap reachable: an unrelated runtime's invalid entrypoint
+    // now triggers rollbackFinalizedInstallerMigrations for every result in the
+    // batch, and a Copilot result with no rollback function silently skips
+    // reverting Copilot's own installer migrations.
+    return { settingsPath: null, settings: null, statuslineCommand: null, updateBannerCommand: null, runtime, configDir: targetDir, configuredEntrypoints: [], rollbackInstallerMigrations };
   }
 
   if (plan.installSurface === 'cursor-hooks-json') {
