@@ -13484,6 +13484,20 @@ function install(isGlobal, runtime = DEFAULT_RUNTIME, options = {}) {
   };
 }
 
+// #4249 (review, Major): rollback consequence differs by runtime surface —
+// see docs/how-to/update-gsd.md's rollback-matrix paragraph, which this
+// mirrors. Codex reverts (pre-install snapshot restore); Cursor/Windsurf/
+// Kimi/Kimi Code/Cline already wrote their config file inside install(),
+// ahead of this gate, with no revert path, so it is left on disk broken;
+// every other (settings.json-based) runtime writes strictly after this gate,
+// so a failure here means nothing new was persisted for it.
+const ENTRYPOINT_LEFT_UNREVERTED_RUNTIMES = new Set(['cursor', 'windsurf', 'kimi', 'kimi-code', 'cline']);
+function describeEntrypointConsequence(invalidRuntime) {
+  if (invalidRuntime === 'codex') return 'reverted: its pre-install snapshot was restored';
+  if (ENTRYPOINT_LEFT_UNREVERTED_RUNTIMES.has(invalidRuntime)) return 'NOT reverted: its config file is already written and was left on disk — fix the reported path and rerun install';
+  return 'not persisted: this runtime writes its config after this check';
+}
+
 function assertConfiguredEntrypoints(entries) {
   // #4249: some writers push the same (configPath, scriptPath) pair more than
   // once (e.g. Kimi's context-monitor hook registered under several events,
@@ -13500,12 +13514,16 @@ function assertConfiguredEntrypoints(entries) {
   if (validation.ok) return;
 
   const error = new Error(
-    // #4249: lead each entry with its runtime. The aggregate gate is
-    // all-or-nothing across every runtime being installed, and a failure here
-    // can revert a runtime whose own entrypoints were fine (see
-    // rollbackFinalizedInstallerMigrations), so an operator reading this must
-    // be able to tell WHOSE entrypoint actually broke.
-    `Configured entrypoint validation failed: ${validation.invalid.map(({ runtime: invalidRuntime, role, path: invalidPath, reason }) => `${invalidRuntime} ${role} ${invalidPath} (${reason})`).join(', ')}`,
+    // #4249: lead each entry with its runtime, and name the actual consequence
+    // for that runtime (review, Major) — the aggregate gate is all-or-nothing
+    // across every runtime being installed, and a failure here can revert a
+    // runtime whose own entrypoints were fine (see
+    // rollbackFinalizedInstallerMigrations) while leaving another runtime's
+    // already-written config broken on disk with no revert at all, so an
+    // operator reading only this message must be able to tell WHOSE
+    // entrypoint broke and WHAT that means for their config, not just that
+    // something did.
+    `Configured entrypoint validation failed: ${validation.invalid.map(({ runtime: invalidRuntime, role, path: invalidPath, reason }) => `${invalidRuntime} ${role} ${invalidPath} (${reason}) [${describeEntrypointConsequence(invalidRuntime)}]`).join(', ')}`,
   );
   error.configuredEntrypointValidation = validation;
   throw error;

@@ -62,6 +62,12 @@ test('finishInstall rejects an invalid configured entrypoint before Done output'
     assert.throws(() => finishInstall(null, null, null, false, 'cline', false, root, {
       configuredEntrypoints: [{ runtime: 'cline', configPath: path.join(root, 'config'), scriptPath: path.join(root, 'missing.js') }],
     }), /Configured entrypoint validation failed/);
+    // #4249 review, Major: the message must name the actual consequence for
+    // the failing runtime, not just that something failed — Cline has no
+    // revert path, so its entry must be flagged "NOT reverted".
+    assert.throws(() => finishInstall(null, null, null, false, 'cline', false, root, {
+      configuredEntrypoints: [{ runtime: 'cline', configPath: path.join(root, 'config'), scriptPath: path.join(root, 'missing.js') }],
+    }), /NOT reverted/);
   } finally {
     console.log = originalLog;
     restoreConfigLocationEnv();
@@ -456,6 +462,42 @@ test('an aggregate entrypoint validation failure rolls the Codex install back (#
       fs.readFileSync(configPath, 'utf8'),
       priorBytes,
       'the aggregate failure must reach restoreCodexSnapshot, not just throw',
+    );
+  });
+});
+
+test('an aggregate entrypoint validation failure leaves Cline\'s own config file on disk, unreverted (#4249 review, Major)', (t) => {
+  withSandboxedHome(t, 'configured-entrypoint-unreverted-', () => {
+    // Cline is one of the four runtimes (Cursor/Windsurf/Kimi/Cline) that
+    // write their config file inside install(), ahead of the validation
+    // gate, with no snapshot/restore path — docs/how-to/update-gsd.md's
+    // rollback-matrix paragraph. Unlike the Codex companion test above,
+    // this asserts the POSITIVE case that same paragraph discloses in
+    // prose but no prior test proved: the file the failing runtime itself
+    // just wrote is still there afterward, broken and unreverted.
+    const clineFirst = install(true, 'cline');
+    const clineHookPath = path.join(clineFirst.configDir, '.clinerules', 'hooks', 'PreToolUse');
+    assert.equal(fs.existsSync(clineHookPath), true, 'precondition: Cline hook must exist before the failing install');
+
+    // Same technique as the Codex rollback test: an emptied PATH makes
+    // Cline's own `#!/usr/bin/env node` hook fail interpreter resolution,
+    // driving a REAL aggregate failure through installAllRuntimes.
+    const savedPath = process.env.PATH;
+    process.env.PATH = '';
+    try {
+      assert.throws(
+        () => installAllRuntimes(['codex', 'cline'], true, false),
+        /Configured entrypoint validation failed/,
+        'an unresolvable interpreter must fail the aggregate gate',
+      );
+    } finally {
+      process.env.PATH = savedPath;
+    }
+
+    assert.equal(
+      fs.existsSync(clineHookPath),
+      true,
+      'Cline has no snapshot/restore path — its already-written hook file must remain on disk, not be deleted',
     );
   });
 });
