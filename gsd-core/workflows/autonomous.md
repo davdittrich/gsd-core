@@ -75,7 +75,7 @@ if [[ "$INIT_AUTONOMOUS" == @file:* ]]; then INIT_AUTONOMOUS=$(cat "${INIT_AUTON
 
 Extract `section_manifest` from `INIT_AUTONOMOUS` (used by the `converge-*` sections below and in step 3).
 
-If `PLAN_STRATEGY` is `converge`, fail fast unless the existing convergence feature gate is enabled:
+If `PLAN_STRATEGY` is `converge`, the dispatch below carries `--override-gate` (#4600): the operator's explicit `--converge`/`--cross-ai` overrides the convergence feature gate for this run. Without the flag, `PLAN_STRATEGY` is `local` and this block never appends it.
 
 ```bash
 # Lane flags derived from the declared roster (#2800/#2272); --all and --text are convergence
@@ -93,6 +93,13 @@ MAX_CYCLES_ARG=""
 if echo "$ARGUMENTS" | grep -qE '\-\-max-cycles\s+[0-9]+'; then
   MAX_CYCLES_ARG=$(echo "$ARGUMENTS" | grep -oE '\-\-max-cycles\s+[0-9]+' | awk '{print $2}')
   CONVERGENCE_ARGS="${CONVERGENCE_ARGS} --max-cycles ${MAX_CYCLES_ARG}"
+fi
+
+# #4600: the dispatched convergence workflow re-checks the feature gate in its own §1.5 —
+# an explicit --converge/--cross-ai must override it, so mark this dispatch explicitly.
+# Conditional on PLAN_STRATEGY: a local-strategy run must never carry the override.
+if [ "${PLAN_STRATEGY}" = "converge" ]; then
+  CONVERGENCE_ARGS="${CONVERGENCE_ARGS} --override-gate"
 fi
 ```
 
@@ -430,7 +437,7 @@ Auto-invoke code review and fix chain. Autonomous mode chains both review and fi
 
 **Capability dispatch:**
 ```bash
-EXECUTE_POST_HOOKS_JSON=$(gsd_run loop render-hooks execute:post --raw)
+EXECUTE_POST_HOOKS_JSON=$(gsd_run loop render-hooks execute:post --raw --phase "${PHASE_NUM}")
 ```
 
 Resolve active step hooks from `EXECUTE_POST_HOOKS_JSON` where `kind == "step"` and `ref.skill == "code-review"`.
@@ -549,7 +556,7 @@ Resolve the active post-verification hooks and the UI-SPEC gate:
 
 ```bash
 UI_SPEC_FILE=$(ls "${PHASE_DIR}"/*-UI-SPEC.md 2>/dev/null | head -1)
-HOOKS_JSON=$(gsd_run loop render-hooks verify:post --raw)
+HOOKS_JSON=$(gsd_run loop render-hooks verify:post --raw --phase "${PHASE_NUM}")
 ```
 
 Read the `activeHooks` array directly from the `HOOKS_JSON` value already in context (do not invoke a shell `jq` pipeline — parse as the JSON object it is). **If `activeHooks` is empty or absent:** skip silently to the iterate step.
@@ -841,7 +848,7 @@ When any phase operation fails or a blocker is detected, present 3 options via A
 - [ ] `--interactive` compatible with `--only`, `--from`, and `--to` flags
 - [ ] `--converge` routes planning through `gsd-plan-review-convergence`
 - [ ] `--cross-ai` is accepted as an alias for `--converge`
-- [ ] `--converge` fails fast with enable instructions when `workflow.plan_review_convergence=false`
+- [ ] `--converge` overrides `workflow.plan_review_convergence=false` for the run — the dispatch carries `--override-gate`, which the convergence workflow's §1.5 gate honors (#4600)
 - [ ] `--converge` forwards reviewer selector flags and `--max-cycles N`
 - [ ] Default autonomous planning remains `gsd-plan-phase` when convergence is not requested
 </success_criteria>

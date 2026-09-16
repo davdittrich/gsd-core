@@ -2893,61 +2893,86 @@ function dispatchOverlayCapabilityCommand({ command, args, cwd, raw, error, load
           commands.cmdScaffold(cwd, scaffoldType, scaffoldOptions, raw);
   }
 
+  // #4030: the four `loop render-hooks` value flags below (--config-dir,
+  // --active-cap, --runtime, --phase) each parsed both `--flag X` and
+  // `--flag=X` with an identical ~14-line block; the fourth copy was the one
+  // that crossed this repo's "abstract at 3+ identical occurrences" line.
+  // Semantics are preserved exactly, including that the `=` form trims and the
+  // space form does not, and that a missing value calls `error` with the
+  // flag's own usage text.
+  // A null `usage` (used only by --phase/--phase-dir, #4030) means: when the
+  // flag is present but its value is an EXPLICIT empty string (`--phase=` or
+  // `--phase ""`), return that empty string rather than undefined, so the
+  // resolver's own unresolvable-token path (which treats '' identically to a
+  // not-found token) can warn instead of going silent. When the flag is truly
+  // ABSENT — never passed, or immediately followed by another flag — this
+  // still returns undefined, indistinguishable from omitting the flag, since
+  // there is no explicit value to surface a warning about.
+  //
+  // Without the empty-string case, `--phase "${PHASE_NUMBER}"` with an unset
+  // shell variable would silently drop every hook at that point (this CLI
+  // path is what all real call sites use) — a strictly worse failure than the
+  // "degrades to a warning, never fails a render" promise every phase-scoped
+  // call site relies on. The other three callers (--config-dir/--active-cap/
+  // --runtime) pass a real usage string and keep the strict default: an empty
+  // value there IS an authoring mistake worth failing on.
+  function readDualFormFlag(args, flag, usage, error) {
+    const eqArg = args.find(arg => arg.startsWith(`${flag}=`));
+    if (eqArg) {
+      const value = eqArg.slice(flag.length + 1).trim();
+      // An explicit empty value (--flag=) is present, just empty — always
+      // returned as '' rather than treated as absent, so a graceful caller's
+      // resolver can tell "given but empty" from "never given" (see below).
+      // Strict callers still error on it: `!value` alone decides that, same
+      // as before this comment's rewrite.
+      if (!value && usage) {
+        error(usage, ERROR_REASON ? ERROR_REASON.USAGE : undefined);
+      }
+      return value;
+    }
+    const idx = args.indexOf(flag);
+    if (idx === -1) return undefined;
+    const value = args[idx + 1];
+    // No token follows, or the next token looks like another flag: there is
+    // no value to speak of, explicit-empty or otherwise — always treated as
+    // absent, both for graceful (silent) and strict (error) callers.
+    if (value === undefined || value.startsWith('--')) {
+      if (usage) error(usage, ERROR_REASON ? ERROR_REASON.USAGE : undefined);
+      return undefined;
+    }
+    // A real, if possibly empty, string follows. Strict callers still error
+    // on empty here — `!value` matches '' — graceful callers return it as-is.
+    if (!value && usage) {
+      error(usage, ERROR_REASON ? ERROR_REASON.USAGE : undefined);
+    }
+    return value;
+  }
+
   function routeLoop({ args, cwd, raw, error }) {
     // loop render-hooks <point>
           const loopSubcommand = args[1];
           if (loopSubcommand === 'render-hooks') {
-            let loopConfigDir = null;
-            const configDirEqArg = args.find(arg => arg.startsWith('--config-dir='));
-            const configDirIdx = args.indexOf('--config-dir');
-            if (configDirEqArg) {
-              const value = configDirEqArg.slice('--config-dir='.length).trim();
-              if (!value) error('Missing value for --config-dir', ERROR_REASON ? ERROR_REASON.USAGE : undefined);
-              loopConfigDir = value;
-            } else if (configDirIdx !== -1) {
-              const value = args[configDirIdx + 1];
-              if (!value || value.startsWith('--')) {
-                error('Missing value for --config-dir', ERROR_REASON ? ERROR_REASON.USAGE : undefined);
-              }
-              loopConfigDir = value;
-            }
+            const loopConfigDir = readDualFormFlag(args, '--config-dir', 'Missing value for --config-dir', error);
             // --active-cap <capId>: parse and validate before delegating
-            let loopActiveCap = undefined;
-            const activeCapEqArg = args.find(arg => arg.startsWith('--active-cap='));
-            const activeCapIdx = args.indexOf('--active-cap');
-            if (activeCapEqArg) {
-              const value = activeCapEqArg.slice('--active-cap='.length).trim();
-              if (!value) error('Missing value for --active-cap (e.g. --active-cap tdd)', ERROR_REASON ? ERROR_REASON.USAGE : undefined);
-              loopActiveCap = value;
-            } else if (activeCapIdx !== -1) {
-              const value = args[activeCapIdx + 1];
-              if (!value || value.startsWith('--')) {
-                error('Missing value for --active-cap (e.g. --active-cap tdd)', ERROR_REASON ? ERROR_REASON.USAGE : undefined);
-              }
-              loopActiveCap = value;
-            }
+            const loopActiveCap = readDualFormFlag(args, '--active-cap', 'Missing value for --active-cap (e.g. --active-cap tdd)', error);
             // --runtime <r> (#2003): explicit runtime override so the config-dir
             // resolution bypasses the persisted-runtime fallback (GSD_RUNTIME →
             // config.runtime). Mirrors the --config-dir dual-form (--runtime X /
             // --runtime=X) and the capability-set --runtime precedent.
-            let loopRuntime = undefined;
-            const runtimeEqArg = args.find(arg => arg.startsWith('--runtime='));
-            const runtimeIdx = args.indexOf('--runtime');
-            if (runtimeEqArg) {
-              const value = runtimeEqArg.slice('--runtime='.length).trim();
-              if (!value) error('Missing value for --runtime', ERROR_REASON ? ERROR_REASON.USAGE : undefined);
-              loopRuntime = value;
-            } else if (runtimeIdx !== -1) {
-              const value = args[runtimeIdx + 1];
-              if (!value || value.startsWith('--')) {
-                error('Missing value for --runtime', ERROR_REASON ? ERROR_REASON.USAGE : undefined);
-              }
-              loopRuntime = value;
-            }
+            const loopRuntime = readDualFormFlag(args, '--runtime', 'Missing value for --runtime', error);
+            // --phase <token> (#4030): task-local phase for the invocation.
+            // Mirrors the --runtime dual-form parsing above.
+            const loopPhase = readDualFormFlag(args, '--phase', null, error);
+            // --phase-dir <dir> (#4030): optional cross-check on --phase. The
+            // resolver compares it against the directory the token resolves to
+            // and never uses it as an independent path.
+            const loopPhaseDir = readDualFormFlag(args, '--phase-dir', null, error);
             loopResolver.cmdLoopRenderHooks(cwd, args[2], raw, {
               configDir: loopConfigDir ? path.resolve(loopConfigDir) : undefined,
               activeCap: loopActiveCap,
               runtime: loopRuntime,
+              phase: loopPhase,
+              phaseDir: loopPhaseDir,
             });
           } else {
             error(
@@ -3017,6 +3042,12 @@ function dispatchOverlayCapabilityCommand({ command, args, cwd, raw, error, load
             worktreeSafety.cmdWorktreeRecordAgent(cwd, args.slice(2));
           } else if (subcommand === 'reap-orphans') {
             worktreeSafety.cmdWorktreeReapOrphans(cwd);
+          } else if (subcommand === 'worker-record') {
+            worktreeSafety.cmdWorktreeWorkerRecord(cwd, args.slice(2));
+          } else if (subcommand === 'worker-status') {
+            worktreeSafety.cmdWorktreeWorkerStatus(cwd, args.slice(2));
+          } else if (subcommand === 'worker-complete') {
+            worktreeSafety.cmdWorktreeWorkerComplete(cwd, args.slice(2));
           } else if (subcommand === 'base-check') {
             require('./lib/worktree-base-ref.cjs').cmdWorktreeBaseCheck(cwd, args.slice(2));
           } else if (subcommand === 'set-baseref') {
@@ -3024,7 +3055,7 @@ function dispatchOverlayCapabilityCommand({ command, args, cwd, raw, error, load
           } else if (subcommand === 'create') {
             worktreeSafety.cmdWorktreeCreate(cwd, args.slice(2));
           } else {
-            error('Unknown worktree subcommand. Available: cleanup-wave, record-agent, reap-orphans, base-check, set-baseref, create', ERROR_REASON.SDK_UNKNOWN_COMMAND);
+            error('Unknown worktree subcommand. Available: cleanup-wave, record-agent, reap-orphans, base-check, set-baseref, create, worker-record, worker-status, worker-complete', ERROR_REASON.SDK_UNKNOWN_COMMAND);
           }
   }
 
@@ -4543,7 +4574,7 @@ async function dispatchHostCommand({ command, args, cwd, raw, error, defaultValu
 // keep working. No shell is spawned (argv array) — no injection surface beyond
 // the old `timeout … bash -c "$CMD"`.
 function runWithTimeout(argv) {
-  const { spawn } = require('node:child_process');
+  const { spawn, spawnSync } = require('node:child_process');
   const os = require('node:os');
 
   const USAGE = 'Usage: gsd_run run-with-timeout <seconds> [--] <command> [args...]';
@@ -4568,9 +4599,11 @@ function runWithTimeout(argv) {
 
   const isWin = process.platform === 'win32';
   // Detached (own process group) on POSIX so a timeout can reap the WHOLE tree —
-  // a bare child.kill() misses grandchildren (e.g. a test runner's workers) and
-  // would not actually bound the wall clock. Windows has no POSIX process
-  // groups; a direct kill is the best portable option there.
+  // a bare child.kill() misses grandchildren (e.g. a test runner's workers).
+  // Windows has no POSIX process groups and process.kill(-pid) is unsupported
+  // there, so EVERY killTree attempt on Windows tree-kills via
+  // `taskkill /PID <pid> /T /F` while the root is alive (see killTree) — by the
+  // time the direct child exits, its descendants are already orphaned.
   const detached = !isWin && secs > 0;
   const spawnFailureCode = (err) =>
     (err && err.code === 'ENOENT' ? 127 : err && err.code === 'EACCES' ? 126 : 125);
@@ -4622,6 +4655,27 @@ function runWithTimeout(argv) {
       try {
         if (detached && child.pid) {
           try { process.kill(-child.pid, signal); return; } catch { /* group already gone */ }
+        }
+        if (isWin && child.pid) {
+          // #4601: Windows has no POSIX process groups, so the tree kill rides
+          // on `taskkill /T`, which walks the child's descendants the way
+          // `process.kill(-pid)` reaches a POSIX group — this is what bounds
+          // the wall clock when the direct child mediates (cmd.exe /c shim) or
+          // spawns its own children. Deliberately NOT gated on the SIGKILL
+          // stage: child.kill on Windows is TerminateProcess regardless of
+          // signal, so by the time the direct child exits its descendants are
+          // orphaned and no taskkill can reach them — the tree kill must ride
+          // the FIRST attempt, while the root is still alive. /F is required:
+          // without it taskkill posts WM_CLOSE, which a headless CLI never
+          // pumps. Spawned as an argv array per the no-shell-for-argv-array
+          // contract, and bounded — a non-zero/absent status means taskkill
+          // lost a race with an exiting process, and we fall through to the
+          // direct kill so the attempt is never weaker than before.
+          const reap = spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+            encoding: 'utf8',
+            timeout: 15000, // taskkill /T is sub-second in practice; bounded so a wedged taskkill can't hang the gate
+          });
+          if (reap.status === 0) return;
         }
         child.kill(signal);
       } catch { /* already exited */ }
