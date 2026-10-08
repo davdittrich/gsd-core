@@ -38,7 +38,7 @@ fingerprinted yet, and gating on it here would be a no-op by construction (the a
 in `scripts/lint-verify-lifecycle-writes.allowlist.json`).
 
 ```bash
-VERIFY_POST_HOOKS_JSON=$(gsd_run loop render-hooks verify:post --raw)
+VERIFY_POST_HOOKS_JSON=$(gsd_run loop render-hooks verify:post --raw --phase "${PHASE_NUMBER}")
 SECURITY_FILE=$(ls "${PHASE_DIR}"/*-SECURITY.md 2>/dev/null | head -1)
 ```
 
@@ -65,7 +65,7 @@ If an active secure-phase step hook exists AND SECURITY.md exists: check frontma
 
 **Capability gate:**
 ```bash
-EXECUTE_POST_HOOKS_JSON=${EXECUTE_POST_HOOKS_JSON:-$(gsd_run loop render-hooks execute:post --raw)}
+EXECUTE_POST_HOOKS_JSON=${EXECUTE_POST_HOOKS_JSON:-$(gsd_run loop render-hooks execute:post --raw --phase "${PHASE_NUMBER}")}
 ```
 
 Dispatch `kind == "step"` hooks per @gsd-core/references/loop-hook-dispatch.md. `ref.skill == "code-review"`:
