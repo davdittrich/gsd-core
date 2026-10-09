@@ -1547,9 +1547,8 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
       `expected the phase-dir-without-phase warning, got: ${JSON.stringify(result.warnings)}`);
   });
 
-  // #4030 extracted the four render-hooks value flags onto one dual-form parser.
-  // --runtime and --phase already had covered error paths; these two did not, so
-  // the shared parser could have changed them silently.
+  // --config-dir and --active-cap had no covered error paths; pin them so a
+  // later parser change cannot alter them silently.
   for (const [flag, pattern] of [
     ['--config-dir', /Missing value for --config-dir/],
     ['--active-cap', /Missing value for --active-cap/],
@@ -1822,7 +1821,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
       assert.ok(calls.length > 0, `no ${point} call site in ${file}`);
       for (const [, rest] of calls) {
         const argv = (rest
-          .replace(/--after-fingerprint\s+"[^"]*"/, '')
+          .replace(/--after-fingerprint\s+"[^"]*"/, '--after-fingerprint .planning/phases/05-widgets')
           .replace(/"\$\{?\w+\}?"/g, '"05"')
           .match(/"[^"]*"|\S+/g) || []).map((a) => a.replace(/"/g, ''));
         const result = runNode(
