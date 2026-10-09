@@ -1570,10 +1570,8 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     });
   }
 
-  // The shared parser's two inherited quirks, pinned so a later "cleanup" cannot
-  // change them silently: the `=` form wins over the space form regardless of
-  // position, and only the `=` form trims. Both predate #4030; these assert the
-  // extraction preserved them.
+  // Parser quirk, pinned so a later "cleanup" cannot change it silently: the `=`
+  // form wins over the space form regardless of position. Both forms trim.
   test('[bva] --phase= equals-form takes precedence over a space-form occurrence, whatever the order', (t) => {
     const dir = makePhaseProject('05-widgets', '07-gadgets');
     t.after(() => cleanup(dir));
@@ -1588,7 +1586,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     }
   });
 
-  test('[bva] only the equals-form trims; the space form is passed through verbatim', (t) => {
+  test('[bva] both forms trim a padded token', (t) => {
     const dir = makePhaseProject('05-widgets');
     t.after(() => cleanup(dir));
     const trimmed = renderWithPhase(dir, 'plan:pre', ['--phase=  05  ', '--raw']);
@@ -1596,11 +1594,10 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     assert.strictEqual(JSON.parse(trimmed.stdout.trim()).context.phase, '05',
       'the = form trims, so a padded token still resolves');
 
-    const untrimmed = renderWithPhase(dir, 'plan:pre', ['--phase', '  05  ', '--raw']);
-    assert.strictEqual(untrimmed.exitCode, 0, 'stderr: ' + untrimmed.stderr);
-    const envelope = JSON.parse(untrimmed.stdout.trim());
-    assert.ok(!Object.prototype.hasOwnProperty.call(envelope, 'context'),
-      'the space form does not trim, so a padded token does not match a directory');
+    const spaced = renderWithPhase(dir, 'plan:pre', ['--phase', '  05  ', '--raw']);
+    assert.strictEqual(spaced.exitCode, 0, 'stderr: ' + spaced.stderr);
+    assert.strictEqual(JSON.parse(spaced.stdout.trim()).context.phase, '05',
+      'the space form trims too, so both forms agree on a padded token');
   });
 
   test('[bva] --phase=05 equals-form parses identically to the space-separated form', (t) => {
@@ -1834,6 +1831,17 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
           `${file} ${point}: the third-party handler must be dispatched`);
         assert.deepStrictEqual(envelope.context, { phase: '05', phaseDir: '.planning/phases/05-widgets' },
           `${file} ${point}: the call site's phase must reach the handler unchanged`);
+
+        // Dispatch the way loop-hook-dispatch.md tells the agent to: append
+        // context.phase to the step's command, then run it. The handler is a
+        // probe that echoes the arguments it actually received.
+        const handled = runNode(
+          ['-e', 'process.stdout.write(JSON.stringify(process.argv.slice(1)))', '--', '--phase', envelope.context.phase, '--raw'],
+          { cwd: ROOT, timeoutMs: PROBE_TIMEOUT_MS },
+        );
+        assert.strictEqual(handled.exitCode, 0, 'stderr: ' + handled.stderr);
+        assert.deepStrictEqual(JSON.parse(handled.stdout), ['--phase', '05', '--raw'],
+          `${file} ${point}: the handler must receive the phase it was dispatched with`);
       }
     });
   }
@@ -1890,6 +1898,19 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
       { phase: '05', phaseDir: '.planning/phases/05-widgets' },
     );
   });
+
+  for (const [platform, accepted] of [['win32', true], ['darwin', true], ['linux', false]]) {
+    test(`[bva] --phase-dir differing only in case is ${accepted ? 'accepted' : 'rejected'} on ${platform}`, (t) => {
+      const dir = makePhaseProject('05-widgets');
+      t.after(() => cleanup(dir));
+      t.mock.method(process.stderr, 'write', () => true);
+      const real = Object.getOwnPropertyDescriptor(process, 'platform');
+      Object.defineProperty(process, 'platform', { value: platform });
+      t.after(() => Object.defineProperty(process, 'platform', real));
+      const { context } = resolveActiveHooksForPoint(dir, 'plan:pre', { phase: '05', phaseDir: '.planning/PHASES/05-Widgets' });
+      assert.strictEqual(context !== undefined, accepted);
+    });
+  }
 
   test('[negative] an incoherent --phase / --phase-dir pair is rejected, though both are in-project', (t) => {
     const dir = makePhaseProject('05-widgets', '07-other');
