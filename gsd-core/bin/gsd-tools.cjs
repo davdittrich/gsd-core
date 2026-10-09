@@ -225,7 +225,9 @@
  *                                        [--config-dir <path>] [--runtime <r>] [--active-cap <capId>]
  *                                        [--after-fingerprint <phaseDir>] (#5105: skip verify:post
  *                                        steps whose declared artifact already exists in phaseDir)
- *                                        Returns JSON envelope { point, activeHooks, rendered }
+ *                                        [--phase <token>] [--phase-dir <dir>] (#4030: add context:{phase,phaseDir};
+ *                                        --phase-dir only cross-checks --phase)
+ *                                        Returns JSON envelope { point, activeHooks, rendered[, context] }
  *                                        Valid points: discuss:pre/post, plan:pre/post,
  *                                        execute:pre/wave:pre/wave:post/post, verify:pre/post, ship:pre/post
  *                                        --runtime: override the auto-detected runtime (#2003) so the config
