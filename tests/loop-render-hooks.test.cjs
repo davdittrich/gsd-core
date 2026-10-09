@@ -16,6 +16,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { cleanup } = require('./helpers.cjs');
+const fc = require('./helpers/fast-check-setup.cjs');
 const { splitLines } = require('../gsd-core/bin/lib/text-lines.cjs');
 
 const {
@@ -1354,6 +1355,45 @@ describe('ADR-1244 D2: load-failed capability gates fail OPEN with a loud warnin
 
 // ─── #4030: --phase → derived context: { phase, phaseDir } ──────────────────
 
+// {file, point, count}: how many render-hooks <point> occurrences that
+// file has, and how many of them must carry --phase. Both counts are
+// asserted so a call site that gains a --phase-less duplicate is caught
+// too, not just a wholesale removal.
+const SITES = [
+  ['gsd-core/workflows/discuss-phase.md', 'discuss:pre', 1],
+  ['gsd-core/workflows/discuss-phase.md', 'discuss:post', 1],
+  ['gsd-core/workflows/plan-phase.md', 'plan:pre', 4],
+  ['gsd-core/workflows/plan-phase.md', 'plan:post', 1],
+  ['gsd-core/workflows/execute-phase.md', 'execute:post', 1],
+  ['gsd-core/workflows/execute-phase.md', 'execute:wave:pre', 1],
+  ['gsd-core/workflows/execute-phase.md', 'execute:wave:post', 1],
+  ['gsd-core/workflows/execute-phase/steps/verify-phase-goal.md', 'execute:post', 1],
+  ['gsd-core/workflows/execute-phase/steps/verify-phase-goal.md', 'verify:post', 1],
+  ['gsd-core/workflows/verify-work.md', 'verify:pre', 1],
+  ['gsd-core/workflows/verify-work.md', 'verify:post', 1],
+  ['gsd-core/workflows/secure-phase.md', 'verify:post', 1],
+  ['gsd-core/workflows/validate-phase.md', 'verify:post', 1],
+  ['gsd-core/workflows/autonomous.md', 'execute:post', 1],
+  ['gsd-core/workflows/autonomous.md', 'verify:post', 1],
+  ['gsd-core/workflows/code-review-fix.md', 'execute:post', 1],
+  ['gsd-core/references/autonomous-ui-design-contract.md', 'plan:pre', 1],
+];
+
+// Counts `render-hooks <point>` call sites in a workflow file and how many carry
+// --phase. --active-cap lines are excluded: that mode returns only 'true'/'false'
+// for one capability's activation (unaffected by phase), never reads `context`,
+// and deliberately does not combine with --phase today (#4030 review S1) — a
+// hook-dispatch call site fetching the JSON envelope for actual dispatch is
+// what these tables pin, not every render-hooks use.
+function phaseSiteCounts(content, point) {
+  const scoped = splitLines(content).filter((l) => !l.includes('--active-cap')).join('\n');
+  return {
+    scoped,
+    bare: scoped.match(new RegExp(`render-hooks ${point}\\b`, 'g')) || [],
+    withPhase: scoped.match(new RegExp(`render-hooks ${point}\\b[^\\n]*--phase `, 'g')) || [],
+  };
+}
+
 describe('cmdLoopRenderHooks --phase (#4030)', () => {
   function makePhaseProject(...phaseDirNames) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-phase-ctx-'));
@@ -1454,7 +1494,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
   });
 
   test('[negative] --phase "" (explicit empty string, space form) warns, never a hard error (#4030 review)', (t) => {
-    // readDualFormFlag distinguishes "explicit empty value" (--phase "") from
+    // readOptionalFlag distinguishes "explicit empty value" (--phase "") from
     // "flag never given" (bare --phase) — only the latter stays silent. An
     // explicit empty string reaches the resolver as '', which guardedFindPhase
     // treats as any other unresolvable token: a warning, never a hard error and
@@ -1484,7 +1524,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
 
   test('[negative] resolveActiveHooksForPoint called in-process with phase: \'\' warns the same way (#4030 review)', (t) => {
     // dispatch-step (gsd-tools.cjs) calls resolveActiveHooksForPoint directly,
-    // bypassing readDualFormFlag entirely — this exported function is its own
+    // bypassing readOptionalFlag entirely — this exported function is its own
     // boundary and must not silently swallow an explicit empty string the way
     // a bare, truly-absent --phase does. An empty phase here reaches
     // guardedFindPhase('', ...), which returns null (its own falsy-phase
@@ -1771,6 +1811,73 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
       'no phase in means no context out — the handler must not receive an inferred one');
   });
 
+  // #4030 AC4: run each real call site's own arguments (not a hand-written
+  // --phase), so a site with a wrong flag or variable fails here.
+  for (const [file, point] of SITES) {
+    test(`[e2e] ${file} :: ${point} call site delivers its phase to a third-party handler`, (t) => {
+      const fx = makeThirdPartyStepFixture(PHASE_SCOPED_POINTS);
+      t.after(() => { cleanup(fx.home); cleanup(fx.project); });
+      const { scoped } = phaseSiteCounts(fs.readFileSync(path.join(ROOT, file), 'utf8'), point);
+      const calls = [...scoped.matchAll(new RegExp(`render-hooks ${point}\\b([^)\\n]*)`, 'g'))];
+      assert.ok(calls.length > 0, `no ${point} call site in ${file}`);
+      for (const [, rest] of calls) {
+        const argv = (rest
+          .replace(/--after-fingerprint\s+"[^"]*"/, '')
+          .replace(/"\$\{?\w+\}?"/g, '"05"')
+          .match(/"[^"]*"|\S+/g) || []).map((a) => a.replace(/"/g, ''));
+        const result = runNode(
+          [GSD_TOOLS, 'loop', 'render-hooks', point, ...argv, '--cwd', fx.project],
+          { cwd: ROOT, timeoutMs: PROBE_TIMEOUT_MS, env: { ...process.env, GSD_HOME: fx.home } },
+        );
+        assert.strictEqual(result.exitCode, 0, 'stderr: ' + result.stderr);
+        const envelope = JSON.parse(result.stdout.trim());
+        assert.ok((envelope.activeHooks || []).some((h) => h.capId === 'phase-probe'),
+          `${file} ${point}: the third-party handler must be dispatched`);
+        assert.deepStrictEqual(envelope.context, { phase: '05', phaseDir: '.planning/phases/05-widgets' },
+          `${file} ${point}: the call site's phase must reach the handler unchanged`);
+      }
+    });
+  }
+
+  // #4030 AC8: the installer projects workflows per runtime. Claude Code and
+  // Codex output must keep every call site's --phase, or the context silently
+  // never reaches the handler on that runtime.
+  test('[projection] Claude Code and Codex installer output keeps every call site --phase', (t) => {
+    const prev = process.env.GSD_TEST_MODE;
+    process.env.GSD_TEST_MODE = '1';
+    const { copyWithPathReplacement } = require('../bin/install.js');
+    if (prev === undefined) delete process.env.GSD_TEST_MODE; else process.env.GSD_TEST_MODE = prev;
+    for (const [runtime, prefix] of [['claude', '~/.claude/'], ['codex', '~/.codex/']]) {
+      const dest = fs.mkdtempSync(path.join(os.tmpdir(), `loop-phase-proj-${runtime}-`));
+      t.after(() => cleanup(dest));
+      for (const sub of ['workflows', 'references']) {
+        copyWithPathReplacement(path.join(ROOT, 'gsd-core', sub), path.join(dest, sub), prefix, runtime, false, false, dest);
+      }
+      for (const [file, point, expectedCount] of SITES) {
+        const projected = fs.readFileSync(path.join(dest, file.replace(/^gsd-core\//, '')), 'utf8');
+        const { bare, withPhase } = phaseSiteCounts(projected, point);
+        assert.strictEqual(bare.length, expectedCount, `${runtime}: ${file} ${point} call site count changed`);
+        assert.strictEqual(withPhase.length, expectedCount, `${runtime}: ${file} ${point} lost --phase`);
+      }
+    }
+  });
+
+  test('[property] any --phase/--phase-dir input yields context only for the real phase directory', (t) => {
+    const dir = makePhaseProject('05-widgets');
+    t.after(() => cleanup(dir));
+    t.mock.method(process.stderr, 'write', () => true); // unresolvable tokens warn; keep output quiet
+    fc.assert(fc.property(
+      fc.oneof(fc.string(), fc.constantFrom('05', '5', '005', '05-widgets', '../05', '')),
+      fc.option(fc.string(), { nil: undefined }),
+      (phase, phaseDir) => {
+        const { context } = resolveActiveHooksForPoint(dir, 'plan:pre', { phase, phaseDir });
+        if (context !== undefined) {
+          assert.deepStrictEqual(context, { phase: '05', phaseDir: '.planning/phases/05-widgets' });
+        }
+      },
+    ));
+  });
+
   // #4030: --phase-dir is accepted, but only as a check against what --phase
   // resolved to. It is never an independent path, so nothing here needs
   // confinement — the emitted phaseDir is always locator-produced.
@@ -1887,42 +1994,10 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
 describe('every phase-scoped render-hooks call site actually carries --phase (#4030 review)', () => {
   const ROOT = path.resolve(__dirname, '..');
 
-  // {file, point, count}: how many render-hooks <point> occurrences that
-  // file has, and how many of them must carry --phase. Both counts are
-  // asserted so a call site that gains a --phase-less duplicate is caught
-  // too, not just a wholesale removal.
-  const SITES = [
-    ['gsd-core/workflows/discuss-phase.md', 'discuss:pre', 1],
-    ['gsd-core/workflows/discuss-phase.md', 'discuss:post', 1],
-    ['gsd-core/workflows/plan-phase.md', 'plan:pre', 4],
-    ['gsd-core/workflows/plan-phase.md', 'plan:post', 1],
-    ['gsd-core/workflows/execute-phase.md', 'execute:post', 1],
-    ['gsd-core/workflows/execute-phase.md', 'execute:wave:pre', 1],
-    ['gsd-core/workflows/execute-phase.md', 'execute:wave:post', 1],
-    ['gsd-core/workflows/execute-phase/steps/verify-phase-goal.md', 'execute:post', 1],
-    ['gsd-core/workflows/execute-phase/steps/verify-phase-goal.md', 'verify:post', 1],
-    ['gsd-core/workflows/verify-work.md', 'verify:pre', 1],
-    ['gsd-core/workflows/verify-work.md', 'verify:post', 1],
-    ['gsd-core/workflows/secure-phase.md', 'verify:post', 1],
-    ['gsd-core/workflows/validate-phase.md', 'verify:post', 1],
-    ['gsd-core/workflows/autonomous.md', 'execute:post', 1],
-    ['gsd-core/workflows/autonomous.md', 'verify:post', 1],
-    ['gsd-core/workflows/code-review-fix.md', 'execute:post', 1],
-    ['gsd-core/references/autonomous-ui-design-contract.md', 'plan:pre', 1],
-  ];
-
   for (const [file, point, expectedCount] of SITES) {
     test(`${file} :: ${point} carries --phase at all ${expectedCount} call site(s)`, () => {
       const content = fs.readFileSync(path.join(ROOT, file), 'utf8');
-      // --active-cap lines are excluded: that mode returns only 'true'/'false'
-      // for one capability's activation (unaffected by phase), never reads
-      // `context`, and deliberately does not combine with --phase today (#4030
-      // review S1) — a hook-dispatch call site fetching the JSON envelope for
-      // actual dispatch is what this table pins, not every render-hooks use.
-      const lines = splitLines(content).filter((l) => !l.includes('--active-cap'));
-      const scoped = lines.join('\n');
-      const bare = scoped.match(new RegExp(`render-hooks ${point}\\b`, 'g')) || [];
-      const withPhase = scoped.match(new RegExp(`render-hooks ${point}\\b[^\\n]*--phase `, 'g')) || [];
+      const { bare, withPhase } = phaseSiteCounts(content, point);
       assert.strictEqual(bare.length, expectedCount,
         `expected ${expectedCount} render-hooks ${point} call site(s) in ${file}, found ${bare.length} — update this table's count if the site count genuinely changed`);
       assert.strictEqual(withPhase.length, expectedCount,
