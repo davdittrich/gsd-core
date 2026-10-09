@@ -74,6 +74,7 @@ Dispatch the referenced unit. Exactly one of `ref.skill`, `ref.agent`, or `ref.c
   no phase argument at all — never substitute an empty string for a missing token:
 
   ```bash
+  # placeholders are filled in by you from the envelope, not by the shell
   # context present
   gsd_run ${ref.command} --phase "${context.phase}" --raw
   # context absent
