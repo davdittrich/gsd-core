@@ -638,8 +638,11 @@ function resolveActiveHooksForPoint(
       // a pure string comparison: `path.resolve` never touches the filesystem,
       // and the emitted phaseDir below is still the locator's value, never this
       // argument. A symlinked spelling therefore still fails closed.
+      // Case-insensitive filesystems (Windows, macOS) treat `Phases` and `phases`
+      // as one directory, so fold case there or a valid spelling is rejected.
+      const fold = (p: string): string => (process.platform === 'win32' || process.platform === 'darwin' ? p.toLowerCase() : p);
       const sameDir = phaseDirArg !== undefined
-        && path.resolve(cwd, phaseDirArg) === path.resolve(cwd, phaseResult.directory);
+        && fold(path.resolve(cwd, phaseDirArg)) === fold(path.resolve(cwd, phaseResult.directory));
       if (phaseDirArg !== undefined && !sameDir) {
         phaseWarnings.push(
           `--phase-dir ${JSON.stringify(phaseDirArg)} does not match the directory ` +

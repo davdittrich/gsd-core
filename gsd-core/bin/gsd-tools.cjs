@@ -3211,7 +3211,7 @@ function dispatchOverlayCapabilityCommand({ command, args, cwd, raw, error, load
     if (eq) return eq.slice(flag.length + 1).trim();
     const idx = args.indexOf(flag);
     const value = idx === -1 ? undefined : args[idx + 1];
-    return value === undefined || value.startsWith('--') ? undefined : value;
+    return value === undefined || value.startsWith('--') ? undefined : value.trim();
   }
 
   function routeLoop({ args, cwd, raw, error }) {
