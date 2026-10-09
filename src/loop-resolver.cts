@@ -586,7 +586,7 @@ function resolveActiveHooksForPoint(
   // rejected as incoherent rather than silently believed — a disagreement no
   // containment check could catch, since both paths are inside the project.
   // `resolveActiveHooksForPoint` is exported (dispatch-step calls it directly,
-  // bypassing the CLI's `readDualFormFlag` entirely), so an empty string here is
+  // bypassing the CLI's `readOptionalFlag` entirely), so an empty string here is
   // a real input this boundary must handle on its own. Kept as a string, not
   // collapsed to undefined: `guardedFindPhase(cwd, '', ...)` returns null (its
   // own `if (!phase) return null` guard), so an empty `--phase` falls through to
