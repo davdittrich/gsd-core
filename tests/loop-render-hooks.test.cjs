@@ -1394,6 +1394,55 @@ function phaseSiteCounts(content, point) {
   };
 }
 
+// Static check (no bash interpreter): is `name=` assigned on a line BEFORE
+// lines[idx], inside a fenced bash/sh block? An unassigned var would expand
+// empty and silently degrade to `--phase ""`.
+function phaseVarAssignedBefore(lines, idx, name) {
+  const assign = new RegExp(`^\\s*(?:export\\s+|local\\s+)?${name}=`);
+  let inBash = false;
+  for (let i = 0; i < idx; i++) {
+    const fence = lines[i].match(/^\s*```(\w*)/);
+    if (fence) inBash = !inBash && (fence[1] === 'bash' || fence[1] === 'sh');
+    else if (inBash && assign.test(lines[i])) return true;
+  }
+  return false;
+}
+
+// Turn the tail of a render-hooks call line into argv, substituting a real
+// token for the phase variable and the fingerprint path.
+function callArgv(rest) {
+  return (rest
+    .replace(/--after-fingerprint\s+"[^"]*"/, '--after-fingerprint .planning/phases/05-widgets')
+    .replace(/"\$\{?\w+\}?"/g, '"05"')
+    .match(/"[^"]*"|\S+/g) || []).map((a) => a.replace(/"/g, ''));
+}
+
+describe('phaseVarAssignedBefore (static assignment check)', () => {
+  const call = 'X=$(gsd_run loop render-hooks plan:pre --raw --phase "${P}")';
+  const lines = (...l) => l.join('\n').split('\n');
+  test('accepts an assignment in a bash fence before the call', () => {
+    const l = lines('```bash', 'P=$(echo 05)', call, '```');
+    assert.ok(phaseVarAssignedBefore(l, 2, 'P'));
+  });
+  test('rejects a call with no assignment anywhere', () => {
+    assert.ok(!phaseVarAssignedBefore(lines('```bash', call, '```'), 1, 'P'));
+  });
+  test('rejects an assignment that comes after the call', () => {
+    assert.ok(!phaseVarAssignedBefore(lines('```bash', call, 'P=05', '```'), 1, 'P'));
+  });
+  test('rejects an assignment outside a bash fence', () => {
+    assert.ok(!phaseVarAssignedBefore(lines('P=05', '```bash', call, '```'), 2, 'P'));
+  });
+  test('a real workflow with its phase assignments stripped fails the check', () => {
+    const real = splitLines(fs.readFileSync(path.join(ROOT, 'gsd-core/workflows/validate-phase.md'), 'utf8'));
+    const idx = real.findIndex((l) => l.includes('render-hooks verify:post') && !l.includes('--active-cap'));
+    assert.ok(phaseVarAssignedBefore(real, idx, 'PHASE_NUMBER'), 'the real workflow assigns PHASE_NUMBER');
+    const stripped = real.filter((l) => !/^\s*PHASE_NUMBER=/.test(l));
+    const sidx = stripped.findIndex((l) => l.includes('render-hooks verify:post') && !l.includes('--active-cap'));
+    assert.ok(!phaseVarAssignedBefore(stripped, sidx, 'PHASE_NUMBER'));
+  });
+});
+
 describe('cmdLoopRenderHooks --phase (#4030)', () => {
   function makePhaseProject(...phaseDirNames) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-phase-ctx-'));
@@ -1448,7 +1497,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     assert.match(result.stderr, /did not match a phase directory/);
   });
 
-  test('[negative] --phase matching only an archived milestone phase omits context, not the archived path (#4030 review)', (t) => {
+  test('[negative] --phase matching only an archived milestone phase omits context, not the archived path', (t) => {
     const dir = makePhaseProject();
     t.after(() => cleanup(dir));
     // Archive shape: <planning>/milestones/vX.Y-phases/<phase-dir>/ — no matching
@@ -1493,7 +1542,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
       'a bare --phase must be silent, exactly like omitting the flag entirely');
   });
 
-  test('[negative] --phase "" (explicit empty string, space form) warns, never a hard error (#4030 review)', (t) => {
+  test('[negative] --phase "" (explicit empty string, space form) warns, never a hard error', (t) => {
     // readOptionalFlag distinguishes "explicit empty value" (--phase "") from
     // "flag never given" (bare --phase) — only the latter stays silent. An
     // explicit empty string reaches the resolver as '', which guardedFindPhase
@@ -1511,7 +1560,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     assert.match(envelope.warnings.join('\n'), /did not match a phase directory/);
   });
 
-  test('[negative] --phase= (explicit empty string, equals form) warns, never a hard error (#4030 review)', (t) => {
+  test('[negative] --phase= (explicit empty string, equals form) warns, never a hard error', (t) => {
     const dir = makePhaseProject('05-widgets');
     t.after(() => cleanup(dir));
     const result = renderWithPhase(dir, 'plan:pre', ['--phase=', '--raw']);
@@ -1522,7 +1571,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
       'an explicit empty --phase= must warn, not go silent');
   });
 
-  test('[negative] resolveActiveHooksForPoint called in-process with phase: \'\' warns the same way (#4030 review)', (t) => {
+  test('[negative] resolveActiveHooksForPoint called in-process with phase: \'\' warns the same way', (t) => {
     // dispatch-step (gsd-tools.cjs) calls resolveActiveHooksForPoint directly,
     // bypassing readOptionalFlag entirely — this exported function is its own
     // boundary and must not silently swallow an explicit empty string the way
@@ -1538,7 +1587,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
       `expected an unresolvable-token warning, got: ${JSON.stringify(result.warnings)}`);
   });
 
-  test('[negative] resolveActiveHooksForPoint called in-process with phaseDir: \'\' and no phase warns (#4030 review)', (t) => {
+  test('[negative] resolveActiveHooksForPoint called in-process with phaseDir: \'\' and no phase warns', (t) => {
     const dir = makePhaseProject('05-widgets');
     t.after(() => cleanup(dir));
     const result = resolveActiveHooksForPoint(dir, 'plan:pre', { phaseDir: '' });
@@ -1607,6 +1656,16 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     assert.strictEqual(result.exitCode, 0, 'stderr: ' + result.stderr);
     const envelope = JSON.parse(result.stdout.trim());
     assert.deepStrictEqual(envelope.context, { phase: '05', phaseDir: '.planning/phases/05-widgets' });
+  });
+
+  test('[happy] --after-fingerprint with --phase keeps context in the envelope', (t) => {
+    const dir = makePhaseProject('05-widgets');
+    t.after(() => cleanup(dir));
+    const result = renderWithPhase(dir, 'verify:post',
+      ['--after-fingerprint', path.join(dir, '.planning', 'phases', '05-widgets'), '--phase', '05', '--raw']);
+    assert.strictEqual(result.exitCode, 0, 'stderr: ' + result.stderr);
+    assert.deepStrictEqual(JSON.parse(result.stdout.trim()).context,
+      { phase: '05', phaseDir: '.planning/phases/05-widgets' });
   });
 
   test('[happy] --phase composes with --active-cap without interference', (t) => {
@@ -1808,21 +1867,26 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
   });
 
   // #4030 AC4: run each real call site's own arguments (not a hand-written
-  // --phase), so a site with a wrong flag or variable fails here.
+  // --phase), so a site with a wrong flag or variable fails here. The phase
+  // variable must be assigned earlier in the file; only then is it replaced
+  // by a real token.
   for (const [file, point] of SITES) {
-    test(`[e2e] ${file} :: ${point} call site delivers its phase to a third-party handler`, (t) => {
+    test(`[e2e] ${file} :: ${point} call site assigns its phase var and delivers it to a third-party handler`, (t) => {
       const fx = makeThirdPartyStepFixture(PHASE_SCOPED_POINTS);
       t.after(() => { cleanup(fx.home); cleanup(fx.project); });
-      const { scoped } = phaseSiteCounts(fs.readFileSync(path.join(ROOT, file), 'utf8'), point);
-      const calls = [...scoped.matchAll(new RegExp(`render-hooks ${point}\\b([^)\\n]*)`, 'g'))];
-      assert.ok(calls.length > 0, `no ${point} call site in ${file}`);
-      for (const [, rest] of calls) {
-        const argv = (rest
-          .replace(/--after-fingerprint\s+"[^"]*"/, '--after-fingerprint .planning/phases/05-widgets')
-          .replace(/"\$\{?\w+\}?"/g, '"05"')
-          .match(/"[^"]*"|\S+/g) || []).map((a) => a.replace(/"/g, ''));
+      const lines = splitLines(fs.readFileSync(path.join(ROOT, file), 'utf8'));
+      const callRe = new RegExp(`render-hooks ${point}\\b([^)\\n]*)`);
+      let seen = 0;
+      lines.forEach((line, idx) => {
+        const m = !line.includes('--active-cap') && line.match(callRe);
+        if (!m) return;
+        seen++;
+        const v = m[1].match(/--phase\s+"\$\{?(\w+)\}?"/);
+        assert.ok(v, `${file}:${idx + 1} ${point}: --phase must take a quoted variable`);
+        assert.ok(phaseVarAssignedBefore(lines, idx, v[1]),
+          `${file}:${idx + 1} ${point}: ${v[1]} is never assigned in a bash block before this call`);
         const result = runNode(
-          [GSD_TOOLS, 'loop', 'render-hooks', point, ...argv, '--cwd', fx.project],
+          [GSD_TOOLS, 'loop', 'render-hooks', point, ...callArgv(m[1]), '--cwd', fx.project],
           { cwd: ROOT, timeoutMs: PROBE_TIMEOUT_MS, env: { ...process.env, GSD_HOME: fx.home } },
         );
         assert.strictEqual(result.exitCode, 0, 'stderr: ' + result.stderr);
@@ -1831,29 +1895,21 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
           `${file} ${point}: the third-party handler must be dispatched`);
         assert.deepStrictEqual(envelope.context, { phase: '05', phaseDir: '.planning/phases/05-widgets' },
           `${file} ${point}: the call site's phase must reach the handler unchanged`);
-
-        // Dispatch the way loop-hook-dispatch.md tells the agent to: append
-        // context.phase to the step's command, then run it. The handler is a
-        // probe that echoes the arguments it actually received.
-        const handled = runNode(
-          ['-e', 'process.stdout.write(JSON.stringify(process.argv.slice(1)))', '--', '--phase', envelope.context.phase, '--raw'],
-          { cwd: ROOT, timeoutMs: PROBE_TIMEOUT_MS },
-        );
-        assert.strictEqual(handled.exitCode, 0, 'stderr: ' + handled.stderr);
-        assert.deepStrictEqual(JSON.parse(handled.stdout), ['--phase', '05', '--raw'],
-          `${file} ${point}: the handler must receive the phase it was dispatched with`);
-      }
+      });
+      assert.ok(seen > 0, `no ${point} call site in ${file}`);
     });
   }
 
   // #4030 AC8: the installer projects workflows per runtime. Claude Code and
   // Codex output must keep every call site's --phase, or the context silently
   // never reaches the handler on that runtime.
-  test('[projection] Claude Code and Codex installer output keeps every call site --phase', (t) => {
+  test('[projection] Claude Code and Codex installer output keeps every call site --phase and the projected command yields context', (t) => {
     const prev = process.env.GSD_TEST_MODE;
     process.env.GSD_TEST_MODE = '1';
     const { copyWithPathReplacement } = require('../bin/install.js');
     if (prev === undefined) delete process.env.GSD_TEST_MODE; else process.env.GSD_TEST_MODE = prev;
+    const proj = makePhaseProject('05-widgets');
+    t.after(() => cleanup(proj));
     for (const [runtime, prefix] of [['claude', '~/.claude/'], ['codex', '~/.codex/']]) {
       const dest = fs.mkdtempSync(path.join(os.tmpdir(), `loop-phase-proj-${runtime}-`));
       t.after(() => cleanup(dest));
@@ -1865,6 +1921,12 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
         const { bare, withPhase } = phaseSiteCounts(projected, point);
         assert.strictEqual(bare.length, expectedCount, `${runtime}: ${file} ${point} call site count changed`);
         assert.strictEqual(withPhase.length, expectedCount, `${runtime}: ${file} ${point} lost --phase`);
+        // Run the projected command line itself through the CLI.
+        const m = projected.split('\n').map((l) => (l.includes('--active-cap') ? null : l.match(new RegExp(`render-hooks ${point}\\b([^)\\n]*)`)))).find(Boolean);
+        const result = renderWithPhase(proj, point, callArgv(m[1]));
+        assert.strictEqual(result.exitCode, 0, `${runtime}: ${file} ${point} stderr: ` + result.stderr);
+        assert.strictEqual(JSON.parse(result.stdout.trim()).context?.phase, '05',
+          `${runtime}: ${file} ${point}: projected command line must yield context.phase`);
       }
     }
   });
@@ -1883,6 +1945,35 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
         }
       },
     ));
+  });
+
+  test('[property] every spelling of the real phase yields context with the real directory', (t) => {
+    const dir = makePhaseProject('05-widgets');
+    t.after(() => cleanup(dir));
+    fc.assert(fc.property(fc.constantFrom('05', '5', '005', '05-widgets'), (phase) => {
+      const { context } = resolveActiveHooksForPoint(dir, 'plan:pre', { phase });
+      assert.ok(context, `${phase} must resolve`);
+      assert.strictEqual(context.phaseDir, '.planning/phases/05-widgets');
+      assert.strictEqual(typeof context.phase, 'string');
+    }));
+  });
+
+  // readOptionalFlag is private to gsd-tools.cjs, so it is exercised through
+  // the CLI (few runs: each is a subprocess).
+  test('[property] --phase parses in = and space form, trims, and rejects a --value', (t) => {
+    const dir = makePhaseProject('05-widgets');
+    t.after(() => cleanup(dir));
+    const pad = fc.stringMatching(/^[ \t]{0,3}$/);
+    fc.assert(fc.property(fc.boolean(), pad, pad, fc.stringMatching(/^[a-z]{1,6}$/), (eq, l, r, junk) => {
+      const padded = `${l}05${r}`;
+      const ok = renderWithPhase(dir, 'plan:pre', eq ? [`--phase=${padded}`, '--raw'] : ['--phase', padded, '--raw']);
+      assert.strictEqual(ok.exitCode, 0, ok.stderr);
+      assert.strictEqual(JSON.parse(ok.stdout.trim()).context.phase, '05');
+      const bad = renderWithPhase(dir, 'plan:pre', ['--phase', `--${junk}`, '--raw']);
+      assert.strictEqual(bad.exitCode, 0, bad.stderr);
+      const env = JSON.parse(bad.stdout.trim());
+      assert.ok(!('context' in env) && !('warnings' in env), 'a --value is not a phase token');
+    }), { numRuns: 12 });
   });
 
   // #4030: --phase-dir is accepted, but only as a check against what --phase
@@ -1998,7 +2089,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
 // dropping --phase from any of the other 19 would reintroduce the exact bug
 // this PR fixes, with a green suite — table-driven so adding a 21st site
 // means adding one row here, not writing a new test.
-describe('every phase-scoped render-hooks call site actually carries --phase (#4030 review)', () => {
+describe('every phase-scoped render-hooks call site actually carries --phase', () => {
   const ROOT = path.resolve(__dirname, '..');
 
   for (const [file, point, expectedCount] of SITES) {
