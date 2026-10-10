@@ -34,8 +34,9 @@ invokes.
 **The resolver derives the directory; a supplied one is only ever a check.**
 `--phase` takes the bare token every workflow already holds (`"05"`,
 including decimal phases like `"07.5"`), and `phaseDir` is whatever on-disk
-directory `guardedFindPhase` matched. Path traversal, absolute-path
-substitution and symlink escape therefore have no input to travel through.
+directory `guardedFindPhase` matched. Path traversal and absolute-path
+substitution therefore have no input to travel through; a symlinked
+`.planning/phases` parent is realpath-confined and omits `context` with a warning.
 Resolution goes through the same `project_code` foreign-prefix guard `init.*`
 applies, so a token like `OTHER-05` does not resolve to this project's
 Phase 5.
