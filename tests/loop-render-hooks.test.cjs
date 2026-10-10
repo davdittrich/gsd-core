@@ -1922,7 +1922,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
         assert.strictEqual(bare.length, expectedCount, `${runtime}: ${file} ${point} call site count changed`);
         assert.strictEqual(withPhase.length, expectedCount, `${runtime}: ${file} ${point} lost --phase`);
         // Run the projected command line itself through the CLI.
-        const m = projected.split('\n').map((l) => (l.includes('--active-cap') ? null : l.match(new RegExp(`render-hooks ${point}\\b([^)\\n]*)`)))).find(Boolean);
+        const m = splitLines(projected).map((l) => (l.includes('--active-cap') ? null : l.match(new RegExp(`render-hooks ${point}\\b([^)\\n]*)`)))).find(Boolean);
         const result = renderWithPhase(proj, point, callArgv(m[1]));
         assert.strictEqual(result.exitCode, 0, `${runtime}: ${file} ${point} stderr: ` + result.stderr);
         assert.strictEqual(JSON.parse(result.stdout.trim()).context?.phase, '05',
