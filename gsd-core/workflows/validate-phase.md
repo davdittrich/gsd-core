@@ -31,6 +31,7 @@ Parse: `phase_dir`, `phase_number`, `phase_name`, `phase_slug`, `padded_phase`.
 
 ```bash
 AUDITOR_MODEL=$(gsd_run query resolve-model gsd-nyquist-auditor --raw)
+PHASE_NUMBER=$(printf '%s' "$INIT" | jq -r '.phase_number // empty')
 VERIFY_POST_HOOKS_JSON=$(gsd_run loop render-hooks verify:post --raw --phase "${PHASE_NUMBER}")
 ```
 
