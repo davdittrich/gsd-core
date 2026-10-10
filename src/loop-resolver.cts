@@ -629,30 +629,10 @@ function resolveActiveHooksForPoint(
         'context omitted.',
       );
     } else if (phaseResult?.found) {
-      // A supplied --phase-dir must AGREE with what the token resolved to.
-      // Confinement is not the interesting failure here: two in-project
-      // directories both pass any containment check, yet `--phase 05
-      // --phase-dir .planning/phases/07-other` is an incoherent pair no
-      // confinement can catch. Comparing against the derived value rejects it.
-      // Compared as resolved paths, not raw strings, so an absolute form or a
-      // `./` prefix of the SAME directory is a match — sibling commands accept
-      // absolute paths (`resolvePath`, check-command-router.cts), and a caller
-      // following that convention should not silently lose its context. This is
-      // dev+ino compare (below); the emitted phaseDir is still the locator's
-      // value, never this argument.
-      // Identity is the filesystem's own answer (dev+ino of both stat results),
-      // so case folding / normalization is never guessed per platform. A stat
-      // failure on either side is a mismatch.
+      // Confinement first: a symlinked `.planning`, workstream or `phases`
+      // parent puts a lexically in-project dir elsewhere. Any realpath failure
+      // fails closed.
       const resolvedDir = path.resolve(cwd, phaseResult.directory);
-      const sameDir = phaseDirArg !== undefined && (() => {
-        try {
-          const a = fs.statSync(path.resolve(cwd, phaseDirArg));
-          const b = fs.statSync(resolvedDir);
-          return a.dev === b.dev && a.ino === b.ino;
-        } catch { return false; }
-      })();
-      // Realpath confinement: a symlinked `.planning`, workstream, or `phases`
-      // parent makes the (lexically in-project) directory point elsewhere.
       let escapes = false;
       try {
         const realCwd = fs.realpathSync(cwd);
@@ -665,13 +645,22 @@ function resolveActiveHooksForPoint(
         };
         escapes = !(inside(realCwd, realPlanning) && inside(realPlanning, realPhases) && inside(realPhases, realDir));
       } catch { escapes = true; }
+      // A supplied --phase-dir must name the same directory the token resolved
+      // to (dev+ino, so case/normalization is the filesystem's call). It only
+      // gates; the emitted phaseDir is always the locator's value.
+      const sameDir = (): boolean => {
+        try {
+          const a = fs.statSync(path.resolve(cwd, phaseDirArg as string));
+          const b = fs.statSync(resolvedDir);
+          return a.dev === b.dev && a.ino === b.ino;
+        } catch { return false; }
+      };
       if (escapes) {
         phaseWarnings.push(
           `--phase ${JSON.stringify(phaseArg)} resolved to ${JSON.stringify(phaseResult.directory)}, ` +
-          'which escapes the project\'s .planning/phases tree (symlink); context omitted.',
+          'which escapes the project\'s .planning/phases tree (symlink or unreadable path); context omitted.',
         );
-      } else
-      if (phaseDirArg !== undefined && !sameDir) {
+      } else if (phaseDirArg !== undefined && !sameDir()) {
         phaseWarnings.push(
           `--phase-dir ${JSON.stringify(phaseDirArg)} does not match the directory ` +
           `--phase ${JSON.stringify(phaseArg)} resolves to (${JSON.stringify(phaseResult.directory)}); context omitted.`,
