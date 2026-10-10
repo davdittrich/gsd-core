@@ -28,8 +28,10 @@ additive `context: { phase, phaseDir }` field, where `phaseDir` is the
 literal on-disk directory name the underlying `findPhaseInternal` matched
 (`toPosixPath(path.join(relBase, match))`), never a caller-supplied string.
 Because the result is drawn from a `readdirSync` listing filtered by
-`matchPhaseDirs`, path traversal, absolute-path substitution, and symlink
-escape are structurally unreachable — there is no path string to validate.
+`matchPhaseDirs`, path traversal and absolute-path substitution are
+structurally unreachable. A symlinked `.planning`, workstream or `phases`
+parent is not: the resolver realpath-confines the directory under the project's
+`.planning/phases` and omits `context` with a warning on escape.
 Going through `guardedFindPhase` rather than the bare primitive also carries
 its `isForeignPrefixedPhaseQuery` check (`src/phase-id.cts`, the #2056/#2105
 guard): a `project_code`-scoped repo gets the identical #2237 foreign-prefix
@@ -50,7 +52,8 @@ matches, the envelope is unchanged; when it does not, `context` is omitted with
 a warning naming both.
 `--phase-dir` alone is refused, since there is then no resolution to check it
 against. Two consequences follow. An out-of-project value (`/etc`, `../..`)
-cannot reach `context`, so this surface needs no confinement logic of its own.
+cannot reach `context`: only the locator's value is emitted, and the realpath
+confinement above covers the symlink case.
 And a *wrong-phase* value — `--phase 05 --phase-dir .planning/phases/07-other`,
 where both paths are inside the project and would survive any containment
 check — is rejected too, which confinement alone could never do.

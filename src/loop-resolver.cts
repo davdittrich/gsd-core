@@ -643,7 +643,7 @@ function resolveActiveHooksForPoint(
           const r = path.relative(root, p);
           return r !== '' && !r.startsWith('..') && !path.isAbsolute(r);
         };
-        escapes = !(inside(realCwd, realPlanning) && inside(realPlanning, realPhases) && inside(realPhases, realDir));
+        escapes = !(inside(realCwd, realPlanning) && inside(realPlanning, realPhases) && inside(realPhases, realDir) && path.dirname(realDir) === realPhases);
       } catch { escapes = true; }
       // A supplied --phase-dir must name the same directory the token resolved
       // to (dev+ino, so case/normalization is the filesystem's call). It only
