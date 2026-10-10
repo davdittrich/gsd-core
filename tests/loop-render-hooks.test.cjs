@@ -1899,19 +1899,6 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     );
   });
 
-  for (const [platform, accepted] of [['win32', true], ['darwin', true], ['linux', false]]) {
-    test(`[bva] --phase-dir differing only in case is ${accepted ? 'accepted' : 'rejected'} on ${platform}`, (t) => {
-      const dir = makePhaseProject('05-widgets');
-      t.after(() => cleanup(dir));
-      t.mock.method(process.stderr, 'write', () => true);
-      const real = Object.getOwnPropertyDescriptor(process, 'platform');
-      Object.defineProperty(process, 'platform', { value: platform });
-      t.after(() => Object.defineProperty(process, 'platform', real));
-      const { context } = resolveActiveHooksForPoint(dir, 'plan:pre', { phase: '05', phaseDir: '.planning/PHASES/05-Widgets' });
-      assert.strictEqual(context !== undefined, accepted);
-    });
-  }
-
   test('[negative] an incoherent --phase / --phase-dir pair is rejected, though both are in-project', (t) => {
     const dir = makePhaseProject('05-widgets', '07-other');
     t.after(() => cleanup(dir));
@@ -2026,3 +2013,93 @@ describe('every phase-scoped render-hooks call site actually carries --phase (#4
   }
 });
 
+
+// #4030 review 3: confinement by realpath, same-directory by dev+ino, boundary rows.
+describe('cmdLoopRenderHooks --phase confinement and --phase-dir identity (#4030)', () => {
+  const symlinkSkip = process.platform === 'win32' ? 'directory symlinks require elevation on Windows' : false;
+  const mk = (t, ...names) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-phase-conf-'));
+    t.after(() => cleanup(dir));
+    for (const n of names) fs.mkdirSync(path.join(dir, '.planning', 'phases', n), { recursive: true });
+    return dir;
+  };
+  const run = (dir, args) => {
+    const r = runNode([GSD_TOOLS, 'loop', 'render-hooks', 'plan:pre', '--cwd', dir, ...args, '--raw'],
+      { cwd: ROOT, timeoutMs: PROBE_TIMEOUT_MS });
+    assert.strictEqual(r.exitCode, 0, 'stderr: ' + r.stderr);
+    return JSON.parse(r.stdout.trim());
+  };
+
+  test('[hostile] a symlinked .planning/phases parent yields no context and a warning, hooks still dispatch', { skip: symlinkSkip }, (t) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-phase-conf-'));
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-phase-outside-'));
+    t.after(() => { cleanup(dir); cleanup(outside); });
+    fs.mkdirSync(path.join(outside, '07-evil'), { recursive: true });
+    fs.mkdirSync(path.join(dir, '.planning'), { recursive: true });
+    fs.symlinkSync(outside, path.join(dir, '.planning', 'phases'), 'dir');
+    const env = run(dir, ['--phase', '07']);
+    assert.ok(!Object.prototype.hasOwnProperty.call(env, 'context'));
+    assert.match((env.warnings || []).join('\n'), /outside the project|escapes/);
+    assert.ok(Array.isArray(env.activeHooks));
+  });
+
+  test('[hostile] a symlinked .planning yields no context and a warning', { skip: symlinkSkip }, (t) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-phase-conf-'));
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-phase-outside-'));
+    t.after(() => { cleanup(dir); cleanup(outside); });
+    fs.mkdirSync(path.join(outside, 'phases', '07-evil'), { recursive: true });
+    fs.symlinkSync(outside, path.join(dir, '.planning'), 'dir');
+    const env = run(dir, ['--phase', '07']);
+    assert.ok(!Object.prototype.hasOwnProperty.call(env, 'context'));
+    assert.match((env.warnings || []).join('\n'), /outside the project|escapes/);
+  });
+
+  test('[hostile] ambiguous directory names are JSON-escaped in the warning', (t) => {
+    let dir;
+    try { dir = mk(t, '08-a\u001b[31mred', '08-b\nspoof'); } catch { t.skip('FS refuses control characters'); return; }
+    const w = (run(dir, ['--phase', '08']).warnings || []).join('\n');
+    assert.ok(!w.includes('\u001b') && !w.includes('\nspoof'), 'raw control bytes must not reach the warning');
+    assert.match(w, /\\u001b|\\n/);
+  });
+
+  // 0/1/2 directory matches x --phase-dir (match | mismatch)
+  test('[bva] 0 matches + --phase-dir: warning, no context', (t) => {
+    const env = run(mk(t), ['--phase', '05', '--phase-dir', '.planning/phases/05-x']);
+    assert.ok(!('context' in env));
+    assert.match(env.warnings.join('\n'), /did not match a phase directory/);
+  });
+  test('[bva] 1 match + matching --phase-dir: context', (t) => {
+    const env = run(mk(t, '05-x'), ['--phase', '05', '--phase-dir', '.planning/phases/05-x']);
+    assert.deepStrictEqual(env.context, { phase: '05', phaseDir: '.planning/phases/05-x' });
+  });
+  test('[bva] 1 match + mismatching (nonexistent) --phase-dir: warning, no context', (t) => {
+    const env = run(mk(t, '05-x'), ['--phase', '05', '--phase-dir', '.planning/phases/05-nope']);
+    assert.ok(!('context' in env));
+    assert.match(env.warnings.join('\n'), /does not match the directory/);
+  });
+  test('[bva] 2 matches + matching --phase-dir: ambiguous, no context', (t) => {
+    const env = run(mk(t, '05-x', '05-y'), ['--phase', '05', '--phase-dir', '.planning/phases/05-x']);
+    assert.ok(!('context' in env));
+    assert.match(env.warnings.join('\n'), /is ambiguous/);
+  });
+  test('[bva] 2 matches + mismatching --phase-dir: ambiguous, no context', (t) => {
+    const env = run(mk(t, '05-x', '05-y'), ['--phase', '05', '--phase-dir', '.planning/phases/05-z']);
+    assert.ok(!('context' in env));
+    assert.match(env.warnings.join('\n'), /is ambiguous/);
+  });
+
+  // dev+ino identity: a case-variant spelling matches only where the FS says it is the same dir.
+  test('[bva] --phase-dir case variant matches iff the filesystem treats it as the same directory', (t) => {
+    const dir = mk(t, '05-widgets');
+    const insensitive = fs.existsSync(path.join(dir, '.planning', 'PHASES'));
+    if (!insensitive) { t.skip('case-sensitive filesystem'); return; }
+    const env = run(dir, ['--phase', '05', '--phase-dir', '.planning/PHASES/05-Widgets']);
+    assert.deepStrictEqual(env.context, { phase: '05', phaseDir: '.planning/phases/05-widgets' });
+  });
+  test('[negative] --phase-dir case variant is rejected on a case-sensitive filesystem', (t) => {
+    const dir = mk(t, '05-widgets');
+    if (fs.existsSync(path.join(dir, '.planning', 'PHASES'))) { t.skip('case-insensitive filesystem'); return; }
+    const env = run(dir, ['--phase', '05', '--phase-dir', '.planning/PHASES/05-Widgets']);
+    assert.ok(!('context' in env));
+  });
+});
