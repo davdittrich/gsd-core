@@ -40,6 +40,9 @@ import { requireSafePath, PathAcceptance } from './security.cjs';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- phase-locator.cjs is an export= CommonJS module
 import phaseLocator = require('./phase-locator.cjs');
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+import planningWorkspaceMod = require('./planning-workspace.cjs');
+const { planningDir } = planningWorkspaceMod;
 const { guardedFindPhase } = phaseLocator;
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -635,14 +638,39 @@ function resolveActiveHooksForPoint(
       // `./` prefix of the SAME directory is a match — sibling commands accept
       // absolute paths (`resolvePath`, check-command-router.cts), and a caller
       // following that convention should not silently lose its context. This is
-      // a pure string comparison: `path.resolve` never touches the filesystem,
-      // and the emitted phaseDir below is still the locator's value, never this
-      // argument. A symlinked spelling therefore still fails closed.
-      // Case-insensitive filesystems (Windows, macOS) treat `Phases` and `phases`
-      // as one directory, so fold case there or a valid spelling is rejected.
-      const fold = (p: string): string => (process.platform === 'win32' || process.platform === 'darwin' ? p.toLowerCase() : p);
-      const sameDir = phaseDirArg !== undefined
-        && fold(path.resolve(cwd, phaseDirArg)) === fold(path.resolve(cwd, phaseResult.directory));
+      // dev+ino compare (below); the emitted phaseDir is still the locator's
+      // value, never this argument.
+      // Identity is the filesystem's own answer (dev+ino of both stat results),
+      // so case folding / normalization is never guessed per platform. A stat
+      // failure on either side is a mismatch.
+      const resolvedDir = path.resolve(cwd, phaseResult.directory);
+      const sameDir = phaseDirArg !== undefined && (() => {
+        try {
+          const a = fs.statSync(path.resolve(cwd, phaseDirArg));
+          const b = fs.statSync(resolvedDir);
+          return a.dev === b.dev && a.ino === b.ino;
+        } catch { return false; }
+      })();
+      // Realpath confinement: a symlinked `.planning`, workstream, or `phases`
+      // parent makes the (lexically in-project) directory point elsewhere.
+      let escapes = false;
+      try {
+        const realCwd = fs.realpathSync(cwd);
+        const realPlanning = fs.realpathSync(planningDir(cwd));
+        const realPhases = fs.realpathSync(path.join(planningDir(cwd), 'phases'));
+        const realDir = fs.realpathSync(resolvedDir);
+        const inside = (root: string, p: string): boolean => {
+          const r = path.relative(root, p);
+          return r !== '' && !r.startsWith('..') && !path.isAbsolute(r);
+        };
+        escapes = !(inside(realCwd, realPlanning) && inside(realPlanning, realPhases) && inside(realPhases, realDir));
+      } catch { escapes = true; }
+      if (escapes) {
+        phaseWarnings.push(
+          `--phase ${JSON.stringify(phaseArg)} resolved to ${JSON.stringify(phaseResult.directory)}, ` +
+          'which escapes the project\'s .planning/phases tree (symlink); context omitted.',
+        );
+      } else
       if (phaseDirArg !== undefined && !sameDir) {
         phaseWarnings.push(
           `--phase-dir ${JSON.stringify(phaseDirArg)} does not match the directory ` +
@@ -660,7 +688,7 @@ function resolveActiveHooksForPoint(
       // not an argument to route around.
       phaseWarnings.push(
         `--phase ${JSON.stringify(phaseArg)} is ambiguous: ${phaseResult.ambiguous_matches.length} ` +
-        `directories match (${phaseResult.ambiguous_matches.map((m) => `"${m}"`).join(', ')}); context omitted.`,
+        `directories match (${phaseResult.ambiguous_matches.map((m) => JSON.stringify(m)).join(', ')}); context omitted.`,
       );
     } else {
       phaseWarnings.push(`--phase ${JSON.stringify(phaseArg)} did not match a phase directory; context omitted.`);
