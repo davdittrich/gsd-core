@@ -1,6 +1,6 @@
 # ADR-4030: Typed invocation context on `loop render-hooks`
 
-- **Status:** Accepted
+- **Status:** Proposed
 - **Date:** 2026-09-05
 - **Issue:** #4030
 - **Amends:** [ADR-857](857-capability-system.md) — adds a typed `context` field to the `loop render-hooks` envelope the Ratification section names as shipped (the 12 Loop Extension Points' render-hook call sites).
@@ -139,10 +139,12 @@ diverges from it whenever one phase plans/verifies while another executes.
   mis-dispatched" (a separate, already-tracked concern in #3606/#3647), so
   it is not relied on here as the sole justification.
 
-## Deviations from the issue text
+## Proposed deviations awaiting maintainer ruling on #4030
 
-- `--phase-dir` is a cross-check on `--phase`, never an independent path (see Decision).
-- `phaseDir` is emitted project-relative (`.planning/phases/05-widgets`), not absolute; the locator's own value, so it is stable across checkouts.
+- `phaseDir` is derived by the resolver (project-relative, from the phase locator), not caller-supplied.
+- `--phase-dir` is a cross-check on `--phase`, never an independent path (see Decision). No shipped call site passes it; it is optional for callers that already hold a directory.
+- The issue example shows an absolute `phaseDir`; the implementation emits project-relative (`.planning/phases/05-widgets`), the locator's own value, stable across checkouts.
+- A rejected `--phase` (no match, ambiguous, foreign prefix, `--phase-dir` mismatch) yields a warning and no `context`; hooks still dispatch.
 - `ship:pre`/`ship:post` are not phase-scoped points and pass no `--phase`; they run per release, not per phase.
 
 ## Revisit if
