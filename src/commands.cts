@@ -597,6 +597,26 @@ function cmdResolveGranularity(cwd: string, phaseType: string | undefined, raw: 
 }
 
 /**
+ * #5328: record the escalated model so hooks/lib/agent-model-check.js lets the
+ * Agent() call pass it. Best-effort: a write failure only costs a guard warning.
+ */
+function recordModelEscalation(cwd: string, agentType: string, model: string): void {
+  try {
+    const dir = path.join(cwd, '.gsd');
+    fs.mkdirSync(dir, { recursive: true });
+    if (fs.lstatSync(dir).isSymbolicLink()) return;
+    try { fs.writeFileSync(path.join(dir, '.gitignore'), '*\n', { flag: 'wx' }); } catch { /* exists */ }
+    const file = path.join(dir, 'model-escalation.json');
+    let records: Record<string, unknown> = {};
+    try { records = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>; } catch { /* first write */ }
+    records[agentType] = { model, written_at: Date.now() };
+    const tmp = `${file}.tmp-${process.pid}`;
+    fs.writeFileSync(tmp, JSON.stringify(records));
+    retryRenameSync(tmp, file);
+  } catch { /* best-effort */ }
+}
+
+/**
  * #443 — Superset execution query: model + unified effort + fast_mode.
  *
  * Emits JSON:
@@ -634,6 +654,8 @@ function cmdResolveExecution(cwd: string, agentType: string | undefined, raw: bo
     if (resolved.escalated) model = resolved.to;
     escalation = { class: opts.failureClass, ...resolved };
   }
+
+  if (typeof opts.attempt === 'number' && opts.attempt > 0 && model) recordModelEscalation(cwd, agentType, model);
 
   const effortOpts: Record<string, unknown> = {};
   if (typeof opts.effortOverride === 'string') effortOpts['override'] = opts.effortOverride;
