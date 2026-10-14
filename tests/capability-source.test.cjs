@@ -592,6 +592,28 @@ describe('security: shell metacharacters do not escape into a shell string', () 
   beforeEach(() => { gsdHome = createTempDir('gsd-home-'); });
   afterEach(() => { cleanup(gsdHome); });
 
+  test('git install never stages the clone\'s .git (#5298)', async () => {
+    const cap = featureCap('git-nodotgit-cap');
+    const fakeGit = (args, _opts) => {
+      if (args[0] === 'clone') {
+        const dir = args[args.length - 1];
+        fs.mkdirSync(path.join(dir, '.git'));
+        fs.writeFileSync(path.join(dir, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+        fs.writeFileSync(path.join(dir, 'capability.json'), JSON.stringify(cap), 'utf8');
+      }
+      return { exitCode: 0, stdout: '', stderr: '', signal: null, error: null };
+    };
+
+    const result = await resolveCapabilitySource('git+https://example.com/org/repo.git', {
+      gsdHome,
+      hostVersion: '1.5.0',
+      execOverrides: { git: fakeGit },
+    });
+
+    assert.ok(!fs.existsSync(path.join(result.stagedDir, '.git')), 'staged dir must not contain .git');
+    assert.ok(fs.existsSync(path.join(result.stagedDir, 'capability.json')), 'capability.json still staged');
+  });
+
   test('git spec with shell metacharacters — captured as argv array, not shell string', async () => {
     const capturedCalls = [];
 
