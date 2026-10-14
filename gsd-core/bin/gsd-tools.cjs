@@ -1705,12 +1705,12 @@ function dispatchOverlayCapabilityCommand({ command, args, cwd, raw, error, load
             method: opts.method,
             headers: opts.body ? { 'Content-Type': 'application/json' } : undefined,
             body: opts.body,
-            redirect: opts.redirect,
+            redirect: opts.probe ? 'manual' : undefined,
             signal: AbortSignal.timeout(opts.timeoutMs),
           });
-          // redirect:'manual' marks a reachability probe: the status line is the answer, so do not
+          // probe:true marks a reachability probe: never follow redirects, and the status line is the answer, so do not
           // let a stalled body turn a replying server into `missing`.
-          if (opts.redirect === 'manual') {
+          if (opts.probe) {
             res.body?.cancel().catch(() => {});
             return { ok: res.ok, status: res.status, body: '' };
           }

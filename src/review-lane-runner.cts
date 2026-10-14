@@ -55,7 +55,7 @@ export interface RunnerDeps {
    */
   spawn: (binary: string, argv: string[], opts: { input?: string; timeoutMs: number; env?: Readonly<Record<string, string>> }) => SpawnOutcome;
   /** Bounded HTTP POST/GET returning the RAW body — never pre-parsed, so errors stay diagnosable. */
-  httpJson: (url: string, opts: { method: 'GET' | 'POST'; body?: string; timeoutMs: number; redirect?: 'manual' }) =>
+  httpJson: (url: string, opts: { method: 'GET' | 'POST'; body?: string; timeoutMs: number; probe?: true }) =>
     Promise<{ ok: boolean; status: number; body: string; error?: string }>;
   readFile: (p: string) => string;
   writeFile: (p: string, content: string) => void;
@@ -389,7 +389,7 @@ export async function probeLane(
       // D7: reachable ⇒ available. Any HTTP answer (401 behind an auth proxy, 404, 3xx) proves a
       // server is there; only a transport failure (status 0) does not. Redirects are not followed:
       // a probe must not issue a request to a host the descriptor never named.
-      const r = await deps.httpJson(`${base}${probe.path}`, { method: 'GET', timeoutMs: probe.timeoutMs, redirect: 'manual' });
+      const r = await deps.httpJson(`${base}${probe.path}`, { method: 'GET', timeoutMs: probe.timeoutMs, probe: true });
       return r.status > 0
         ? { available: true }
         : {
@@ -419,15 +419,18 @@ export async function probeHttpLanes<L extends { slug: string; transport: string
   resolve: (lane: L) => { ok: true; plan: LanePlan } | { ok: false; detail: string },
   deps: RunnerDeps,
 ): Promise<{ rows: string[]; warnings: string[] }> {
-  const rows: string[] = [];
   const warnings: string[] = [];
-  for (const lane of lanes) {
-    if (lane.transport !== 'openai-http' || (selected.length > 0 && !selected.includes(lane.slug))) continue;
-    const r = resolve(lane);
-    if (!r.ok) warnings.push(`${lane.slug}: ${r.detail}`);
-    const up = r.ok && (await probeLane({ ...r.plan, requiresBinaries: [] }, deps)).available;
-    rows.push(`${lane.slug}:${up ? 'available' : 'missing'}`);
-  }
+  // Probes run concurrently (each has its own timeout); Promise.all keeps descriptor order.
+  const rows = await Promise.all(
+    lanes
+      .filter((l) => l.transport === 'openai-http' && (selected.length === 0 || selected.includes(l.slug)))
+      .map(async (lane) => {
+        const r = resolve(lane);
+        if (!r.ok) warnings.push(`${lane.slug}: ${r.detail}`);
+        const up = r.ok && (await probeLane({ ...r.plan, requiresBinaries: [] }, deps)).available;
+        return `${lane.slug}:${up ? 'available' : 'missing'}`;
+      }),
+  );
   return { rows, warnings };
 }
 

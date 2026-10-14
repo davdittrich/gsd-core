@@ -212,12 +212,12 @@ describe('runner — probe (ADR-2782 D7)', () => {
     assert.equal(r.available, true);
   });
 
-  test('http-reachable never follows redirects (redirect: manual)', async () => {
+  test('http-reachable never follows redirects (probe: true)', async () => {
     const p = plan('ollama');
     const calls = [];
     await probeLane(p, deps({ httpJson: async (url, opts) => { calls.push({ url, opts }); return { ok: true, status: 200, body: '{}' }; } }));
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].opts.redirect, 'manual');
+    assert.equal(calls[0].opts.probe, true);
   });
 
   test('http-reachable probes the resolved plan.host, not a raw "null" config sentinel', async () => {
