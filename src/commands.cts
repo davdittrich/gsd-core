@@ -77,6 +77,9 @@ import modelProfiles = require('./model-profiles.cjs');
 const { MODEL_PROFILES, VALID_PHASE_TYPES } = modelProfiles;
 import { formatGsdSlash, resolveRuntime } from './runtime-slash.cjs';
 import { realClock } from './clock.cjs';
+import { findProjectRoot } from './project-root.cjs';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+import worktreeSafetyMod = require('./worktree-safety.cjs');
 import { clampPercent, renderProgressBar } from './phase-lifecycle.cjs';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import planScanMod = require('./plan-scan.cjs');
@@ -597,22 +600,21 @@ function cmdResolveGranularity(cwd: string, phaseType: string | undefined, raw: 
 }
 
 /**
- * #5328: record the escalated model so hooks/lib/agent-model-check.js lets the
- * Agent() call pass it. Best-effort: a write failure only costs a guard warning.
+ * #5328: record a model that differs from the resolved baseline so
+ * hooks/lib/agent-model-check.js lets the Agent() call pass it. Written at the
+ * root the hook reads (resolveSentinelRoot semantics); the file name must match
+ * agent-model-check.js escalationPath() there. Best-effort: a write failure only costs a guard warning.
  */
 function recordModelEscalation(cwd: string, agentType: string, model: string): void {
   try {
-    const dir = path.join(cwd, '.gsd');
+    const root = fs.existsSync(path.join(cwd, '.planning'))
+      ? cwd
+      : findProjectRoot(worktreeSafetyMod.resolveWorktreeRoot(cwd).root);
+    const dir = path.join(root, '.gsd');
     fs.mkdirSync(dir, { recursive: true });
     if (fs.lstatSync(dir).isSymbolicLink()) return;
     try { fs.writeFileSync(path.join(dir, '.gitignore'), '*\n', { flag: 'wx' }); } catch { /* exists */ }
-    const file = path.join(dir, 'model-escalation.json');
-    let records: Record<string, unknown> = {};
-    try { records = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>; } catch { /* first write */ }
-    records[agentType] = { model, written_at: Date.now() };
-    const tmp = `${file}.tmp-${process.pid}`;
-    fs.writeFileSync(tmp, JSON.stringify(records));
-    retryRenameSync(tmp, file);
+    fs.writeFileSync(path.join(dir, `model-escalation-${agentType}.json`), JSON.stringify({ model, written_at: Date.now() }));
   } catch { /* best-effort */ }
 }
 
@@ -655,7 +657,7 @@ function cmdResolveExecution(cwd: string, agentType: string | undefined, raw: bo
     escalation = { class: opts.failureClass, ...resolved };
   }
 
-  if (typeof opts.attempt === 'number' && opts.attempt > 0 && model) recordModelEscalation(cwd, agentType, model);
+  if (model && model !== resolveModelInternal(cwd, agentType)) recordModelEscalation(cwd, agentType, model);
 
   const effortOpts: Record<string, unknown> = {};
   if (typeof opts.effortOverride === 'string') effortOpts['override'] = opts.effortOverride;

@@ -3,7 +3,7 @@
 // Agent()/Task() call passes match the one GSD resolved for that agent?
 // Baseline is resolveModelInternal (what `init` records and the workflow
 // tells the model to pass). A fresh `resolve-execution --attempt N` record
-// (.gsd/model-escalation.json) legitimises the escalated model.
+// (.gsd/model-escalation-<agent>.json) legitimises the escalated model.
 // Never fails closed: any inability to verify is an allow.
 
 const fs = require('fs');
@@ -11,7 +11,7 @@ const path = require('path');
 const { resolveSentinelRoot, SENTINEL_STALE_MS } = require('./isolation-sentinel.js');
 
 const GUARDED_AGENT_TYPES = new Set(['gsd-executor', 'gsd-verifier', 'gsd-plan-checker', 'gsd-planner']);
-const ESCALATION_RELATIVE_PATH = path.join('.gsd', 'model-escalation.json');
+const escalationPath = (root, type) => path.join(root, '.gsd', `model-escalation-${type}.json`);
 
 // Compare at tier-alias level: `claude-sonnet-4-6` and `sonnet` are the same.
 const family = (m) => {
@@ -34,6 +34,9 @@ function checkAgentModel(data, { clock = Date } = {}) {
     const config = JSON.parse(fs.readFileSync(path.join(root, '.planning', 'config.json'), 'utf-8'));
     const mode = config.hooks && config.hooks.agent_model_guard;
     if (mode === false) return ALLOW;
+    // Cheap pre-check: a pinned non-claude runtime skips the build/resolver loads below.
+    // eslint-disable-next-line local/no-runtime-name-literal
+    if (config.runtime && config.runtime !== 'claude') return ALLOW;
 
     const { ensureRuntimeBuild } = require('../../gsd-core/bin/ensure-runtime-build.cjs');
     ensureRuntimeBuild();
@@ -46,14 +49,14 @@ function checkAgentModel(data, { clock = Date } = {}) {
 
     if (passed) {
       try {
-        const rec = JSON.parse(fs.readFileSync(path.join(root, ESCALATION_RELATIVE_PATH), 'utf-8'))[type];
+        const rec = JSON.parse(fs.readFileSync(escalationPath(root, type), 'utf-8'));
         const age = clock.now() - rec.written_at;
         if (age > -5000 && age < SENTINEL_STALE_MS && family(rec.model) === family(passed)) return ALLOW;
       } catch { /* no usable record */ }
     }
 
     return {
-      action: mode === 'deny' ? 'block' : 'warn',
+      action: mode === 'deny' && passed ? 'block' : 'warn',
       reason: `Agent model guard: subagent_type="${type}" ${passed ? `was passed model="${passed}"` : 'was passed no model'}, ` +
         `but GSD resolved model="${expected}" for it. Pass model="${expected}" (or run ` +
         `\`resolve-execution ${type} --attempt N\` first to escalate deliberately).`,
@@ -63,4 +66,4 @@ function checkAgentModel(data, { clock = Date } = {}) {
   }
 }
 
-module.exports = { checkAgentModel, GUARDED_AGENT_TYPES, ESCALATION_RELATIVE_PATH };
+module.exports = { checkAgentModel };

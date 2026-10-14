@@ -49,6 +49,10 @@
 // gated additionally by `workflow.use_worktrees` — read directly, in-process,
 // no subprocess spawn.
 //
+// #5328: also warns/denies (hooks.agent_model_guard) when the model passed for
+// gsd-executor/verifier/plan-checker/planner differs from the resolved one
+// (hooks/lib/agent-model-check.js); the isolation verdict always wins.
+//
 // Triggers on: Agent/Task tool calls with subagent_type === "gsd-executor"
 //   (both names accepted — #3045 MAJOR 1: only Agent was previously matched,
 //   silently inert on any host/version whose subagent tool is named Task).
@@ -593,7 +597,6 @@ function main() {
           hookSpecificOutput: {
             hookEventName: 'PreToolUse',
             additionalContext: decision.reason,
-            code: 'AGENT_MODEL_MISMATCH',
           },
         });
       }
