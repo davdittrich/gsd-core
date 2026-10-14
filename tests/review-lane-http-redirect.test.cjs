@@ -14,11 +14,12 @@ const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const { cleanup } = require('./helpers.cjs');
+const { PROBE_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
 
 const TOOLS = path.join(__dirname, '..', 'gsd-core', 'bin', 'gsd-tools.cjs');
 
 const listen = (srv) => new Promise((res) => srv.listen(0, '127.0.0.1', () => res(srv.address().port)));
-const close = (srv) => new Promise((res) => srv.close(res));
+const close = (srv) => new Promise((res) => { srv.closeAllConnections?.(); srv.close(res); });
 
 /** `redirectOn`: which method R answers with a redirect — 'POST', 'GET' or null (never). */
 async function invokeLane(redirectOn, status = 307) {
@@ -55,7 +56,7 @@ async function invokeLane(redirectOn, status = 307) {
       const c = cp.spawn(
         process.execPath,
         [TOOLS, 'review-lane', 'invoke', '--slug', 'ollama', '--run-dir', runDir, '--repo-root', project, '--raw'],
-        { cwd: project, env: process.env },
+        { cwd: project, env: process.env, timeout: PROBE_TIMEOUT_MS },
       );
       let text = '';
       c.stdout.on('data', (d) => (text += d));
@@ -77,7 +78,7 @@ async function invokeLane(redirectOn, status = 307) {
 }
 
 describe('review-lane HTTP seam refuses redirects (#5288)', () => {
-  for (const status of [301, 302, 307, 308]) {
+  for (const status of [301, 302, 303, 307, 308]) {
     test(`${status} on the chat POST: target gets no request, stub names the redirect`, async () => {
       const { seen, out, written } = await invokeLane('POST', status);
       assert.deepEqual(seen, [], 'redirect target received a request');
@@ -91,11 +92,13 @@ describe('review-lane HTTP seam refuses redirects (#5288)', () => {
     const { seen, out } = await invokeLane('GET', 302);
     assert.deepEqual(seen, [], 'redirect target received a request');
     assert.match(out, /"ok": false/, out);
+    assert.match(out, /redirect refused/i, out);
   });
 
   test('a host that does not redirect still yields a real review', async () => {
-    const { seen, out } = await invokeLane(null);
+    const { seen, out, written } = await invokeLane(null);
     assert.deepEqual(seen, []);
     assert.match(out, /"stubbed": false/, out);
+    assert.match(written, /REAL-REVIEW/, written);
   });
 });

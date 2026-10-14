@@ -1709,7 +1709,7 @@ function dispatchOverlayCapabilityCommand({ command, args, cwd, raw, error, load
             redirect: 'manual',
           });
           if (res.status >= 300 && res.status < 400) {
-            await res.body?.cancel();
+            await res.body?.cancel().catch(() => {});
             return { ok: false, status: res.status, body: '', error: `redirect refused (HTTP ${res.status})` };
           }
           return { ok: res.ok, status: res.status, body: await res.text() };
