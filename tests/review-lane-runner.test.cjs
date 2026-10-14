@@ -221,14 +221,13 @@ describe('runner — probe (ADR-2782 D7)', () => {
   });
 
   test('http-reachable probes the resolved plan.host, not a raw "null" config sentinel', async () => {
-    const p = plan('ollama');
+    const p = plan('ollama', { 'review.ollama_host': 'null' });
     const urls = [];
     await probeLane(p, deps({
-      configGet: () => 'null',
       httpJson: async (url) => { urls.push(url); return { ok: true, status: 200, body: '{}' }; },
     }));
     assert.equal(urls.length, 1);
-    assert.ok(urls[0].startsWith(p.host), `probed ${urls[0]}, expected host ${p.host}`);
+    assert.ok(urls[0].startsWith('http://localhost:11434'), `probed ${urls[0]}, expected the descriptor default`);
   });
 
   test('probeHttpLanes: skips spawn lanes, honors selection, reports unresolvable lanes', async () => {

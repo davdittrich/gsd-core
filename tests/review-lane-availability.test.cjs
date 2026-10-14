@@ -144,9 +144,9 @@ describe('review-lane availability (#5266)', () => {
 
   test('an installed third-party openai-http lane is never probed (ADR-2782 D7)', async () => {
     const third = await listen(status(200));
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'rev5266-home-'));
+    const src = fs.mkdtempSync(path.join(os.tmpdir(), 'rev5266-src-'));
     try {
-      const home = fs.mkdtempSync(path.join(os.tmpdir(), 'rev5266-home-'));
-      const src = fs.mkdtempSync(path.join(os.tmpdir(), 'rev5266-src-'));
       const hostKey = 'review.rev5266http_host';
       fs.writeFileSync(path.join(src, 'capability.json'), JSON.stringify({
         id: 'rev5266http',
@@ -185,9 +185,9 @@ describe('review-lane availability (#5266)', () => {
       assert.equal(out.success, true, out.error || out.output);
       assert.ok(!out.output.includes('rev5266http'), `third-party lane leaked into output:\n${out.output}`);
       assert.deepEqual(third.requests, [], 'third-party lane host must never be requested');
+    } finally {
       cleanup(home);
       cleanup(src);
-    } finally {
       await closeServer(third);
     }
   });
