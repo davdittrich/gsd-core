@@ -15,11 +15,12 @@ const { spawnSync } = require('node:child_process');
 
 const { resolveCapabilitySource } = require('../gsd-core/bin/lib/capability-source.cjs');
 const { cleanup, createTempDir } = require('./helpers.cjs');
+const { GIT_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
 
 const URL = 'https://example.invalid/repo.git';
 
 function git(cwd, ...args) {
-  const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
+  const r = spawnSync('git', args, { cwd, encoding: 'utf8', timeout: GIT_TIMEOUT_MS });
   assert.equal(r.status, 0, `git ${args.join(' ')}: ${r.stderr}`);
   return r.stdout.trim();
 }
@@ -53,6 +54,8 @@ describe('#5297 git install honors non-tip refs', () => {
     commit('0.2.0');
     mid = git(work, 'rev-parse', 'HEAD');
     git(work, 'tag', '-a', 'v0.2.0', '-m', 'annotated');
+    git(work, 'branch', 'amb', 'main');
+    git(work, 'tag', 'amb', 'v0.1.0');
     git(work, 'checkout', '-q', '-b', 'side');
     commit('0.3.0-side');
     git(work, 'checkout', '-q', 'main');
@@ -66,7 +69,7 @@ describe('#5297 git install honors non-tip refs', () => {
     gsdHome = createTempDir('gsd-home-');
     const execGit = (args, o) => {
       const a = args.map((x) => (x === URL ? bare : x));
-      const r = spawnSync('git', a, { encoding: 'utf8', timeout: o?.timeout });
+      const r = spawnSync('git', a, { encoding: 'utf8', timeout: o?.timeout ?? GIT_TIMEOUT_MS });
       return { exitCode: r.status ?? 1, stdout: r.stdout, stderr: r.stderr, signal: r.signal, error: r.error ?? null };
     };
     return resolveCapabilitySource(spec, { gsdHome, hostVersion: '1.5.0', execOverrides: { git: execGit }, ...extra });
@@ -77,6 +80,7 @@ describe('#5297 git install honors non-tip refs', () => {
     ['bare tag behind tip', 'v0.1.0', '0.1.0'],
     ['tag: prefix', 'tag:v0.1.0', '0.1.0'],
     ['annotated tag', 'v0.2.0', '0.2.0'],
+    ['tag: beats same-named branch', 'tag:amb', '0.1.0'],
     ['non-default branch', 'side', '0.3.0-side'],
     ['no ref tracks default', null, '0.4.0'],
   ]) {

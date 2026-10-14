@@ -1035,12 +1035,13 @@ function resolveGit(
     // Copy only — no npm install; template hooks are disabled for checkout. #5297: a shallow clone holds
     // only the default-branch tip, so a pinned ref is fetched by name instead (tag, branch or sha;
     // `tag:`/`sha:` prefixes stripped). Ref and URL sit after `--`; `:`/`+` would be read as refspec syntax.
-    const ref = classifyGitRef(parsed).value;
+    const kind = classifyGitRef(parsed);
+    const ref = kind.value;
     if (/[:+]/.test(ref)) throw new Error(`Unsafe git ref (refspec syntax not allowed): "${ref}"`);
     const steps: Array<[string, string[]]> = ref
       ? [
           ['init', ['-C', cloneDir, 'init', '-q']],
-          ['fetch', ['-C', cloneDir, 'fetch', '-q', '--depth', '1', '--', parsed.target, ref]],
+          ['fetch', ['-C', cloneDir, 'fetch', '-q', '--depth', '1', '--', parsed.target, kind.kind === 'tag' ? `refs/tags/${ref}` : ref]],
           ['checkout', ['-C', cloneDir, '-c', 'core.hooksPath=/dev/null', 'checkout', '-q', 'FETCH_HEAD', '--']],
         ]
       : [['clone', ['clone', '--depth', '1', '--', parsed.target, cloneDir]]];
