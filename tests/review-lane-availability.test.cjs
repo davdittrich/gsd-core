@@ -21,6 +21,9 @@ const { resolveLanePlan } = require('../gsd-core/bin/lib/review-lane-invocation.
 
 const run = promisify(execFile);
 const TOOLS = path.resolve(__dirname, '..', 'gsd-core', 'bin', 'gsd-tools.cjs');
+// Fixture probe budget for the synthetic third-party lane: a loopback HTTP fixture answers in
+// ms, so this is a per-lane descriptor value under test, not a subprocess class norm.
+const FIXTURE_PROBE_TIMEOUT_MS = 2000;
 
 /** Listening server; `handler` decides the response. Returns `{ url, server, requests }`. */
 async function listen(handler) {
@@ -158,7 +161,7 @@ describe('review-lane availability (#5266)', () => {
           slug: 'rev5266http',
           flags: ['--rev5266http'],
           transport: 'openai-http',
-          probe: { kind: 'http-reachable', hostConfigKey: hostKey, path: '/v1/models', timeoutMs: 2000 },
+          probe: { kind: 'http-reachable', hostConfigKey: hostKey, path: '/v1/models', timeoutMs: FIXTURE_PROBE_TIMEOUT_MS },
           invoke: { hostConfigKey: hostKey, path: '/v1/chat/completions', modelDiscovery: 'none', effortChannel: 'none' },
           timeoutFloorMs: 5000,
           emptyOutput: 'stub-with-stderr',
