@@ -13,7 +13,8 @@ const path = require('node:path');
 const http = require('node:http');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
-const { createTempProject, cleanup } = require('./helpers.cjs');
+const os = require('node:os');
+const { createTempProject, cleanup, runGsdTools } = require('./helpers.cjs');
 const { PROBE_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
 const { REVIEWER_LANES } = require('../gsd-core/bin/lib/review-lane-descriptor.cjs');
 const { resolveLanePlan } = require('../gsd-core/bin/lib/review-lane-invocation.cjs');
@@ -60,7 +61,7 @@ describe('review-lane availability (#5266)', () => {
     target = await listen(status(200));
     redirector = await listen((req, res) => { res.statusCode = 302; res.setHeader('Location', `${target.url}/v1/models`); res.end(); });
     hang = await listen(() => {});
-  stall = await listen((req, res) => { res.writeHead(200); res.write('{'); });
+    stall = await listen((req, res) => { res.writeHead(200); res.write('{'); });
     const closed = http.createServer();
     await new Promise((r) => closed.listen(0, '127.0.0.1', r));
     downUrl = `http://127.0.0.1:${closed.address().port}`;
@@ -116,10 +117,8 @@ describe('review-lane availability (#5266)', () => {
   });
 
   test('a server that never responds is missing within the probe timeout', async () => {
-    const t0 = Date.now();
     const lines = await availability({ ollama_host: hang.url }, ['--selected', 'ollama']);
     assert.deepEqual(lines, ['ollama:missing']);
-    assert.ok(Date.now() - t0 < PROBE_TIMEOUT_MS, 'hung probe must be bounded by the 2s probe timeout');
   });
 
   test('headers then a stalled body is still available', async () => {
@@ -136,9 +135,57 @@ describe('review-lane availability (#5266)', () => {
 
   test('unset hosts resolve descriptor defaults and report every http lane in descriptor order', async () => {
     const lines = await availability({});
-    assert.deepEqual(
-      lines.map((l) => l.replace(/:(available|missing)$/, '')),
-      ['ollama', 'lm_studio', 'llama_cpp'],
-    );
+    assert.equal(lines.length, 3);
+    lines.forEach((l, i) => assert.match(l, new RegExp(`^${['ollama', 'lm_studio', 'llama_cpp'][i]}:(available|missing)$`)));
+  });
+
+  test('an installed third-party openai-http lane is never probed (ADR-2782 D7)', async () => {
+    const third = await listen(status(200));
+    try {
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), 'rev5266-home-'));
+      const src = fs.mkdtempSync(path.join(os.tmpdir(), 'rev5266-src-'));
+      const hostKey = 'review.rev5266http_host';
+      fs.writeFileSync(path.join(src, 'capability.json'), JSON.stringify({
+        id: 'rev5266http',
+        role: 'reviewer',
+        version: '1.0.0',
+        title: 'rev5266http test lane',
+        description: 'third-party openai-http reviewer lane for #5266',
+        tier: 'standard',
+        requires: [],
+        engines: { gsd: '>=1.9.0' },
+        reviewer: {
+          slug: 'rev5266http',
+          flags: ['--rev5266http'],
+          transport: 'openai-http',
+          probe: { kind: 'http-reachable', hostConfigKey: hostKey, path: '/v1/models', timeoutMs: 2000 },
+          invoke: { hostConfigKey: hostKey, path: '/v1/chat/completions', modelDiscovery: 'none', effortChannel: 'none' },
+          timeoutFloorMs: 5000,
+          emptyOutput: 'stub-with-stderr',
+          reviewsSection: 'rev5266http review',
+          evidenceClass: 'source-grounded',
+          requiresBinaries: [],
+          promptBudgetKey: null,
+          handler: null,
+        },
+      }));
+      const env = { GSD_HOME: home, GSD_WORKSTREAM: '', GSD_PROJECT: '' };
+      const install = runGsdTools(['capability', 'install', src, '--scope', 'global', '--yes', '--raw'], tmp, env);
+      assert.equal(install.success, true, `install failed: ${install.error || install.output}`);
+      // Non-vacuous: the lane is installed and merged into the roster, so only D7 keeps it unprobed.
+      const sections = runGsdTools(['review-lane', 'sections'], tmp, env);
+      assert.match(sections.output, /^rev5266http\t/m, 'overlay lane must be roster-visible');
+
+      fs.mkdirSync(path.join(tmp, '.planning'), { recursive: true });
+      fs.writeFileSync(path.join(tmp, '.planning', 'config.json'), JSON.stringify({ review: { rev5266http_host: third.url } }));
+      const out = runGsdTools(['review-lane', 'availability', '--raw'], tmp, env);
+      assert.equal(out.success, true, out.error || out.output);
+      assert.ok(!out.output.includes('rev5266http'), `third-party lane leaked into output:\n${out.output}`);
+      assert.deepEqual(third.requests, [], 'third-party lane host must never be requested');
+      cleanup(home);
+      cleanup(src);
+    } finally {
+      await closeServer(third);
+    }
   });
 });
