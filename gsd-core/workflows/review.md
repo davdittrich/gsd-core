@@ -29,7 +29,7 @@ command -v kimi >/dev/null 2>&1 && echo "kimi-code:available" || echo "kimi-code
 
 # Check local model servers (OpenAI-compatible HTTP API — no CLI binary required);
 # hosts and defaults come from each lane's descriptor
-gsd_run review-lane availability || echo "local-lanes:probe-unavailable (update gsd-tools)"
+gsd_run review-lane availability || echo "local-lanes:probe-failed (see the error above; an old gsd-tools lacks this subcommand)"
 
 # jq prerequisite (#2589). The config/model/budget lookups in this workflow no
 # longer need jq — they use the native --raw/--pick flags. But the lanes listed
