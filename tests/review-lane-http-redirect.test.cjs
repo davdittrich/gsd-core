@@ -21,7 +21,7 @@ const TOOLS = path.join(__dirname, '..', 'gsd-core', 'bin', 'gsd-tools.cjs');
 const listen = (srv) => new Promise((res) => srv.listen(0, '127.0.0.1', () => res(srv.address().port)));
 const close = (srv) => new Promise((res) => { srv.closeAllConnections?.(); srv.close(res); });
 
-/** `redirectOn`: which method R answers with a redirect — 'POST', 'GET' or null (never). */
+/** `redirectOn`: what R redirects — 'POST', 'GET', 'GET#2' (only the second GET: the models listing after the probe) or null (never). */
 async function invokeLane(redirectOn, status = 307) {
   const seen = [];
   const target = http.createServer((req, res) => {
@@ -30,8 +30,9 @@ async function invokeLane(redirectOn, status = 307) {
     res.end(JSON.stringify({ choices: [{ message: { content: 'LEAKED' } }] }));
   });
   let tPort;
+  let gets = 0;
   const redirector = http.createServer((req, res) => {
-    if (req.method === redirectOn) {
+    if (req.method === redirectOn || (redirectOn === 'GET#2' && req.method === 'GET' && ++gets === 2)) {
       res.writeHead(status, { Location: `http://127.0.0.1:${tPort}${req.url}` });
       return res.end();
     }
@@ -93,6 +94,13 @@ describe('review-lane HTTP seam refuses redirects (#5288)', () => {
     assert.deepEqual(seen, [], 'redirect target received a request');
     assert.match(out, /"ok": false/, out);
     assert.match(out, /redirect refused/i, out);
+  });
+
+  test('302 on the models listing GET: target gets no request, lane falls back and still reviews', async () => {
+    const { seen, out, written } = await invokeLane('GET#2', 302);
+    assert.deepEqual(seen, [], 'redirect target received a request');
+    assert.match(out, /"stubbed": false/, out);
+    assert.match(written, /REAL-REVIEW/, written);
   });
 
   test('a host that does not redirect still yields a real review', async () => {
