@@ -1711,7 +1711,7 @@ function dispatchOverlayCapabilityCommand({ command, args, cwd, raw, error, load
           // redirect:'manual' marks a reachability probe: the status line is the answer, so do not
           // let a stalled body turn a replying server into `missing`.
           if (opts.redirect === 'manual') {
-            void res.body?.cancel();
+            res.body?.cancel().catch(() => {});
             return { ok: res.ok, status: res.status, body: '' };
           }
           return { ok: res.ok, status: res.status, body: await res.text() };
