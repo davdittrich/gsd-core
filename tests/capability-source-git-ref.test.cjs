@@ -90,4 +90,11 @@ describe('#5297 git install honors non-tip refs', () => {
     const res = await run(`git+${URL}#sha:${mid}`);
     try { assert.equal(versionOf(res), '0.2.0'); } finally { cleanup(gsdHome); }
   });
+
+  test('missing ref and refspec syntax are rejected', async () => {
+    for (const ref of ['nope', 'a:b']) {
+      await assert.rejects(() => run(`git+${URL}#${ref}`), /git (fetch|init)|Unsafe git ref/);
+      cleanup(gsdHome);
+    }
+  });
 });

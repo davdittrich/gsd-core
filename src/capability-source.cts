@@ -1032,21 +1032,22 @@ function resolveGit(
 
   const cloneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-cap-git-'));
   try {
-    // Copy only — no hooks execute on clone/fetch, no npm install. #5297: a shallow clone holds only the
-    // default-branch tip, so a pinned ref is fetched by name instead (tag, branch or sha; `tag:`/`sha:`
-    // prefixes stripped). Ref and URL sit after `--`; a leading-dash ref is rejected at parse time.
+    // Copy only — no npm install; template hooks are disabled for checkout. #5297: a shallow clone holds
+    // only the default-branch tip, so a pinned ref is fetched by name instead (tag, branch or sha;
+    // `tag:`/`sha:` prefixes stripped). Ref and URL sit after `--`; `:`/`+` would be read as refspec syntax.
     const ref = classifyGitRef(parsed).value;
-    const steps = ref
+    if (/[:+]/.test(ref)) throw new Error(`Unsafe git ref (refspec syntax not allowed): "${ref}"`);
+    const steps: Array<[string, string[]]> = ref
       ? [
-          ['-C', cloneDir, 'init', '-q'],
-          ['-C', cloneDir, 'fetch', '-q', '--depth', '1', '--', parsed.target, ref],
-          ['-C', cloneDir, 'checkout', '-q', 'FETCH_HEAD', '--'],
+          ['init', ['-C', cloneDir, 'init', '-q']],
+          ['fetch', ['-C', cloneDir, 'fetch', '-q', '--depth', '1', '--', parsed.target, ref]],
+          ['checkout', ['-C', cloneDir, '-c', 'core.hooksPath=/dev/null', 'checkout', '-q', 'FETCH_HEAD', '--']],
         ]
-      : [['clone', '--depth', '1', '--', parsed.target, cloneDir]];
-    for (const args of steps) {
+      : [['clone', ['clone', '--depth', '1', '--', parsed.target, cloneDir]]];
+    for (const [name, args] of steps) {
       const r = execGit(args, { timeout: 60_000 });
       if (r.exitCode !== 0) {
-        throw new Error(`git ${ref ? args[2] : 'clone'}${ref ? ` "${ref}"` : ''} failed (exit ${r.exitCode}): ${r.stderr}`);
+        throw new Error(`git ${name}${ref ? ` "${ref}"` : ''} failed (exit ${r.exitCode}): ${r.stderr}`);
       }
     }
 
