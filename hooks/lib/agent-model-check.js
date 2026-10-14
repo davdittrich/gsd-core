@@ -16,7 +16,7 @@ const escalationPath = (root, type) => path.join(root, '.gsd', `model-escalation
 // Compare at tier-alias level: `claude-sonnet-4-6` and `sonnet` are the same.
 const family = (m) => {
   const s = String(m).toLowerCase();
-  return /(opus|sonnet|haiku|fable)/.exec(s)?.[1] ?? s;
+  return /(?:^|[^a-z0-9])(opus|sonnet|haiku|fable)(?:$|[^a-z0-9])/.exec(s)?.[1] ?? s;
 };
 
 /**
@@ -31,6 +31,7 @@ function checkAgentModel(data, { clock = Date } = {}) {
     if (typeof type !== 'string' || !GUARDED_AGENT_TYPES.has(type)) return ALLOW;
 
     const root = resolveSentinelRoot(data.cwd || process.cwd());
+    // Strict JSON on purpose: a config this cannot parse (comments, trailing commas) fails open.
     const config = JSON.parse(fs.readFileSync(path.join(root, '.planning', 'config.json'), 'utf-8'));
     const mode = config.hooks && config.hooks.agent_model_guard;
     if (mode === false) return ALLOW;
@@ -51,13 +52,15 @@ function checkAgentModel(data, { clock = Date } = {}) {
       try {
         const rec = JSON.parse(fs.readFileSync(escalationPath(root, type), 'utf-8'));
         const age = clock.now() - rec.written_at;
-        if (age > -5000 && age < SENTINEL_STALE_MS && family(rec.model) === family(passed)) return ALLOW;
+        if (typeof rec.model === 'string' && age > -5000 && age < SENTINEL_STALE_MS && family(rec.model) === family(passed)) return ALLOW;
       } catch { /* no usable record */ }
     }
 
+    // tool_input.model is model-authored: cap it and keep only id-shaped characters before it reaches additionalContext.
+    const shown = passed.replace(/[^\w.:[\]-]/g, '?').slice(0, 64);
     return {
-      action: mode === 'deny' && passed ? 'block' : 'warn',
-      reason: `Agent model guard: subagent_type="${type}" ${passed ? `was passed model="${passed}"` : 'was passed no model'}, ` +
+      action: mode === 'deny' && passed.length > 0 ? 'block' : 'warn',
+      reason: `Agent model guard: subagent_type="${type}" ${passed ? `was passed model="${shown}"` : 'was passed no model'}, ` +
         `but GSD resolved model="${expected}" for it. Pass model="${expected}" (or run ` +
         `\`resolve-execution ${type} --attempt N\` first to escalate deliberately).`,
     };

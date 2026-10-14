@@ -605,16 +605,24 @@ function cmdResolveGranularity(cwd: string, phaseType: string | undefined, raw: 
  * root the hook reads (resolveSentinelRoot semantics); the file name must match
  * agent-model-check.js escalationPath() there. Best-effort: a write failure only costs a guard warning.
  */
-function recordModelEscalation(cwd: string, agentType: string, model: string): void {
+function recordModelEscalation(cwd: string, agentType: string, model: string | null): void {
+  if (!/^[a-z0-9_-]+$/i.test(agentType)) return; // agentType becomes a file name
   try {
     const root = fs.existsSync(path.join(cwd, '.planning'))
       ? cwd
       : findProjectRoot(worktreeSafetyMod.resolveWorktreeRoot(cwd).root);
     const dir = path.join(root, '.gsd');
+    const file = path.join(dir, `model-escalation-${agentType}.json`);
+    // null = baseline resolved: drop any earlier escalation so it cannot legitimise a stale model.
+    if (model === null) {
+      if (!fs.existsSync(dir) || fs.lstatSync(dir).isSymbolicLink()) return;
+      fs.rmSync(file, { force: true });
+      return;
+    }
     fs.mkdirSync(dir, { recursive: true });
     if (fs.lstatSync(dir).isSymbolicLink()) return;
     try { fs.writeFileSync(path.join(dir, '.gitignore'), '*\n', { flag: 'wx' }); } catch { /* exists */ }
-    fs.writeFileSync(path.join(dir, `model-escalation-${agentType}.json`), JSON.stringify({ model, written_at: Date.now() }));
+    fs.writeFileSync(file, JSON.stringify({ model, written_at: Date.now() }));
   } catch { /* best-effort */ }
 }
 
@@ -657,7 +665,7 @@ function cmdResolveExecution(cwd: string, agentType: string | undefined, raw: bo
     escalation = { class: opts.failureClass, ...resolved };
   }
 
-  if (model && model !== resolveModelInternal(cwd, agentType)) recordModelEscalation(cwd, agentType, model);
+  recordModelEscalation(cwd, agentType, model && model !== resolveModelInternal(cwd, agentType) ? model : null);
 
   const effortOpts: Record<string, unknown> = {};
   if (typeof opts.effortOverride === 'string') effortOpts['override'] = opts.effortOverride;

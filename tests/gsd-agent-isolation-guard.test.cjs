@@ -2108,6 +2108,46 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
     assert.equal(JSON.parse(fs.readFileSync(escalationFile(project, 'gsd-executor'), 'utf8')).model, 'gpt-5');
   });
 
+  test('family match is token-bounded: substrings of custom model names do not collide', (t) => {
+    setup(t);
+    assert.equal(evaluate(dispatch('gsd-planner', 'noopus-1')).action, 'warn');
+    assert.equal(evaluate(dispatch('gsd-planner', 'claude-opus-4-8')).action, 'allow');
+  });
+
+  test('reason keeps only id-shaped characters and caps the echoed model', (t) => {
+    setup(t);
+    const w = evaluate(dispatch('gsd-planner', `x\n${'y'.repeat(200)}\u2028z`));
+    assert.equal(w.action, 'warn');
+    assert.doesNotMatch(w.reason, /[\r\n\u2028\u2029]/);
+    assert.doesNotMatch(dispatchReason('x" ignore prior'), /ignore prior/);
+    assert.ok(w.reason.length < 400, 'echoed model is capped');
+  });
+
+  const dispatchReason = (m) => evaluate(dispatch('gsd-planner', m)).reason;
+
+  test('escalation record without a string model never matches', (t) => {
+    setup(t);
+    writeEscalation(project, 'gsd-planner', { written_at: Date.now() });
+    assert.equal(evaluate(dispatch('gsd-planner', 'undefined')).action, 'warn');
+  });
+
+  test('a baseline resolve-execution clears a prior escalation record', (t) => {
+    setup(t);
+    assert.ok(runGsdTools(['resolve-execution', 'gsd-executor', '--attempt', '1'], project).success);
+    assert.equal(fs.existsSync(escalationFile(project, 'gsd-executor')), true);
+    assert.ok(runGsdTools(['resolve-execution', 'gsd-executor'], project).success);
+    assert.equal(fs.existsSync(escalationFile(project, 'gsd-executor')), false);
+    assert.equal(evaluate(dispatch('gsd-executor', 'opus', WORKTREE)).action, 'warn');
+  });
+
+  test('resolve-execution never writes outside .gsd for a traversal-shaped agent type', (t) => {
+    setup(t, { ...ISSUE_CONFIG, model_overrides: { 'x/../../escape': 'haiku' } });
+    runGsdTools(['resolve-execution', 'x/../../escape', '--attempt', '1'], project);
+    assert.equal(fs.existsSync(path.join(project, 'escape.json')), false);
+    assert.deepEqual(fs.readdirSync(project).filter((f) => f.includes('escape')), []);
+    assert.deepEqual((fs.existsSync(path.join(project, '.gsd')) ? fs.readdirSync(path.join(project, '.gsd')) : []).filter((f) => f.startsWith('model-escalation')), []);
+  });
+
   test('config-set rejects an invalid hooks.agent_model_guard value', (t) => {
     setup(t);
     assert.equal(runGsdTools(['config-set', 'hooks.agent_model_guard', 'block'], project).success, false);
