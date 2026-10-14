@@ -16,7 +16,7 @@ const escalationPath = (root, type) => path.join(root, '.gsd', `model-escalation
 // Compare at tier-alias level: `claude-sonnet-4-6` and `sonnet` are the same.
 const family = (m) => {
   const s = String(m).toLowerCase();
-  return /(?:^|[^a-z0-9])(opus|sonnet|haiku|fable)(?:$|[^a-z0-9])/.exec(s)?.[1] ?? s;
+  return /(?:^|[^a-z0-9])(opus|sonnet|haiku|fable)(?:$|[^a-z])/.exec(s)?.[1] ?? s;
 };
 
 /**

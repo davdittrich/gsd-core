@@ -622,7 +622,15 @@ function recordModelEscalation(cwd: string, agentType: string, model: string | n
     fs.mkdirSync(dir, { recursive: true });
     if (fs.lstatSync(dir).isSymbolicLink()) return;
     try { fs.writeFileSync(path.join(dir, '.gitignore'), '*\n', { flag: 'wx' }); } catch { /* exists */ }
-    fs.writeFileSync(file, JSON.stringify({ model, written_at: Date.now() }));
+    const record = JSON.stringify({ model, written_at: Date.now() });
+    if (process.platform !== 'win32') {
+      // rename so the hook never reads a half-written record
+      const tmp = `${file}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, record);
+      fs.renameSync(tmp, file);
+    } else {
+      fs.writeFileSync(file, record); // Windows can hold the target open; skip rename
+    }
   } catch { /* best-effort */ }
 }
 
@@ -648,9 +656,9 @@ function cmdResolveExecution(cwd: string, agentType: string | undefined, raw: bo
   // (heavy tier) alongside effort. The FIRST-spawn tier now comes from
   // resolveModelInternal's own dynamic_routing step (#4505), so the absent-attempt
   // branch below reaches it too — this gate is only about escalation.
-  let model = (opts.attempt !== undefined && opts.attempt !== null)
-    ? resolveModelForTier(cwd, agentType, opts.attempt)
-    : resolveModelInternal(cwd, agentType);
+  const baselineModel = resolveModelInternal(cwd, agentType);
+  const hasAttempt = opts.attempt !== undefined && opts.attempt !== null;
+  let model = hasAttempt ? resolveModelForTier(cwd, agentType, opts.attempt) : baselineModel;
 
   // #2296: when the caller reports WHY the previous attempt failed, consult the
   // provider-escalation ladder. Only a quota/rate-limit class warrants it — a
@@ -665,7 +673,9 @@ function cmdResolveExecution(cwd: string, agentType: string | undefined, raw: bo
     escalation = { class: opts.failureClass, ...resolved };
   }
 
-  recordModelEscalation(cwd, agentType, model && model !== resolveModelInternal(cwd, agentType) ? model : null);
+  // A plain query (no --attempt) is read-only for the record; only an explicit attempt rewrites or clears it.
+  if (model && model !== baselineModel) recordModelEscalation(cwd, agentType, model);
+  else if (hasAttempt) recordModelEscalation(cwd, agentType, null);
 
   const effortOpts: Record<string, unknown> = {};
   if (typeof opts.effortOverride === 'string') effortOpts['override'] = opts.effortOverride;

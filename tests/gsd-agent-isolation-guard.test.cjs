@@ -2112,6 +2112,7 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
     setup(t);
     assert.equal(evaluate(dispatch('gsd-planner', 'noopus-1')).action, 'warn');
     assert.equal(evaluate(dispatch('gsd-planner', 'claude-opus-4-8')).action, 'allow');
+    assert.equal(evaluate(dispatch('gsd-planner', 'opus45')).action, 'allow');
   });
 
   test('reason keeps only id-shaped characters and caps the echoed model', (t) => {
@@ -2131,21 +2132,29 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
     assert.equal(evaluate(dispatch('gsd-planner', 'undefined')).action, 'warn');
   });
 
-  test('a baseline resolve-execution clears a prior escalation record', (t) => {
+  test('a plain resolve-execution leaves an escalation record alone', (t) => {
+    setup(t);
+    assert.ok(runGsdTools(['resolve-execution', 'gsd-executor', '--attempt', '1'], project).success);
+    assert.ok(runGsdTools(['resolve-execution', 'gsd-executor'], project).success);
+    assert.equal(fs.existsSync(escalationFile(project, 'gsd-executor')), true);
+  });
+
+  test('a baseline resolve-execution --attempt 0 clears a prior escalation record', (t) => {
     setup(t);
     assert.ok(runGsdTools(['resolve-execution', 'gsd-executor', '--attempt', '1'], project).success);
     assert.equal(fs.existsSync(escalationFile(project, 'gsd-executor')), true);
-    assert.ok(runGsdTools(['resolve-execution', 'gsd-executor'], project).success);
+    assert.ok(runGsdTools(['resolve-execution', 'gsd-executor', '--attempt', '0'], project).success);
     assert.equal(fs.existsSync(escalationFile(project, 'gsd-executor')), false);
     assert.equal(evaluate(dispatch('gsd-executor', 'opus', WORKTREE)).action, 'warn');
   });
 
   test('resolve-execution never writes outside .gsd for a traversal-shaped agent type', (t) => {
-    setup(t, { ...ISSUE_CONFIG, model_overrides: { 'x/../../escape': 'haiku' } });
-    runGsdTools(['resolve-execution', 'x/../../escape', '--attempt', '1'], project);
+    setup(t, { ...ISSUE_CONFIG, dynamic_routing: { ...ISSUE_CONFIG.dynamic_routing, provider_escalation: ['gpt-5'] } });
+    // the directory must exist, else the write fails on ENOENT with or without the guard
+    fs.mkdirSync(path.join(project, '.gsd', 'model-escalation-x'), { recursive: true });
+    runGsdTools(['resolve-execution', 'x/../../escape', '--attempt', '1', '--failure-class', 'quota-exceeded'], project);
     assert.equal(fs.existsSync(path.join(project, 'escape.json')), false);
     assert.deepEqual(fs.readdirSync(project).filter((f) => f.includes('escape')), []);
-    assert.deepEqual((fs.existsSync(path.join(project, '.gsd')) ? fs.readdirSync(path.join(project, '.gsd')) : []).filter((f) => f.startsWith('model-escalation')), []);
   });
 
   test('config-set rejects an invalid hooks.agent_model_guard value', (t) => {
