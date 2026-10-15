@@ -304,7 +304,7 @@ describe('#3190 — code-review-fix --auto REVIEW.md commit + FIX_REPORT_PATH en
         const res = runHook('-c', [script], { interpreter: 'bash', timeoutMs: PROBE_TIMEOUT_MS });
         assert.strictEqual(res.exitCode, 0, 'the cleanup step must never abort: ' + res.stderr);
         const calls = fs.existsSync(path.join(dir, 'gsd-calls.log')) ? fs.readFileSync(path.join(dir, 'gsd-calls.log'), 'utf8') : '';
-        fs.rmSync(path.join(dir, 'gsd-calls.log'), { force: true });
+        if (calls) fs.unlinkSync(path.join(dir, 'gsd-calls.log'));
         return {
           calls,
           status: git(dir, 'status', '--porcelain').stdout.trim(),
