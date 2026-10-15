@@ -282,10 +282,11 @@ export function evaluateTddReviewCheckpoint(input: { projectDir: string; args: r
   const violations = rows.filter(r => r.status === 'FAIL').length;
 
   // Build review table
-  const tableHeader = '| Plan | RED | GREEN | REFACTOR | Status       |';
-  const tableDivider = '|------|-----|-------|----------|--------------|';
+  const w = Math.max(6, ...rows.map(r => r.status.length));
+  const tableHeader = `| Plan | RED | GREEN | REFACTOR | ${'Status'.padEnd(w)} |`;
+  const tableDivider = `|------|-----|-------|----------|${'-'.repeat(w + 2)}|`;
   const tableRows = rows.map(r =>
-    `| ${r.planId.padEnd(4)} | ${r.red ? ' ✓ ' : ' ✗ '} | ${r.green ? '  ✓  ' : '  ✗  '} | ${r.refactor ? '   ✓    ' : '   —    '} | ${r.status.padEnd(12)} |`,
+    `| ${r.planId.padEnd(4)} | ${r.red ? ' ✓ ' : ' ✗ '} | ${r.green ? '  ✓  ' : '  ✗  '} | ${r.refactor ? '   ✓    ' : '   —    '} | ${r.status.padEnd(w)} |`,
   );
 
   let table = [

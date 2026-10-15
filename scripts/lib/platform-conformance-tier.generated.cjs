@@ -18,6 +18,7 @@ module.exports = {
   "tests/augment-upgrades.test.cjs",
   "tests/blocking-guard-budget-parity.test.cjs",
   "tests/broken-windows.test.cjs",
+  "tests/bug-5354-tdd-seal-squash.test.cjs",
   "tests/capability-cli.test.cjs",
   "tests/capability-command-dispatch.test.cjs",
   "tests/capability-consent.test.cjs",

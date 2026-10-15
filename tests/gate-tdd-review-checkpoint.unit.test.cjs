@@ -105,7 +105,7 @@ const CASES = [
         passed: true,
         tddPlans: 1,
         violations: 1,
-        table: '### TDD REVIEW — Phase 1\n\nTDD Plans: 1 | Gate violations: 1\n\n| Plan | RED | GREEN | REFACTOR | Status       |\n|------|-----|-------|----------|--------------|\n| 01-01 |  ✗  |   ✗   |    —     | FAIL         |\n\n⚠ Gate violations are advisory — review before advancing.\n  Plan 01-01 missing: RED, GREEN gate commit(s).\n  Expected commit pattern: test(01-01): ... → feat(01-01): ...',
+        table: '### TDD REVIEW — Phase 1\n\nTDD Plans: 1 | Gate violations: 1\n\n| Plan | RED | GREEN | REFACTOR | Status |\n|------|-----|-------|----------|--------|\n| 01-01 |  ✗  |   ✗   |    —     | FAIL   |\n\n⚠ Gate violations are advisory — review before advancing.\n  Plan 01-01 missing: RED, GREEN gate commit(s).\n  Expected commit pattern: test(01-01): ... → feat(01-01): ...',
         rows: [
           {
             planId: '01-01',
@@ -119,7 +119,7 @@ const CASES = [
             ],
           },
         ],
-        message: '### TDD REVIEW — Phase 1\n\nTDD Plans: 1 | Gate violations: 1\n\n| Plan | RED | GREEN | REFACTOR | Status       |\n|------|-----|-------|----------|--------------|\n| 01-01 |  ✗  |   ✗   |    —     | FAIL         |\n\n⚠ Gate violations are advisory — review before advancing.\n  Plan 01-01 missing: RED, GREEN gate commit(s).\n  Expected commit pattern: test(01-01): ... → feat(01-01): ...',
+        message: '### TDD REVIEW — Phase 1\n\nTDD Plans: 1 | Gate violations: 1\n\n| Plan | RED | GREEN | REFACTOR | Status |\n|------|-----|-------|----------|--------|\n| 01-01 |  ✗  |   ✗   |    —     | FAIL   |\n\n⚠ Gate violations are advisory — review before advancing.\n  Plan 01-01 missing: RED, GREEN gate commit(s).\n  Expected commit pattern: test(01-01): ... → feat(01-01): ...',
       };
     },
   },
@@ -148,7 +148,7 @@ const CASES = [
         passed: true,
         tddPlans: 1,
         violations: 0,
-        table: '### TDD REVIEW — Phase 1\n\nTDD Plans: 1 | Gate violations: 0\n\n| Plan | RED | GREEN | REFACTOR | Status       |\n|------|-----|-------|----------|--------------|\n| 01-01 |  ✓  |   ✓   |    ✓     | Pass         |',
+        table: '### TDD REVIEW — Phase 1\n\nTDD Plans: 1 | Gate violations: 0\n\n| Plan | RED | GREEN | REFACTOR | Status |\n|------|-----|-------|----------|--------|\n| 01-01 |  ✓  |   ✓   |    ✓     | Pass   |',
         rows: [
           {
             planId: '01-01',
@@ -159,7 +159,7 @@ const CASES = [
             missing: [],
           },
         ],
-        message: '### TDD REVIEW — Phase 1\n\nTDD Plans: 1 | Gate violations: 0\n\n| Plan | RED | GREEN | REFACTOR | Status       |\n|------|-----|-------|----------|--------------|\n| 01-01 |  ✓  |   ✓   |    ✓     | Pass         |',
+        message: '### TDD REVIEW — Phase 1\n\nTDD Plans: 1 | Gate violations: 0\n\n| Plan | RED | GREEN | REFACTOR | Status |\n|------|-----|-------|----------|--------|\n| 01-01 |  ✓  |   ✓   |    ✓     | Pass   |',
       };
     },
   },
@@ -182,7 +182,7 @@ const CASES = [
         passed: true,
         tddPlans: 1,
         violations: 1,
-        table: '### TDD REVIEW — Phase 1\n\nTDD Plans: 1 | Gate violations: 1\n\n| Plan | RED | GREEN | REFACTOR | Status       |\n|------|-----|-------|----------|--------------|\n| 01-01 |  ✓  |   ✗   |    —     | FAIL         |\n\n⚠ Gate violations are advisory — review before advancing.\n  Plan 01-01 missing: GREEN gate commit(s).\n  Expected commit pattern: test(01-01): ... → feat(01-01): ...',
+        table: '### TDD REVIEW — Phase 1\n\nTDD Plans: 1 | Gate violations: 1\n\n| Plan | RED | GREEN | REFACTOR | Status |\n|------|-----|-------|----------|--------|\n| 01-01 |  ✓  |   ✗   |    —     | FAIL   |\n\n⚠ Gate violations are advisory — review before advancing.\n  Plan 01-01 missing: GREEN gate commit(s).\n  Expected commit pattern: test(01-01): ... → feat(01-01): ...',
         rows: [
           {
             planId: '01-01',
@@ -195,7 +195,7 @@ const CASES = [
             ],
           },
         ],
-        message: '### TDD REVIEW — Phase 1\n\nTDD Plans: 1 | Gate violations: 1\n\n| Plan | RED | GREEN | REFACTOR | Status       |\n|------|-----|-------|----------|--------------|\n| 01-01 |  ✓  |   ✗   |    —     | FAIL         |\n\n⚠ Gate violations are advisory — review before advancing.\n  Plan 01-01 missing: GREEN gate commit(s).\n  Expected commit pattern: test(01-01): ... → feat(01-01): ...',
+        message: '### TDD REVIEW — Phase 1\n\nTDD Plans: 1 | Gate violations: 1\n\n| Plan | RED | GREEN | REFACTOR | Status |\n|------|-----|-------|----------|--------|\n| 01-01 |  ✓  |   ✗   |    —     | FAIL   |\n\n⚠ Gate violations are advisory — review before advancing.\n  Plan 01-01 missing: GREEN gate commit(s).\n  Expected commit pattern: test(01-01): ... → feat(01-01): ...',
       };
     },
   },
