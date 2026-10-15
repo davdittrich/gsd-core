@@ -277,14 +277,14 @@ describe('#3190 — code-review-fix --auto REVIEW.md commit + FIX_REPORT_PATH en
     const fence = stepFence(src, 'cleanup_iteration_backups');
     const git = (dir, ...a) => runHook('-c', ['git "$@"', 'git', ...a], { interpreter: 'bash', cwd: dir, timeoutMs: PROBE_TIMEOUT_MS });
 
-    const drive = (commitDocs) => {
+    const drive = (commitDocs, status = 'issues_found') => {
       const dir = createTempDir('gsd-5034-cleanup-');
       try {
         git(dir, 'init', '-q');
         git(dir, 'config', 'user.email', 't@t');
         git(dir, 'config', 'user.name', 't');
         git(dir, 'config', 'commit.gpgsign', 'false');
-        fs.writeFileSync(path.join(dir, '01-REVIEW.md'), ['---', 'status: issues_found', '---'].join('\n'));
+        fs.writeFileSync(path.join(dir, '01-REVIEW.md'), ['---', 'status: ' + status, '---'].join('\n'));
         fs.writeFileSync(path.join(dir, '01-REVIEW-FIX.md'), 'fix');
         git(dir, 'add', '.');
         git(dir, 'commit', '-q', '-m', 'seed');
@@ -309,6 +309,7 @@ describe('#3190 — code-review-fix --auto REVIEW.md commit + FIX_REPORT_PATH en
           calls,
           status: git(dir, 'status', '--porcelain').stdout.trim(),
           log: git(dir, 'log', '--name-only', '--format=%s').stdout,
+          count: git(dir, 'rev-list', '--count', 'HEAD').stdout.trim(),
           review: fs.existsSync(path.join(dir, '01-REVIEW.iter2.md')),
           fix: fs.existsSync(path.join(dir, '01-REVIEW-FIX.iter2.md')),
         };
@@ -318,11 +319,18 @@ describe('#3190 — code-review-fix --auto REVIEW.md commit + FIX_REPORT_PATH en
     const on = drive('true');
     assert.strictEqual(on.status, '', 'the tree must be clean after the step: ' + on.status);
     assert.ok(on.review && on.fix, 'backups are retained on disk');
+    assert.match(on.log, /retain code review iteration backups/, 'commit subject');
+    assert.strictEqual(on.count, '2', 'exactly one new commit beyond the seed');
     assert.match(on.log, /01-REVIEW\.iter2\.md/, 'REVIEW backup recoverable from git');
     assert.match(on.log, /01-REVIEW-FIX\.iter2\.md/, 'FIX backup recoverable from git');
 
     const off = drive('false');
     assert.strictEqual(off.calls, '', 'COMMIT_DOCS=false: .planning is gitignored, no commit attempted');
     assert.ok(off.review && off.fix, 'backups are retained on disk');
+    assert.notStrictEqual(off.status, '', 'COMMIT_DOCS=false leaves the tree dirty');
+
+    const clean = drive('true', 'clean');
+    assert.strictEqual(clean.calls, '', 'clean: no commit attempted');
+    assert.ok(!clean.review && !clean.fix, 'clean: backups removed');
   });
 });

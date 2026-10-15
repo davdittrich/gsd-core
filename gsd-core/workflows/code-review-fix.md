@@ -397,7 +397,7 @@ Key design decisions for --auto (addresses ALL review HIGH concerns):
 1. **Re-review scope**: Uses REVIEW_FILES_ARRAY from original REVIEW.md frontmatter, falling back to full phase scope. Scope is NOT lost between iterations. Uses portable while-read loop (bash 3.2+ compatible, handles spaces in paths).
 2. **Artifact semantics**: REVIEW.md is overwritten by each re-review (latest review state). REVIEW-FIX.md is overwritten by each fixer iteration (latest fix state with iteration count). There is ONE final version of each artifact, not per-iteration copies.
    Backup files (.iterN.md) preserve history for post-mortem analysis if iterations degrade. On successful convergence (#3190) the backups are spent scratch and removed; on degradation (hit MAX_ITERATIONS / fixer failure) they are retained for post-mortem and committed (#5034). The removal happens in `cleanup_iteration_backups`, after `record_disposition` has read them — they are the only surviving record of what an earlier iteration fixed, since this artifact keeps one final version rather than per-iteration copies.
-3. **Commit timing**: Fix commits happen per-finding inside the agent. REVIEW-FIX.md is NOT committed until step 7 (after ALL iterations complete). Only ONE docs commit, not one per iteration. In --auto that single commit also stages the converged REVIEW.md alongside REVIEW-FIX.md (#3190), so the two committed artifacts agree — the initial code-review commit held iteration-1 REVIEW.md content, and the --auto re-review loop overwrote it each iteration.
+3. **Commit timing**: Fix commits happen per-finding inside the agent. REVIEW-FIX.md is NOT committed until step 7 (after ALL iterations complete). One docs commit for the fix report, not one per iteration, plus one for retained backups on degradation. In --auto that single commit also stages the converged REVIEW.md alongside REVIEW-FIX.md (#3190), so the two committed artifacts agree — the initial code-review commit held iteration-1 REVIEW.md content, and the --auto re-review loop overwrote it each iteration.
 </step>
 
 <step name="commit_fix_report">
@@ -476,8 +476,8 @@ Only runs if AUTO_MODE is true. If AUTO_MODE is false, skip this step entirely.
 
 **Removes the `.iterN.md` scratch — deliberately AFTER `record_disposition`, not at the end of the
 loop.** #3190's rule is unchanged: on convergence the backups are spent scratch and go; on degradation
-they are retained for post-mortem and, when `COMMIT_DOCS` is true, committed so the tree stays clean. What changed is the timing, and it was load-bearing. This workflow
-keeps ONE final version of `REVIEW.md` and `REVIEW-FIX.md` rather than per-iteration copies, so the
+they are retained for post-mortem and, when `COMMIT_DOCS` is true, committed so the tree stays
+clean. What changed is the timing, and it was load-bearing. This workflow keeps ONE final version of `REVIEW.md` and `REVIEW-FIX.md` rather than per-iteration copies, so the
 backups are the only surviving record of what an earlier iteration fixed — and the re-review drops a
 finding once it is fixed, so the final review does not carry it either. Deleting them inside the loop
 meant the disposition ledger reached a converged `--auto` run with every early fix already erased, and
@@ -516,7 +516,8 @@ if [ "$AUTO_MODE" = "true" ]; then
       if [ "${#BACKUP_FILES[@]}" -gt 0 ]; then
         gsd_run query commit \
           "docs(${PADDED_PHASE}): retain code review iteration backups" \
-          --files "${BACKUP_FILES[@]}"
+          --files "${BACKUP_FILES[@]}" \
+          || echo "Warning: could not commit iteration backups; they remain untracked: ${BACKUP_FILES[*]}"
       fi
     fi
   fi
