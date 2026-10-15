@@ -298,8 +298,13 @@ if [ "$AUTO_MODE" = "true" ]; then
     
     # Spawn gsd-code-reviewer agent to re-review (runs in a subagent — no output until it returns, ~1–5 min; expected, not a freeze)
     # (This overwrites REVIEW_PATH with latest review state)
+    # #5019: re-surface the lane evidence code-review.md persisted (absent => prompt unchanged); no lane re-run
+    EXTERNAL_EVIDENCE_BLOCK=""
+    if [ -f "${REVIEW_PATH%.md}-lane-evidence.md" ]; then
+      EXTERNAL_EVIDENCE_BLOCK="$(cat "${REVIEW_PATH%.md}-lane-evidence.md")"$'\n\n'
+    fi
     Agent(subagent_type="gsd-code-reviewer", model="{REVIEWER_MODEL}", prompt="
-<config>
+${EXTERNAL_EVIDENCE_BLOCK}<config>
 depth: ${REVIEW_DEPTH}
 phase_dir: ${PHASE_DIR}
 review_path: ${REVIEW_PATH}
@@ -493,6 +498,7 @@ and the backups are kept.
 
 ```bash
 if [ "$AUTO_MODE" = "true" ]; then
+  rm -f "${REVIEW_PATH%.md}-lane-evidence.md"  # #5019: spent once the loop ends, converged or not
   FINAL_STATUS=$(REVIEW_PATH="${REVIEW_PATH}" node -e "
     const fs = require('fs');
     try {
