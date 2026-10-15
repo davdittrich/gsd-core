@@ -153,7 +153,7 @@ describe('#4379 — the TDD RED pathspec is language-agnostic', () => {
       'lib_spec.rb', 'x_test.exs',              // Ruby, Elixir
       'crates/core/tests/scan_test.rs', 'src/__tests__/util.js', 'pkg/api/test_x.py', // nested (#5181)
       'src/impl.go', 'src/lib.rs',              // NOT tests — must never match
-      'crates/core/src/scan.rs',                // NOT a test, nested (#5181)
+      'crates/core/src/scan.rs', 'src/test_utils/factory.py',                // NOT a test, nested (#5181)
     ];
     for (const rel of files) {
       const abs = path.join(dir, rel);
@@ -200,7 +200,9 @@ describe('#4379 — the TDD RED pathspec is language-agnostic', () => {
     for (const rel of ['crates/core/tests/scan_test.rs', 'src/__tests__/util.js', 'pkg/api/test_x.py']) {
       assert.ok(hits.has(rel), `${rel} must match`);
     }
-    assert.ok(!hits.has('crates/core/src/scan.rs'), 'nested implementation file must NOT match');
+    for (const rel of ['crates/core/src/scan.rs', 'src/test_utils/factory.py']) {
+      assert.ok(!hits.has(rel), `${rel} must NOT match`);
+    }
   });
 
   test('the existing JS/TS conventions still match (no regression)', (t) => {
