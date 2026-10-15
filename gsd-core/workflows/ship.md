@@ -198,7 +198,7 @@ if [ "$(gsd_run query config-get commit_docs --raw --default true)" != false ]; 
   if [ -f "$SEAL" ] && git check-ignore -q "$SEAL"; then
     echo "WARNING: $SEAL is gitignored; the squash will not carry it." >&2
   elif [ -n "$(git status --porcelain -- "$SEAL")" ]; then
-    git add "$SEAL" && git commit -m "docs(${PHASE_NUMBER}): seal TDD review evidence" || { echo "ERROR: TDD seal commit failed" >&2; exit 1; }
+    git add "$SEAL"; git commit -m "docs(${PHASE_NUMBER}): seal TDD review evidence" || { echo "ERROR: TDD seal commit failed" >&2; exit 1; }
   fi
 fi
 ```
