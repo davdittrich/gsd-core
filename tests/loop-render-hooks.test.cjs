@@ -2210,3 +2210,13 @@ describe('cmdLoopRenderHooks --phase confinement and --phase-dir identity (#4030
     assert.ok(!('context' in env));
   });
 });
+
+describe('discuss-phase creates a missing phase directory before discuss:pre (#4030)', () => {
+  test('a mkdir of the init expected_phase_dir precedes the discuss:pre render-hooks call', () => {
+    const lines = splitLines(fs.readFileSync(path.join(ROOT, 'gsd-core/workflows/discuss-phase.md'), 'utf8'));
+    const hooks = lines.findIndex((l) => l.includes('render-hooks discuss:pre'));
+    const mkdir = lines.findIndex((l) => l.includes('mkdir -p') && l.includes('DISCUSS_NEW_DIR'));
+    assert.ok(hooks !== -1, 'discuss:pre call site exists');
+    assert.ok(mkdir !== -1 && mkdir < hooks, 'a missing phase directory must exist before --phase is resolved');
+  });
+});

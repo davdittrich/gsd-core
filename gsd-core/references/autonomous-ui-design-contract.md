@@ -8,7 +8,7 @@ Resolve active `plan:pre` hooks:
 
 ```bash
 UI_SPEC_FILE=$(ls "${PHASE_DIR}"/*-UI-SPEC.md 2>/dev/null | head -1)
-PHASE_NUM=${PHASE_NUM:-$(printf '%s' "$PHASE_STATE" | jq -r '.phase_number // empty')}
+PHASE_NUM=$(printf '%s' "$PHASE_STATE" | jq -r --arg p "${PHASE_NUM}" '.phase_number // $p')
 HOOKS_JSON=$(gsd_run loop render-hooks plan:pre --raw --phase "${PHASE_NUM}")
 ```
 
