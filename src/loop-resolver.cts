@@ -646,13 +646,17 @@ function resolveActiveHooksForPoint(
         escapes = !(inside(realCwd, realPlanning) && inside(realPlanning, realPhases) && inside(realPhases, realDir) && path.dirname(realDir) === realPhases);
       } catch { escapes = true; }
       // A supplied --phase-dir must name the same directory the token resolved
-      // to (dev+ino, so case/normalization is the filesystem's call). It only
-      // gates; the emitted phaseDir is always the locator's value.
+      // to (dev+ino, so case/normalization is the filesystem's call). FAT32,
+      // exFAT and some SMB shares report ino 0 for every entry, so there the
+      // realpaths decide. It only gates; the emitted phaseDir is always the
+      // locator's value.
       const sameDir = (): boolean => {
         try {
-          const a = fs.statSync(path.resolve(cwd, phaseDirArg as string));
+          const given = path.resolve(cwd, phaseDirArg as string);
+          const a = fs.statSync(given);
           const b = fs.statSync(resolvedDir);
-          return a.dev === b.dev && a.ino === b.ino;
+          if (a.dev !== b.dev || a.ino !== b.ino) return false;
+          return a.ino !== 0 || fs.realpathSync.native(given) === fs.realpathSync.native(resolvedDir);
         } catch { return false; }
       };
       if (escapes) {
