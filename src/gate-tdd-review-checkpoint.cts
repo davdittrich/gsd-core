@@ -30,8 +30,12 @@ import path from 'node:path';
 import { gateVerdict, gateUnreadable, gateUsageFailure, GATE_FAILURE_CODE } from './gate-verdict.cjs';
 import type { GateResult } from './gate-verdict.cjs';
 import { resolvePhaseDir } from './gate-phase-context.cjs';
-import { readDirEvidence, readPlanSetEvidence, readTextEvidence, statEvidence, evidenceFound, evidenceFromError, type Evidence } from './gate-evidence.cjs';
-import { resolveEvaluationScope } from './gate-evaluation-scope.cjs';
+import { readDirEvidence, readPlanSetEvidence, readTextEvidence, evidenceFound, evidenceFromError, type Evidence } from './gate-evidence.cjs';
+import { resolveEvaluationScope, extractTaskCommitRefs } from './gate-evaluation-scope.cjs';
+import { execGit } from './shell-command-projection.cjs';
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- core-utils.cjs is an export= CommonJS module
+import coreUtilsMod = require('./core-utils.cjs');
+const { summaryCandidates } = coreUtilsMod;
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import frontmatterMod = require('./frontmatter.cjs');
 const { frontmatterKeyHasValue, extractFrontmatter } = frontmatterMod;
@@ -108,6 +112,8 @@ function planCommitKinds(projectDir: string, planId: string): ReadonlyMap<string
 const SEAL_FILE = 'TDD-REVIEW-SEAL.json';
 type SealEntry = { red: string; green: string };
 
+const isSha = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{40}$/.test(v);
+
 /** #5354: per-plan RED/GREEN hashes recorded pre-squash; a malformed or unreadable seal credits nothing. */
 function readSeal(phaseDir: string): Record<string, Partial<SealEntry>> {
   const text = readTextEvidence(path.join(phaseDir, SEAL_FILE));
@@ -125,7 +131,25 @@ function parseSeal(text: string): Evidence<Record<string, Partial<SealEntry>>> {
   }
 }
 
-const isSha = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{40}$/.test(v);
+/**
+ * #5354: a plan was squashed away when its SUMMARY names task commits and none is reachable from
+ * HEAD (a missing object counts as unreachable). No SUMMARY, no listed hash, or any reachable hash
+ * is an ordinary failure.
+ */
+function summaryCommitsAllUnreachable(projectDir: string, phaseDir: string, planPath: string): boolean {
+  const rel = path.relative(phaseDir, planPath).split(path.sep).join('/');
+  for (const candidate of summaryCandidates(rel)) {
+    const summary = readTextEvidence(path.join(phaseDir, candidate));
+    if (summary.kind !== 'found') continue;
+    const refs = extractTaskCommitRefs(summary.value);
+    return refs.length > 0 && refs.every((id) => {
+      const r = execGit(['merge-base', '--is-ancestor', id, 'HEAD'], { cwd: projectDir });
+      return !r.timedOut && (r.exitCode === 1 || r.exitCode === 128);
+    });
+  }
+  return false;
+}
+
 
 interface UnreadableSource {
   source: string;
@@ -222,7 +246,7 @@ export function evaluateTddReviewCheckpoint(input: { projectDir: string; args: r
   for (const planPath of tddPlanFiles) {
     const planId = path.basename(planPath, '-PLAN.md');
     const kinds = planCommitKinds(projectDir, planId);
-    const sealed = seal[planId] ?? {};
+    const sealed = Object.hasOwn(seal, planId) && seal[planId]?.red !== seal[planId]?.green ? seal[planId] : {};
     const redSha = kinds.get('test') ?? (isSha(sealed.red) ? sealed.red : undefined);
     const red = redSha !== undefined;
     const refactor = kinds.has('refactor');
@@ -245,8 +269,8 @@ export function evaluateTddReviewCheckpoint(input: { projectDir: string; args: r
     const missing: string[] = [];
     if (!red) missing.push('RED');
     if (!green) missing.push('GREEN');
-    // #5354: executed (SUMMARY exists) but nothing reachable and nothing sealed = squashed away, not evaluable.
-    const notEvaluable = missing.length > 0 && kinds.size === 0 && seal[planId] === undefined && statEvidence(path.join(phaseDir, `${planId}-SUMMARY.md`)).kind === 'found';
+    // #5354: credit incomplete, nothing sealed, and the SUMMARY's task commits are all gone = squashed away.
+    const notEvaluable = missing.length > 0 && Object.keys(sealed).length === 0 && summaryCommitsAllUnreachable(projectDir, phaseDir, planPath);
     const status: TddPlanRow['status'] = notEvaluable ? 'NotEvaluable' : missing.length === 0 ? 'Pass' : 'FAIL';
     if (redSha !== undefined && greenSha !== undefined) evidence[planId] = { red: redSha, green: greenSha };
 
@@ -258,10 +282,10 @@ export function evaluateTddReviewCheckpoint(input: { projectDir: string; args: r
   const violations = rows.filter(r => r.status === 'FAIL').length;
 
   // Build review table
-  const tableHeader = '| Plan | RED | GREEN | REFACTOR | Status |';
-  const tableDivider = '|------|-----|-------|----------|--------|';
+  const tableHeader = '| Plan | RED | GREEN | REFACTOR | Status       |';
+  const tableDivider = '|------|-----|-------|----------|--------------|';
   const tableRows = rows.map(r =>
-    `| ${r.planId.padEnd(4)} | ${r.red ? ' ✓ ' : ' ✗ '} | ${r.green ? '  ✓  ' : '  ✗  '} | ${r.refactor ? '   ✓    ' : '   —    '} | ${r.status.padEnd(6)} |`,
+    `| ${r.planId.padEnd(4)} | ${r.red ? ' ✓ ' : ' ✗ '} | ${r.green ? '  ✓  ' : '  ✗  '} | ${r.refactor ? '   ✓    ' : '   —    '} | ${r.status.padEnd(12)} |`,
   );
 
   let table = [
@@ -293,7 +317,12 @@ export function evaluateTddReviewCheckpoint(input: { projectDir: string; args: r
 
   // #5354: --record seals this passing evaluation's evidence so it survives a squash merge.
   if (violations === 0 && phaseDir && input.args.includes('--record')) {
-    fs.writeFileSync(path.join(phaseDir, SEAL_FILE), `${JSON.stringify({ plans: { ...evidence } }, null, 2)}\n`);
+    try {
+      fs.writeFileSync(path.join(phaseDir, SEAL_FILE), `${JSON.stringify({ plans: { ...readSeal(phaseDir), ...evidence } }, null, 2)}\n`);
+    } catch (err) {
+      const e = evidenceFromError(err, SEAL_FILE);
+      return unreadableReview(phase, tddPlanFiles.length, [{ source: SEAL_FILE, reason: e.kind === 'unreadable' ? e.reason : String(err) }]);
+    }
   }
 
   // Uniform gate contract: block = violations > 0. The gate is advisory (blocking:false in

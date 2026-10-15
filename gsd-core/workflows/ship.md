@@ -194,10 +194,13 @@ Seal TDD review evidence before push. Squash merge keeps only branch-tip state, 
 No-op when the phase has no `type: tdd` plans (the gate returns skip and writes nothing):
 
 ```bash
-gsd_run check tdd.review-checkpoint "${PHASE_NUMBER}" --record --raw >/dev/null 2>&1 || echo "WARNING: TDD review seal not written (gate error); RED/GREEN credit will not survive squash." >&2
+gsd_run check tdd.review-checkpoint "${PHASE_NUMBER}" --record --raw >/dev/null 2>&1
 SEAL="${PHASE_DIR}/TDD-REVIEW-SEAL.json"
-if [ -n "$(git status --porcelain -- "$SEAL")" ]; then
-  git add "$SEAL" && git commit -m "docs(${PHASE_NUMBER}): seal TDD review evidence"
+[ -f "$SEAL" ] || echo "WARNING: no TDD seal written (violations or gate error); RED/GREEN credit will not survive squash." >&2
+if [ -f "$SEAL" ] && git check-ignore -q "$SEAL"; then
+  echo "WARNING: $SEAL is gitignored; the squash will not carry the seal." >&2
+elif [ -n "$(git status --porcelain -- "$SEAL")" ]; then
+  git add "$SEAL" && git commit -m "docs(${PHASE_NUMBER}): seal TDD review evidence" || { echo "ERROR: failed to commit TDD seal" >&2; exit 1; }
 fi
 ```
 
