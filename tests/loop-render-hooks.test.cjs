@@ -2001,6 +2001,22 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     assert.match((envelope.warnings || []).join('\n'), /does not match the directory/);
   });
 
+  test('[negative] an incoherent pair is still rejected when the filesystem reports ino 0 (FAT32/exFAT/SMB)', (t) => {
+    const dir = makePhaseProject('05-widgets', '07-other');
+    t.after(() => cleanup(dir));
+    const realStat = fs.statSync;
+    fs.statSync = (p, ...rest) => {
+      const st = realStat(p, ...rest);
+      return st && st.isDirectory() ? Object.assign(Object.create(Object.getPrototypeOf(st)), st, { ino: 0 }) : st;
+    };
+    t.after(() => { fs.statSync = realStat; });
+    const result = resolveActiveHooksForPoint(dir, 'plan:pre', { phase: '05', phaseDir: '.planning/phases/07-other' });
+    assert.strictEqual(result.context, undefined);
+    assert.match(result.warnings.join('\n'), /does not match the directory/);
+    const same = resolveActiveHooksForPoint(dir, 'plan:pre', { phase: '05', phaseDir: '.planning/phases/05-widgets' });
+    assert.deepStrictEqual(same.context, { phase: '05', phaseDir: '.planning/phases/05-widgets' });
+  });
+
   test('[hostile] an out-of-project --phase-dir is rejected by disagreement, not by confinement', (t) => {
     const dir = makePhaseProject('05-widgets');
     t.after(() => cleanup(dir));
