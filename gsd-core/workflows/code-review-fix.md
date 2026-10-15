@@ -135,7 +135,7 @@ If status is "clean" or "skipped":
 ```
 No issues to fix in Phase ${PHASE_ARG} REVIEW.md (status: ${REVIEW_STATUS}).
 ```
-Exit workflow.
+Run the #5019 lane-evidence removal (`LE=…` snippet in `cleanup_iteration_backups`), then exit workflow.
 
 If status is "unknown":
 ```
@@ -237,7 +237,7 @@ If Agent() fails:
 Error: Code fix agent failed: ${error_message}
 ```
 
-Check if FIX_REPORT_PATH exists:
+Run the #5019 lane-evidence removal (`LE=…` snippet in `cleanup_iteration_backups`). Check if FIX_REPORT_PATH exists:
 - If yes: "Partial success — some fixes may have been committed."
 - If no: "No fixes applied."
 
@@ -298,10 +298,11 @@ if [ "$AUTO_MODE" = "true" ]; then
     
     # Spawn gsd-code-reviewer agent to re-review (runs in a subagent — no output until it returns, ~1–5 min; expected, not a freeze)
     # (This overwrites REVIEW_PATH with latest review state)
-    # #5019: re-surface the lane evidence code-review.md persisted (absent => prompt unchanged); no lane re-run
+    # #5019: re-surface the lane evidence code-review.md persisted (line 1 = its live lane dir); absent => prompt unchanged
     EXTERNAL_EVIDENCE_BLOCK=""
-    if [ -f "${REVIEW_PATH%.md}-lane-evidence.md" ]; then
-      EXTERNAL_EVIDENCE_BLOCK="$(cat "${REVIEW_PATH%.md}-lane-evidence.md")"$'\n\n'
+    LANE_EVIDENCE="${REVIEW_PATH%.md}-lane-evidence.md"
+    if [ -f "$LANE_EVIDENCE" ] && [ -d "$(head -n 1 "$LANE_EVIDENCE")" ]; then
+      EXTERNAL_EVIDENCE_BLOCK="$(tail -n +2 "$LANE_EVIDENCE")"$'\n\n'
     fi
     Agent(subagent_type="gsd-code-reviewer", model="{REVIEWER_MODEL}", prompt="
 ${EXTERNAL_EVIDENCE_BLOCK}<config>
@@ -498,7 +499,9 @@ and the backups are kept.
 
 ```bash
 if [ "$AUTO_MODE" = "true" ]; then
-  rm -f "${REVIEW_PATH%.md}-lane-evidence.md"  # #5019: spent once the loop ends, converged or not
+  # #5019: spent once the loop ends, converged or not — also run before the early exits above/below
+  LE="${REVIEW_PATH%.md}-lane-evidence.md"
+  if [ -f "$LE" ]; then D=$(head -n 1 "$LE"); case "$D" in */gsd-review-lanes-*) rm -rf "$D";; esac; rm -f "$LE"; fi
   FINAL_STATUS=$(REVIEW_PATH="${REVIEW_PATH}" node -e "
     const fs = require('fs');
     try {
