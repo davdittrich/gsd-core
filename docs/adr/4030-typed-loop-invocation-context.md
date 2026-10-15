@@ -41,7 +41,9 @@ site — confirmed with a hostile-token test (`tests/loop-render-hooks.test.cjs`
 `--phase-dir <dir>` is accepted alongside `--phase`, as the issue's spec asks,
 but strictly as a **cross-check on the token's resolution** — never as an
 independent path. The comparison is filesystem identity: `fs.statSync` on both
-the supplied value and the locator's directory, equal `dev`+`ino`. Any spelling
+the supplied value and the locator's directory, equal `dev`+`ino` (where the
+filesystem reports `ino` 0, as some Windows volumes do, `realpath` equality
+stands in). Any spelling
 of the same directory matches — relative, absolute, `./`-prefixed, `..`
 segments, a symlinked spelling, or a different case on a case-insensitive
 volume — and no per-platform case folding is guessed. Sibling commands accept
