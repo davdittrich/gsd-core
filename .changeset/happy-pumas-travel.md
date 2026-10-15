@@ -1,5 +1,5 @@
 ---
 type: Fixed
-pr: 0
+pr: 63
 ---
 **The TDD RED-commit gate now recognises nested test paths** — `crates/core/tests/…`, `src/__tests__/…` and `pkg/api/test_x.py` count as test files at any depth, not only at the repo root (#5181).
