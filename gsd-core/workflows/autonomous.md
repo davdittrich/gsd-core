@@ -568,7 +568,6 @@ Resolve the active post-verification hooks and the UI-SPEC gate:
 
 ```bash
 UI_SPEC_FILE=$(ls "${PHASE_DIR}"/*-UI-SPEC.md 2>/dev/null | head -1)
-PHASE_NUM=$(printf '%s' "$PHASE_STATE" | jq -r '.phase_number // empty')
 HOOKS_JSON=$(gsd_run loop render-hooks verify:post --after-fingerprint "${PHASE_DIR}" --raw --phase "${PHASE_NUM}")
 ```
 

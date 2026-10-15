@@ -44,12 +44,10 @@ Inject `fragment.inline` verbatim into the context for the role named in `into`
 
 Dispatch the referenced unit. Exactly one of `ref.skill`, `ref.agent`, or `ref.command` is set.
 
-- `ref.skill` present → dispatch via the Skill tool with skill id `gsd-<ref.skill>`. If
-  `context` is present and the target skill accepts a phase argument, pass it as the skill's
-  args (e.g. `args="${context.phase}"`, plus whatever else that host's own dispatch already
-  appends — this file is point-agnostic and assumes no ambient shell variable exists).
-  Check the skill's own argument contract first, then pass `context.phase` whenever it is
-  present — skills diverge sharply on what an omitted phase argument does: some (e.g.
+- `ref.skill` present → dispatch via the Skill tool with skill id `gsd-<ref.skill>`. When
+  `context` is present, pass `context.phase` as the skill's args (e.g.
+  `args="${context.phase}"`, plus whatever else that host's own dispatch already appends —
+  this file is point-agnostic and assumes no ambient shell variable exists) — skills diverge sharply on what an omitted phase argument does: some (e.g.
   `code-review`) exit with "Phase not found"; others (e.g. `validate-phase`, whose
   `argument-hint` documents "optional, defaults to last completed phase") silently fall back
   to artifact-order inference, exactly the failure mode this field exists to close.
