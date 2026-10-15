@@ -4,7 +4,7 @@
  * direct console/stdout/stderr write (ESLint-enforced).
  *
  * End-of-phase advisory check: scans `type: tdd` plans for RED/GREEN/REFACTOR gate-sequence
- * compliance (`test(<plan>):` / `feat|fix(<plan>):` / `refactor(<plan>):` commits) and builds a review
+ * compliance (`test(<plan>):` / `feat(<plan>):` or `fix(<plan>):` / `refactor(<plan>):` commits) and builds a review
  * table. `passed` is always true (advisory — never truly blocks); `block` is `violations > 0` so
  * the host loop can read one uniform field.
  *
@@ -42,7 +42,7 @@ interface TddPlanRow {
   refactor: boolean;
   status: 'Pass' | 'FAIL';
   missing: string[];
-  /** Plans whose `feat(...)` commit supplied this plan's GREEN through `depends_on` (#4867). */
+  /** Plans whose `feat(...)` or `fix(...)` commit supplied this plan's GREEN through `depends_on` (#4867). */
   greenFrom?: string[];
 }
 
@@ -192,6 +192,7 @@ export function evaluateTddReviewCheckpoint(input: { projectDir: string; args: r
     });
   }
 
+  const isGreen = (kinds: ReadonlySet<string>) => kinds.has('feat') || kinds.has('fix');
   // For each TDD plan, extract the plan ID (e.g. "01-02-PLAN.md" → "01-02") and check git log
   const rows: TddPlanRow[] = [];
   for (const planPath of tddPlanFiles) {
@@ -203,13 +204,10 @@ export function evaluateTddReviewCheckpoint(input: { projectDir: string; args: r
     // #4867: a RED-only probe plan is satisfied by the GREEN of a plan that (transitively) declares
     // `depends_on` it. Only a real `feat(...)`/`fix(...)` commit under such a plan counts; the plan's own RED is
     // still required, and a plan nothing depends on is scored on its own commits alone.
-    const ownGreen = kinds.has('feat') || kinds.has('fix');
+    const ownGreen = isGreen(kinds);
     const greenFrom = ownGreen
       ? []
-      : transitiveDependents(planId, dependents).filter((dependentId) => {
-        const k = planCommitKinds(projectDir, dependentId);
-        return k.has('feat') || k.has('fix');
-      });
+      : transitiveDependents(planId, dependents).filter((dependentId) => isGreen(planCommitKinds(projectDir, dependentId)));
     const green = ownGreen || greenFrom.length > 0;
 
     const missing: string[] = [];
