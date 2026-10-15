@@ -188,6 +188,22 @@ Verify the work is ready to ship:
    **When every active gate has been processed without a halt:** continue to the next preflight check.
 </step>
 
+<step name="seal_tdd_review">
+Seal TDD review evidence before push. Squash merge keeps only branch-tip state, so the seal must be committed here.
+
+No-op when the phase has no `type: tdd` plans (the gate returns skip and writes nothing):
+
+```bash
+gsd_run check tdd.review-checkpoint "${PHASE_NUMBER}" --record --raw >/dev/null 2>&1 || echo "WARNING: TDD review seal not written (gate error); RED/GREEN credit will not survive squash." >&2
+SEAL="${PHASE_DIR}/TDD-REVIEW-SEAL.json"
+if [ -n "$(git status --porcelain -- "$SEAL")" ]; then
+  git add "$SEAL" && git commit -m "docs(${PHASE_NUMBER}): seal TDD review evidence"
+fi
+```
+
+Commit fails → stop; do not push. Seal unchanged → skip the commit.
+</step>
+
 <step name="push_branch">
 Push the current branch to remote:
 
