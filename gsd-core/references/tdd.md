@@ -191,10 +191,9 @@ detection step above enumerates** — it costs nothing to recognise a convention
 onboarding flow does not yet auto-detect, and a project using one should not have its
 RED commits go unseen:
 - `*.test.*` / `*.spec.*` next to source — JS/TS and anything sharing the convention
-- `__tests__/` directory
-- `tests/` directory at root
+- `tests/` / `__tests__/` directory, root or nested (`*/tests/*`, `*/__tests__/*`)
 - `*_test.go` — Go
-- `test_*.py` / `*_test.py` — Python (in addition to `tests/`)
+- `test_*.py` (root or nested `*/test_*.py`) / `*_test.py` — Python (in addition to `tests/`)
 - `*_test.exs` — Elixir
 - `*_spec.rb` / `*_test.rb` — Ruby
 
