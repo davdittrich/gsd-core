@@ -1006,6 +1006,12 @@ function cmdConfigSet(cwd: string, keyPath: string | undefined, value: string | 
     }
   }
 
+  if (kp === 'git.commit_timeout_ms') {
+    if (typeof parsedValue !== 'number' || !Number.isFinite(parsedValue) || parsedValue <= 0) {
+      error(`Invalid git.commit_timeout_ms '${val}'. Must be a positive number (milliseconds).`);
+    }
+  }
+
   if (kp === 'git.protected_branches') {
     if (!isValidProtectedBranches(parsedValue)) {
       error(`Invalid git.protected_branches '${val}'. Must be a non-empty array of non-empty branch names.`);

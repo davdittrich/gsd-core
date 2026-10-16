@@ -2035,6 +2035,22 @@ const WORKFLOW_PATH = path.join(
   'complete-milestone.md',
 );
 
+describe('#5231: git.commit_timeout_ms config key', () => {
+  test('accepts 60000; rejects 0, -1, abc', (t) => {
+    const tmpDir = createTempProject('gsd-5231-');
+    t.after(() => cleanup(tmpDir));
+    const env = homeSandboxEnv(tmpDir);
+    const ok = runGsdTools(['config-set', 'git.commit_timeout_ms', '60000'], tmpDir, env);
+    assert.ok(ok.success, `60000 should be accepted:\n${ok.error}`);
+    const got = runGsdTools(['config-get', 'git.commit_timeout_ms'], tmpDir, env);
+    assert.strictEqual(got.output.trim(), '60000');
+    for (const bad of ['0', '-1', 'abc']) {
+      const r = runGsdTools(['config-set', 'git.commit_timeout_ms', bad], tmpDir, env);
+      assert.ok(!r.success, `'${bad}' should be rejected`);
+    }
+  });
+});
+
 describe('#3086: git.create_tag config key', () => {
   test('A. fresh project: config-get git.create_tag returns true (default)', (t) => {
     const tmpDir = createTempProject('gsd-3086-default-');
