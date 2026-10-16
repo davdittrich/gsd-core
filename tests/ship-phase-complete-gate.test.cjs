@@ -1,6 +1,6 @@
 'use strict';
 
-/** #5221: /gsd-ship blocks PHASE_NOT_COMPLETE only for a phase with an unticked checklist entry (unchecked_phases); everything else fails open. */
+/** #5221: /gsd:ship blocks PHASE_NOT_COMPLETE only for a phase with an unticked checklist entry (unchecked_phases); everything else fails open. */
 
 const { describe, test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -25,7 +25,7 @@ describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, ()
     const r = run(analyze('3', false), 0);
     assert.equal(r.status, 1);
     assert.match(r.stderr, /PHASE_NOT_COMPLETE/);
-    assert.match(r.stderr, /Run \/gsd-verify-work 3 \(completes the phase\), then re-run \/gsd-ship/);
+    assert.match(r.stderr, /Run \/gsd:verify-work 3 \(completes the phase\), then re-run \/gsd:ship/);
     assert.ok(!/CONTINUED/.test(r.stdout));
   });
 
