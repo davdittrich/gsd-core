@@ -3214,7 +3214,7 @@ cmdCommit(${JSON.stringify(cwd)}, 'docs: probe', ${JSON.stringify(files)}, false
     if (run.status !== 0 && !run.stdout) {
       throw new Error(`probe crashed: ${run.stderr}`);
     }
-    const m = /__COMMIT_TIMEOUT__(.*)$/.exec(run.stderr || '');
+    const m = /^__COMMIT_TIMEOUT__(.*)$/m.exec(run.stderr || '');
     return { result: JSON.parse(run.stdout), timeout: m ? JSON.parse(m[1] || 'null') : undefined };
   }
 
@@ -3249,7 +3249,7 @@ cmdCommit(${JSON.stringify(cwd)}, 'docs: probe', ${JSON.stringify(files)}, false
     });
   }
 
-  // #5231: `git.commit_timeout_ms` — positive finite number, default 30000.
+  // #5231: `git.commit_timeout_ms` — positive integer, default 30000.
   function writeGitConfig(git) {
     fs.writeFileSync(path.join(tmpDir, '.planning', 'config.json'), JSON.stringify({ git }));
   }
@@ -3268,13 +3268,13 @@ cmdCommit(${JSON.stringify(cwd)}, 'docs: probe', ${JSON.stringify(files)}, false
     assert.ok((result.error || '').includes('30s'));
   });
 
-  for (const bad of [0, -1, 'abc']) {
-    test(`#5231: invalid git.commit_timeout_ms (${JSON.stringify(bad)}) falls back to 30000`, () => {
+  test('#5231: invalid git.commit_timeout_ms (0, -1, abc, 1500.5) falls back to 30000', () => {
+    for (const bad of [0, -1, 'abc', 1500.5]) {
       writeGitConfig({ commit_timeout_ms: bad });
       const { timeout } = commitWithTimedOutCommit({ cwd: tmpDir, files: ['.planning/STATE.md'] });
-      assert.equal(timeout, 30000);
-    });
-  }
+      assert.equal(timeout, 30000, JSON.stringify(bad));
+    }
+  });
 
   test('a timeout whose partial output contains "nothing to commit" is still a timeout (precedence pin)', () => {
     // #3886 review: the isSpawnTimeout gate runs BEFORE the nothing-to-commit

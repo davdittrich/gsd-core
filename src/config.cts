@@ -1007,8 +1007,8 @@ function cmdConfigSet(cwd: string, keyPath: string | undefined, value: string | 
   }
 
   if (kp === 'git.commit_timeout_ms') {
-    if (typeof parsedValue !== 'number' || !Number.isFinite(parsedValue) || parsedValue <= 0) {
-      error(`Invalid git.commit_timeout_ms '${val}'. Must be a positive number (milliseconds).`);
+    if (typeof parsedValue !== 'number' || !Number.isSafeInteger(parsedValue) || parsedValue <= 0) {
+      error(`Invalid git.commit_timeout_ms '${val}'. Must be a positive integer (milliseconds).`);
     }
   }
 

@@ -35,7 +35,7 @@ Configuration options for `.planning/` directory behavior.
 | `git.base_branch` | `null` (auto-detect) | Target branch for PRs and merges (e.g. `"master"`, `"develop"`). When `null`, auto-detects from `git symbolic-ref refs/remotes/origin/HEAD`, falling back to `"main"`. |
 | `git.protected_branches` | (none) | Optional array of non-empty strings naming additional shared branches that should trigger protected-branch warnings |
 | `git.create_tag` | `true` | Create git tags on milestone completion |
-| `git.commit_timeout_ms` | `30000` | Timeout for every SDK `git commit` (commit, commit-to-subrepo, pr-subrepo). Raise it when a pre-commit hook legitimately takes longer than 30 s; on timeout the commit is killed but the hook process may keep running. |
+| `git.commit_timeout_ms` | `30000` | Positive-integer ms timeout for each SDK `git commit`; raise for slow pre-commit hooks. |
 | `git.phase_branch_template` | `"gsd/phase-{phase}-{slug}"` | Branch template for phase strategy |
 | `git.milestone_branch_template` | `"gsd/{milestone}-{slug}"` | Branch template for milestone strategy |
 | `git.quick_branch_template` | `null` | Optional branch template for quick-task runs |
@@ -341,7 +341,7 @@ Set via `git.*` namespace (e.g., `"git": { "branching_strategy": "phase" }`).
 | `git.base_branch` | string\|null | `null` (auto-detect) | Any branch name | Target branch for PRs and merges; auto-detects from `origin/HEAD` when `null` |
 | `git.protected_branches` | array of non-empty strings | (none) | Non-empty branch names | Optional protected names added to the resolved base branch for execute-phase and ship warnings |
 | `git.create_tag` | boolean | `true` | `true`, `false` | Create git tags on milestone completion |
-| `git.commit_timeout_ms` | number (ms) | `30000` | Positive number; invalid, `0`, or negative falls back to `30000` | Timeout for every SDK `git commit` (commit, commit-to-subrepo, pr-subrepo). Raise it when a pre-commit hook legitimately takes longer than 30 s; on timeout the commit is killed but the hook process may keep running. |
+| `git.commit_timeout_ms` | number (ms) | `30000` | Positive integer; otherwise `30000` | Timeout for each SDK `git commit`; raise for slow pre-commit hooks. |
 | `git.phase_branch_template` | string | `"gsd/phase-{phase}-{slug}"` | Template with `{phase}`, `{slug}` | Branch naming template for `phase` strategy |
 | `git.milestone_branch_template` | string | `"gsd/{milestone}-{slug}"` | Template with `{milestone}`, `{slug}` | Branch naming template for `milestone` strategy |
 | `git.quick_branch_template` | string\|null | `null` | Template with `{slug}` | Optional branch template for quick-task runs |

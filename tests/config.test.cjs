@@ -2036,7 +2036,7 @@ const WORKFLOW_PATH = path.join(
 );
 
 describe('#5231: git.commit_timeout_ms config key', () => {
-  test('accepts 60000; rejects 0, -1, abc', (t) => {
+  test('accepts 60000; rejects 0, -1, abc, 1500.5', (t) => {
     const tmpDir = createTempProject('gsd-5231-');
     t.after(() => cleanup(tmpDir));
     const env = homeSandboxEnv(tmpDir);
@@ -2044,10 +2044,12 @@ describe('#5231: git.commit_timeout_ms config key', () => {
     assert.ok(ok.success, `60000 should be accepted:\n${ok.error}`);
     const got = runGsdTools(['config-get', 'git.commit_timeout_ms'], tmpDir, env);
     assert.strictEqual(got.output.trim(), '60000');
-    for (const bad of ['0', '-1', 'abc']) {
+    for (const bad of ['0', '-1', 'abc', '1500.5']) {
       const r = runGsdTools(['config-set', 'git.commit_timeout_ms', bad], tmpDir, env);
       assert.ok(!r.success, `'${bad}' should be rejected`);
+      assert.match(r.error, /positive integer/);
     }
+    assert.strictEqual(runGsdTools(['config-get', 'git.commit_timeout_ms'], tmpDir, env).output.trim(), '60000');
   });
 });
 

@@ -2712,7 +2712,7 @@ function cmdCommit(cwd: string, message: string | undefined, files: string[] | u
   // #3886: `git commit` runs pre-commit hooks (husky/lint-staged routinely
   // idles ~4s on Windows before any task) — 10s is too tight, and a timeout
   // kill is NOT an ordinary failure. Same band as the push call below.
-  const commitTimeout = commitTimeoutMs(cwd);
+  const commitTimeout = commitTimeoutMs(config.commit_timeout_ms);
   const commitResult = execGit(commitArgs, { cwd, env: commitEnv, timeout: commitTimeout });
   if (commitResult.exitCode !== 0) {
     // #3886: a SIGTERM'd git commit is a timeout, not commit_failed — the
@@ -2908,7 +2908,7 @@ function cmdCommitToSubrepo(cwd: string, message: string | undefined, files: str
     const commitEnvSub: Record<string, string> = {
       GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'diff.ignoreSubmodules', GIT_CONFIG_VALUE_0: 'dirty',
     };
-    const commitTimeout = commitTimeoutMs(cwd);
+    const commitTimeout = commitTimeoutMs(config.commit_timeout_ms);
     const commitResult = execGit(commitArgs, { cwd: repoCwd, timeout: commitTimeout, env: commitEnvSub });
     if (commitResult.exitCode !== 0) {
       if (isSpawnTimeout(commitResult)) {
@@ -3090,7 +3090,7 @@ function cmdPrSubrepo(
   const commitEnvPr: Record<string, string> = {
     GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'diff.ignoreSubmodules', GIT_CONFIG_VALUE_0: 'dirty',
   };
-  const commitTimeout = commitTimeoutMs(cwd);
+  const commitTimeout = commitTimeoutMs(loadConfig(cwd, { persist: false }).commit_timeout_ms);
   const commitResult = execGit(commitArgs, { cwd: repoCwd, timeout: commitTimeout, env: commitEnvPr });
   if (commitResult.exitCode !== 0) {
     rollback();
@@ -4220,20 +4220,12 @@ interface HooksDirResolution {
   reason?: string;
 }
 
-/**
- * #3886: the timeout band for `git commit` — pre-commit hooks (husky +
- * lint-staged idles ~4s on Windows before any task) routinely exceed the 10s
- * plumbing default; 30s is the same band the push call uses. This is the
- * DEFAULT; #5231: `git.commit_timeout_ms` overrides it (see commitTimeoutMs).
- * Shared by all three commit sites AND their timeout messages, so the number
- * and the text cannot drift apart.
- */
+/** #3886/#5231: default `git commit` timeout (hooks outlast 10s); `git.commit_timeout_ms` overrides it, shared by all three commit sites and their messages. */
 const COMMIT_TIMEOUT_MS = 30_000;
 
-/** #5231: `git.commit_timeout_ms` if a finite number > 0, else the default. Read from the workspace root. */
-function commitTimeoutMs(cwd: string): number {
-  const v = loadConfig(cwd).commit_timeout_ms;
-  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : COMMIT_TIMEOUT_MS;
+/** #5231: `git.commit_timeout_ms` if a positive safe integer (spawnSync throws on fractions), else the default. */
+function commitTimeoutMs(configValue: unknown): number {
+  return typeof configValue === 'number' && Number.isSafeInteger(configValue) && configValue > 0 ? configValue : COMMIT_TIMEOUT_MS;
 }
 
 /**

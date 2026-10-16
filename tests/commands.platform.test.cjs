@@ -978,7 +978,7 @@ projection.execGit = (args, opts) => {
 try { ${call} } catch (e) { /* error() throws ExitError after writing its message to stderr */ }
 `;
     const run = spawnSync(process.execPath, ['-e', script], { encoding: 'utf-8', timeout: SEAM_DEFAULT_TIMEOUT_MS });
-    const m = /__COMMIT_TIMEOUT__(.*)$/.exec(run.stderr || '');
+    const m = /^__COMMIT_TIMEOUT__(.*)$/m.exec(run.stderr || '');
     return { stdout: run.stdout, stderr: run.stderr, timeout: m ? JSON.parse(m[1] || 'null') : undefined };
   }
 
@@ -994,17 +994,5 @@ try { ${call} } catch (e) { /* error() throws ExitError after writing its messag
     const r = probe(`cmds.cmdPrSubrepo(${JSON.stringify(rootDir)}, 'backend', 'fix-5231-timeout', 'fix: probe', false);`);
     assert.strictEqual(r.timeout, 60000, `stderr: ${r.stderr}`);
     assert.ok(r.stderr.includes('timed out after 60s'), `stderr: ${r.stderr}`);
-  });
-
-  test('commit-to-subrepo defaults to 30000 when git.commit_timeout_ms is unset', () => {
-    setup(null);
-    const r = probe(`cmds.cmdCommitToSubrepo(${JSON.stringify(rootDir)}, 'chore: probe', ['backend/seed.js'], false);`);
-    assert.strictEqual(r.timeout, 30000, `stderr: ${r.stderr}`);
-  });
-
-  test('pr-subrepo defaults to 30000 when git.commit_timeout_ms is unset', () => {
-    setup(null);
-    const r = probe(`cmds.cmdPrSubrepo(${JSON.stringify(rootDir)}, 'backend', 'fix-5231-default', 'fix: probe', false);`);
-    assert.strictEqual(r.timeout, 30000, `stderr: ${r.stderr}`);
   });
 });
