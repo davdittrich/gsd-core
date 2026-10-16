@@ -53,6 +53,15 @@ describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, ()
     assert.match(r.stdout, /CONTINUED/);
   });
 
+  test('unparseable analyze output (garbage or empty, exit 0) is a hard error, never a skip', () => {
+    for (const out of ['not json', '']) {
+      const r = run(out, 0);
+      assert.equal(r.status, 1, `stdout=${JSON.stringify(out)}`);
+      assert.ok(!/PHASE_NOT_COMPLETE/.test(r.stderr));
+      assert.ok(!/CONTINUED/.test(r.stdout));
+    }
+  });
+
   test('analyze exit 69 is a hard error, never PHASE_NOT_COMPLETE or a skip', () => {
     const r = run(analyze('3', false), 69);
     assert.equal(r.status, 1);

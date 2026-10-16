@@ -977,7 +977,7 @@ function cmdRoadmapAnalyze(cwd: string, raw: boolean): void {
     }));
 
   // #5221: unticked checklist entries only (a table-only row has no checkbox) — ship's completeness gate.
-  const uncheckedPhases = phases.filter(p => PHASES_WITH_CHECKBOX.has(p) && !p.roadmap_complete).map(p => p.number);
+  const uncheckedPhases = [...new Set(checklistOccurrences.filter(o => !o.checked && !isSentinelPhase(o.token, o.bracketId)).map(o => o.token))];
 
   const result = {
     milestones,

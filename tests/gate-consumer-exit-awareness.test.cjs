@@ -402,5 +402,14 @@ describe('roadmap.update-plan-progress: only a missing_phase_details decline sto
       assert.match(r.stderr, /ERROR/);
       assert.ok(!/CONTINUED/.test(r.stdout));
     });
+
+    test(`${name}: output jq cannot parse (garbage or empty, exit 0) stops`, () => {
+      for (const out of ['not json', '']) {
+        const r = run(out, 0);
+        assert.equal(r.status, 1, `stdout=${JSON.stringify(out)}`);
+        assert.match(r.stderr, /ERROR/);
+        assert.ok(!/CONTINUED/.test(r.stdout));
+      }
+    });
   }
 });
