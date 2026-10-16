@@ -341,7 +341,7 @@ Set via `git.*` namespace (e.g., `"git": { "branching_strategy": "phase" }`).
 | `git.base_branch` | string\|null | `null` (auto-detect) | Any branch name | Target branch for PRs and merges; auto-detects from `origin/HEAD` when `null` |
 | `git.protected_branches` | array of non-empty strings | (none) | Non-empty branch names | Optional protected names added to the resolved base branch for execute-phase and ship warnings |
 | `git.create_tag` | boolean | `true` | `true`, `false` | Create git tags on milestone completion |
-| `git.commit_timeout_ms` | number (ms) | `30000` | Positive integer; otherwise `30000` | Timeout for each SDK `git commit`; raise for slow pre-commit hooks. |
+| `git.commit_timeout_ms` | positive integer (ms) | `30000` | Positive integer; otherwise `30000` | Timeout for each SDK `git commit`; raise for slow pre-commit hooks. |
 | `git.phase_branch_template` | string | `"gsd/phase-{phase}-{slug}"` | Template with `{phase}`, `{slug}` | Branch naming template for `phase` strategy |
 | `git.milestone_branch_template` | string | `"gsd/{milestone}-{slug}"` | Template with `{milestone}`, `{slug}` | Branch naming template for `milestone` strategy |
 | `git.quick_branch_template` | string\|null | `null` | Template with `{slug}` | Optional branch template for quick-task runs |

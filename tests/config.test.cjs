@@ -2036,6 +2036,14 @@ const WORKFLOW_PATH = path.join(
 );
 
 describe('#5231: git.commit_timeout_ms config key', () => {
+  test('fresh project: config-get returns the 30000 default', (t) => {
+    const tmpDir = createTempProject('gsd-5231-default-');
+    t.after(() => cleanup(tmpDir));
+    const r = runGsdTools(['config-get', 'git.commit_timeout_ms'], tmpDir, homeSandboxEnv(tmpDir));
+    assert.ok(r.success, `config-get failed:\n${r.error}`);
+    assert.strictEqual(r.output.trim(), '30000');
+  });
+
   test('accepts 60000; rejects 0, -1, abc, 1500.5', (t) => {
     const tmpDir = createTempProject('gsd-5231-');
     t.after(() => cleanup(tmpDir));
