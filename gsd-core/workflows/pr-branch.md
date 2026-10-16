@@ -40,15 +40,17 @@ PR_BRANCH="${CURRENT_BRANCH}-pr"
 TIP=$(git rev-parse "$CURRENT_BRANCH")
 MARKER_REF="refs/gsd/pr-published/$TARGET/$CURRENT_BRANCH"
 PENDING_REF="refs/gsd/pr-built/$TARGET/$CURRENT_BRANCH"
+BUILT_REF="refs/gsd/pr-built-head/$TARGET/$CURRENT_BRANCH"
 
-# The last build counts as published only once its -pr branch is merged; a deleted
-# -pr branch means it was discarded, so its commits must be replayed.
+# The last build counts as published only once its -pr tip (BUILT_REF) is merged, even if
+# the local -pr branch was since deleted; an unmerged build whose -pr branch is gone was
+# discarded, so its commits must be replayed.
 P=$(git rev-parse -q --verify "$PENDING_REF")
 if [ -n "$P" ]; then
-  if ! git rev-parse -q --verify "refs/heads/$PR_BRANCH" >/dev/null; then
-    git update-ref -d "$PENDING_REF"
-  elif git merge-base --is-ancestor "$PR_BRANCH" "$TARGET"; then
-    git update-ref "$MARKER_REF" "$P" && git update-ref -d "$PENDING_REF"
+  if git merge-base --is-ancestor "$BUILT_REF" "$TARGET" 2>/dev/null; then
+    git update-ref "$MARKER_REF" "$P" && git update-ref -d "$PENDING_REF" && git update-ref -d "$BUILT_REF"
+  elif ! git rev-parse -q --verify "refs/heads/$PR_BRANCH" >/dev/null; then
+    git update-ref -d "$PENDING_REF"; git update-ref -d "$BUILT_REF" 2>/dev/null
   fi
 fi
 
@@ -388,7 +390,9 @@ if git rev-parse -q --verify "refs/heads/$PR_BRANCH" >/dev/null; then
     git checkout -q -B "$PR_BRANCH" "$TARGET"
   else
     echo "$PR_BRANCH exists and is unpublished/unmerged; run one, then re-run. Merged by squash/rebase:" >&2
-    echo "  git update-ref $MARKER_REF \$(git rev-parse $PENDING_REF) && git branch -D $PR_BRANCH" >&2
+    if git rev-parse -q --verify "$PENDING_REF" >/dev/null; then
+      echo "  git update-ref $MARKER_REF \$(git rev-parse $PENDING_REF) && git branch -D $PR_BRANCH" >&2
+    fi
     echo "Discarding: git branch -D $PR_BRANCH" >&2
     exit 1
   fi
@@ -569,12 +573,12 @@ value means the PR branch would DELETE planning files the target branch tracks
 them). That is data loss, not filtering — report it, do not tell the user to push, and
 rebuild the branch.
 
-When both gates pass, record the built tip as pending (`$TIP`, never HEAD); the next run
-promotes it to published once `$PR_BRANCH` is merged. A failed write warns; it never aborts:
+When both gates pass, record the built tip as pending (`$TIP`, never HEAD) and the `$PR_BRANCH` tip
+beside it; the next run promotes pending to published once that tip is merged. A failed write warns; it never aborts:
 
 ```bash
 if [ "$FORBIDDEN" = 0 ] && [ "$PLANNING_DELETIONS" = 0 ]; then
-  git update-ref "$PENDING_REF" "$TIP" || echo "WARNING: could not record $PENDING_REF; next run will replay commits." >&2
+  git update-ref "$BUILT_REF" "$(git rev-parse "$PR_BRANCH")" && git update-ref "$PENDING_REF" "$TIP" || echo "WARNING: could not record $PENDING_REF; next run will replay commits." >&2
 fi
 ```
 

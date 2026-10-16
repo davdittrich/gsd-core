@@ -5,11 +5,9 @@
  * (`refs/gsd/pr-published/<branch>`) bounds the commit range, and a leftover
  * `<branch>-pr` is replaced when merged / refused when not.
  *
- * L2 only: parses the SHIPPED bash blocks out of
- * `gsd-core/workflows/pr-branch.md` (via the pr-branch-filter seam) and runs
- * them in order against real git fixtures. No source-grep, no hand-copied
- * recipe. The one non-shipped line is the pick-list assignment, which the
- * workflow leaves to prose classification.
+ * L2 only: runs the SHIPPED bash blocks of `gsd-core/workflows/pr-branch.md`
+ * (pr-branch-filter seam) in order against real git fixtures; only the
+ * prose-classified pick-list assignment is supplied by the test.
  */
 
 const { describe, test } = require('node:test');
@@ -29,6 +27,7 @@ const {
 
 const MARKER = 'refs/gsd/pr-published/main/feature';
 const PENDING = 'refs/gsd/pr-built/main/feature';
+const BUILT = 'refs/gsd/pr-built-head/main/feature';
 
 const ISOLATED_ENV = (home) => ({
   PATH: process.env.PATH,
@@ -92,9 +91,21 @@ function publish(dir, target = 'main') {
     b('DIFF_PATHS=$(git diff'),
     b('git update-ref "$PENDING_REF"'),
   ].join('\n');
-  const r = spawnSync('sh', ['-c', script], {
-    cwd: dir, encoding: 'utf8', env: ISOLATED_ENV(dir), timeout: GIT_TIMEOUT_MS,
-  });
+  return runSh(script, dir);
+}
+
+// Script goes through a temp file, not `sh -c` argv (Windows MSYS2 mis-parses long quote-heavy argv).
+function runSh(script, cwd) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-prmarker-script-'));
+  try {
+    const file = path.join(tmp, 'recipe.sh');
+    fs.writeFileSync(file, script);
+    const r = spawnSync('sh', [file], { cwd, encoding: 'utf8', env: ISOLATED_ENV(cwd), timeout: GIT_TIMEOUT_MS });
+    return runResult(r);
+  } finally { cleanup(tmp); }
+}
+
+function runResult(r) {
   return { status: r.status ?? 1, stdout: r.stdout || '', stderr: r.stderr || '' };
 }
 
@@ -109,6 +120,7 @@ const refOf = (dir, ref) => {
 };
 const markerOf = (dir) => refOf(dir, MARKER);
 const pendingOf = (dir) => refOf(dir, PENDING);
+const builtOf = (dir) => refOf(dir, BUILT);
 const loggedOf = (r) => r.stdout.split('\n').filter((l) => /\b(feat|docs): r\d/.test(l));
 
 describe('#5469 pr-branch published marker (real git)', () => {
@@ -130,6 +142,7 @@ describe('#5469 pr-branch published marker (real git)', () => {
         assert.ok(logged.every((l) => l.includes(`r${n}`)), `round ${n} log replays older rounds:\n${r.stdout}`);
         assert.equal(git(dir, 'rev-list', '--count', 'main..feature-pr'), '1');
         assert.equal(pendingOf(dir), tip, 'build records the TIP captured at start as pending');
+        assert.equal(builtOf(dir), git(dir, 'rev-parse', 'feature-pr'), 'build records the -pr tip beside pending');
         assert.equal(markerOf(dir), n === 1 ? '' : prevTip, 'marker is promoted only after the PR branch is merged');
         mergePr(dir);
         prevTip = tip;
@@ -208,6 +221,38 @@ describe('#5469 pr-branch published marker (real git)', () => {
     } finally { teardown(); }
   });
 
+  test('merged then locally deleted -pr: pending is promoted, nothing replayed', () => {
+    const dir = repo();
+    try {
+      commitRound(dir, 1);
+      assert.equal(publish(dir).status, 0);
+      const tip1 = git(dir, 'rev-parse', 'feature');
+      mergePr(dir);
+      git(dir, 'branch', '-D', 'feature-pr');
+      commitRound(dir, 2);
+      const r = publish(dir);
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(markerOf(dir), tip1, 'merged build is promoted despite the deleted -pr branch');
+      assert.equal(loggedOf(r).length, 2, `only round 2 may be replayed:\n${r.stdout}`);
+      assert.ok(loggedOf(r).every((l) => l.includes('r2')));
+    } finally { teardown(); }
+  });
+
+  test('refusal without a pending ref prints only the discard command', () => {
+    const dir = repo();
+    try {
+      git(dir, 'checkout', '-q', '-b', 'feature-pr', 'main');
+      write(dir, 'other.txt', 'x\n');
+      commitAll(dir, 'chore: stray');
+      git(dir, 'checkout', '-q', 'feature');
+      commitRound(dir, 1);
+      const r = publish(dir);
+      assert.notEqual(r.status, 0);
+      assert.match(r.stderr, /git branch -D feature-pr/);
+      assert.doesNotMatch(r.stderr, /update-ref/);
+    } finally { teardown(); }
+  });
+
   test('squash-merged -pr: documented manual commands re-anchor the next run', () => {
     const dir = repo();
     try {
@@ -222,7 +267,7 @@ describe('#5469 pr-branch published marker (real git)', () => {
       assert.notEqual(refused.status, 0);
       const cmd = refused.stderr.match(/git update-ref \S+ \$\(git rev-parse \S+\) && git branch -D \S+/);
       assert.ok(cmd, `refusal must print the squash/rebase command:\n${refused.stderr}`);
-      spawnSync('sh', ['-c', cmd[0]], { cwd: dir, env: ISOLATED_ENV(dir), timeout: GIT_TIMEOUT_MS });
+      runSh(cmd[0], dir);
       const r = publish(dir);
       assert.equal(r.status, 0, r.stderr);
       assert.equal(loggedOf(r).length, 2, `only round 2 may be replayed:\n${r.stdout}`);
