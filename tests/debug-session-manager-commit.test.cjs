@@ -206,7 +206,7 @@ test('#2568: the in-session fix commit is idempotent', () => {
   const body = manager();
   assert.match(
     body,
-    /git diff --cached --quiet \|\| git commit/,
+    /git diff --cached --quiet -- [^\n|]+ \|\| git commit -m [^\n]+ -- /,
     'the fix-code commit must be guarded on staged content — archive_session may have ' +
       'already committed it, and an unguarded git commit exits non-zero on an empty diff',
   );

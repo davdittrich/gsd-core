@@ -3292,3 +3292,54 @@ cmdCommit(${JSON.stringify(tmpDir)}, 'docs: probe', ['.planning/STATE.md'], fals
     assert.equal(result.timed_out, undefined);
   });
 });
+
+describe('agent prompts scope raw git commit with a pathspec (#5211)', () => {
+  // A bare `git commit -m ...` commits the whole index, sweeping in files other
+  // sessions staged. Prompts must prescribe `git commit -m "..." -- <paths>`.
+  // Scope: fenced blocks and inline code spans only (prose that merely names
+  // the command is not an invocation). A command spans from `git commit` to the
+  // next operator or unquoted newline, so a multi-line -m body is one command.
+  // tokenize() stops at the first unquoted `#`, so comments are stripped per
+  // line first or a later commit in the same block would be hidden.
+  const agentsDir = path.join(__dirname, '..', 'agents');
+  const unscopedCommits = (raw) => {
+    const out = [];
+    const text = raw.split('\n').map((l) => l.slice(0, l.length - commentPortion(l).length)).join('\n');
+    const toks = tokenize(text);
+    for (let i = 0; i + 1 < toks.length; i += 1) {
+      if (toks[i].op || toks[i].redir || toks[i].value !== 'git' || toks[i + 1].value !== 'commit') continue;
+      const argv = [];
+      let prev = toks[i + 1];
+      for (let j = i + 2; j < toks.length && !toks[j].op; j += 1) {
+        if (/(?<!\\)\n/.test(text.slice(prev.end, toks[j].start))) break;
+        if (!toks[j].redir) argv.push(toks[j].value);
+        prev = toks[j];
+      }
+      const dd = argv.indexOf('--');
+      if (argv.length > 0 && dd === -1 || dd !== -1 && dd === argv.length - 1) out.push(text.slice(toks[i].start, prev.end));
+    }
+    return out;
+  };
+
+  test('scanner flags unscoped commits and passes scoped ones', () => {
+    assert.equal(unscopedCommits('git commit -m "x"').length, 1);
+    assert.equal(unscopedCommits('# note\ngit commit -m "x"').length, 1);
+    assert.equal(unscopedCommits('git commit -m x --').length, 1);
+    assert.equal(unscopedCommits('git commit -m "x" -- a b').length, 0);
+  });
+
+  test('every git commit with arguments carries a -- pathspec', () => {
+    const offenders = [];
+    for (const f of fs.readdirSync(agentsDir).filter((n) => n.endsWith('.md')).sort()) {
+      const md = fs.readFileSync(path.join(agentsDir, f), 'utf8');
+      const segments = [];
+      const rest = md.replace(/^[ \t]*```[^\n]*\n([\s\S]*?)^[ \t]*```/gm, (_, body) => { segments.push(body); return ''; });
+      for (const m of rest.matchAll(/`([^`\n]+)`/g)) segments.push(m[1]);
+      for (const seg of segments) {
+        for (const cmd of unscopedCommits(seg)) offenders.push(`${f}: ${cmd.split('\n')[0]}`);
+      }
+    }
+    assert.deepStrictEqual(offenders, [],
+      'unscoped `git commit` in agent prompts sweeps foreign staged files (#5211); append `-- <paths>`');
+  });
+});
