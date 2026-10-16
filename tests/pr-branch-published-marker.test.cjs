@@ -2,12 +2,12 @@
 
 /**
  * #5469 — /gsd:pr-branch repeat publishes: the published-marker ref
- * (`refs/gsd/pr-published/<branch>`) bounds the commit range, and a leftover
- * `<branch>-pr` is replaced when merged / refused when not.
+ * (`refs/gsd/pr-published/<target>/<branch>`, promoted from the pending build refs once the
+ * `-pr` branch merges) bounds the commit range, and a leftover `<branch>-pr` is replaced when
+ * merged / refused when not.
  *
  * L2 only: runs the SHIPPED bash blocks of `gsd-core/workflows/pr-branch.md`
- * (pr-branch-filter seam) in order against real git fixtures; only the
- * prose-classified pick-list assignment is supplied by the test.
+ * (pr-branch-filter seam) in order against real git fixtures.
  */
 
 const { describe, test } = require('node:test');
@@ -137,7 +137,7 @@ describe('#5469 pr-branch published marker (real git)', () => {
         const tip = git(dir, 'rev-parse', 'feature');
         const r = publish(dir);
         assert.equal(r.status, 0, `round ${n} failed: ${r.stderr}`);
-        const logged = r.stdout.split('\n').filter((l) => /\b(feat|docs): r\d/.test(l));
+        const logged = loggedOf(r);
         assert.equal(logged.length, 2, `round ${n} must list only its own 2 commits:\n${r.stdout}`);
         assert.ok(logged.every((l) => l.includes(`r${n}`)), `round ${n} log replays older rounds:\n${r.stdout}`);
         assert.equal(git(dir, 'rev-list', '--count', 'main..feature-pr'), '1');
@@ -267,7 +267,8 @@ describe('#5469 pr-branch published marker (real git)', () => {
       assert.notEqual(refused.status, 0);
       const cmd = refused.stderr.match(/git update-ref \S+ \$\(git rev-parse \S+\) && git branch -D \S+/);
       assert.ok(cmd, `refusal must print the squash/rebase command:\n${refused.stderr}`);
-      runSh(cmd[0], dir);
+      const recovered = runSh(cmd[0], dir);
+      assert.equal(recovered.status, 0, `recovery command failed: ${recovered.stderr}`);
       const r = publish(dir);
       assert.equal(r.status, 0, r.stderr);
       assert.equal(loggedOf(r).length, 2, `only round 2 may be replayed:\n${r.stdout}`);
