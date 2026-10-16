@@ -69,6 +69,18 @@ Verify the work is ready to ship:
    ```
    Present `$NEXT_ACTION` to the user and, when `$NEXT_COMMAND` is non-empty, show it as the command to run next. These two are message text only — the block/allow decision has already been made from `$STATUS`, so a concurrent write between the reads cannot change the gate's verdict. The query already covers every status in its closed set, so no per-status arm is needed.
 
+1a. **Phase marked complete?** (#5221) Verified is not complete: `/gsd-verify-work` completes the phase.
+   ```bash
+   if [ -f .planning/ROADMAP.md ]; then
+     ANALYZE=$(gsd_run query roadmap.analyze) || { echo "roadmap.analyze failed — see the error above" >&2; exit 1; }
+     if [[ "$ANALYZE" == @file:* ]]; then ANALYZE=$(cat "${ANALYZE#@file:}"); fi
+     # unchecked_phases lists only unticked checklist entries; table-only rows never appear (fail-open).
+     UNCHECKED=$(echo "$ANALYZE"|jq -r --arg p "$PHASE_NUMBER" 'def n:split(".")|map(sub("^0+(?=[0-9])";""))|join(".");.unchecked_phases[]?|select(tostring|n==($p|n))'|head -1)
+     [ -z "$UNCHECKED" ] || { echo "PHASE_NOT_COMPLETE: Run /gsd-verify-work ${PHASE_NUMBER} (completes the phase), then re-run /gsd-ship" >&2; exit 1; }
+   fi
+   ```
+   A missing ROADMAP.md or a phase with no checklist entry skips the check; an analyze failure stops.
+
 2. **Clean working tree?**
    ```bash
    git status --short
