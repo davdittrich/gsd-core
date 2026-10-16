@@ -18,6 +18,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync, spawnSync } = require('child_process');
+const { cleanup } = require('./helpers.cjs');
+const { GIT_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
 
 const {
   WORKFLOW_PATH,
@@ -25,7 +27,8 @@ const {
   extractBashBlockContaining,
 } = require('./helpers/pr-branch-filter.cjs');
 
-const MARKER = 'refs/gsd/pr-published/feature';
+const MARKER = 'refs/gsd/pr-published/main/feature';
+const PENDING = 'refs/gsd/pr-built/main/feature';
 
 const ISOLATED_ENV = (home) => ({
   PATH: process.env.PATH,
@@ -35,7 +38,7 @@ const ISOLATED_ENV = (home) => ({
 });
 
 function git(dir, ...args) {
-  return execFileSync('git', args, { cwd: dir, encoding: 'utf8', env: ISOLATED_ENV(dir), timeout: 30000 }).trim();
+  return execFileSync('git', args, { cwd: dir, encoding: 'utf8', env: ISOLATED_ENV(dir), timeout: GIT_TIMEOUT_MS }).trim();
 }
 
 function commitAll(dir, msg) {
@@ -72,47 +75,50 @@ function commitRound(dir, n) {
 }
 
 // Runs the shipped blocks in workflow order under pr_strict.
-function publish(dir) {
+function publish(dir, target = 'main') {
   const text = fs.readFileSync(WORKFLOW_PATH, 'utf-8');
   const b = (marker) => extractBashBlockContaining(text, marker);
   const script = [
     'CURRENT_BRANCH=feature',
-    'TARGET=main',
+    `TARGET=${target}`,
     'PR_STRICT=true',
-    b('AHEAD=$(git rev-list'),
+    b('PR_BRANCH="${CURRENT_BRANCH}-pr"'),
     b('TRANSIENT_DIRS="phases'),
     b('FILTER_PATHS=$(for d'),
     b('git log --oneline'),
-    'INCLUDED_COMMITS=$(git rev-list --reverse "${BASE:-$TARGET}".."$CURRENT_BRANCH")',
-    b('PR_BRANCH="${CURRENT_BRANCH}-pr"'),
+    b('# Create PR branch from target'),
     extractPickLoop(text),
     b('git checkout "$CURRENT_BRANCH"'),
     b('DIFF_PATHS=$(git diff'),
-    b('git update-ref "$MARKER_REF"'),
+    b('git update-ref "$PENDING_REF"'),
   ].join('\n');
   const r = spawnSync('sh', ['-c', script], {
-    cwd: dir, encoding: 'utf8', env: ISOLATED_ENV(dir), timeout: 30000,
+    cwd: dir, encoding: 'utf8', env: ISOLATED_ENV(dir), timeout: GIT_TIMEOUT_MS,
   });
   return { status: r.status ?? 1, stdout: r.stdout || '', stderr: r.stderr || '' };
 }
 
 // Fast-forward the bare target to the published -pr branch (a merged PR).
-function mergePr(dir) {
-  git(dir, 'merge-base', '--is-ancestor', 'main', 'feature-pr');
-  git(dir, 'update-ref', 'refs/heads/main', 'refs/heads/feature-pr');
+function mergePr(dir, target = 'main') {
+  git(dir, 'merge-base', '--is-ancestor', target, 'feature-pr');
+  git(dir, 'update-ref', `refs/heads/${target}`, 'refs/heads/feature-pr');
 }
 
-const markerOf = (dir) => {
-  try { return git(dir, 'rev-parse', '-q', '--verify', MARKER); } catch { return ''; }
+const refOf = (dir, ref) => {
+  try { return git(dir, 'rev-parse', '-q', '--verify', ref); } catch { return ''; }
 };
+const markerOf = (dir) => refOf(dir, MARKER);
+const pendingOf = (dir) => refOf(dir, PENDING);
+const loggedOf = (r) => r.stdout.split('\n').filter((l) => /\b(feat|docs): r\d/.test(l));
 
 describe('#5469 pr-branch published marker (real git)', () => {
   const dirs = [];
   const repo = () => { const d = buildRepo(); dirs.push(d); return d; };
-  const teardown = () => { while (dirs.length) fs.rmSync(dirs.pop(), { recursive: true, force: true }); };
+  const teardown = () => { while (dirs.length) cleanup(dirs.pop()); };
 
   test('round 3 replays only the round-3 commits; marker follows the tip; merged leftover -pr is replaced', () => {
     const dir = repo();
+    let prevTip = '';
     try {
       for (const n of [1, 2, 3]) {
         commitRound(dir, n);
@@ -123,8 +129,10 @@ describe('#5469 pr-branch published marker (real git)', () => {
         assert.equal(logged.length, 2, `round ${n} must list only its own 2 commits:\n${r.stdout}`);
         assert.ok(logged.every((l) => l.includes(`r${n}`)), `round ${n} log replays older rounds:\n${r.stdout}`);
         assert.equal(git(dir, 'rev-list', '--count', 'main..feature-pr'), '1');
-        assert.equal(markerOf(dir), tip, 'marker must equal the TIP captured at start');
+        assert.equal(pendingOf(dir), tip, 'build records the TIP captured at start as pending');
+        assert.equal(markerOf(dir), n === 1 ? '' : prevTip, 'marker is promoted only after the PR branch is merged');
         mergePr(dir);
+        prevTip = tip;
       }
     } finally { teardown(); }
   });
@@ -141,6 +149,7 @@ describe('#5469 pr-branch published marker (real git)', () => {
       assert.match(r.stderr, /feature-pr/);
       assert.match(r.stderr, /unpublished|unmerged/);
       assert.match(r.stderr, /git branch -D feature-pr/);
+      assert.match(r.stderr, /git update-ref refs\/gsd\/pr-published\/main\/feature \$\(git rev-parse refs\/gsd\/pr-built\/main\/feature\)/);
       assert.equal(git(dir, 'rev-parse', 'feature-pr'), prTip);
       assert.equal(git(dir, 'branch', '--show-current'), 'feature');
     } finally { teardown(); }
@@ -157,10 +166,10 @@ describe('#5469 pr-branch published marker (real git)', () => {
       commitRound(dir, 2);
       const r = publish(dir);
       assert.equal(r.status, 0, r.stderr);
-      assert.match(r.stderr, /refs\/gsd\/pr-published\/feature/);
-      assert.match(r.stderr, /main/);
+      assert.match(r.stderr, /refs\/gsd\/pr-published\/main\/feature is not an ancestor/);
+      assert.match(r.stderr, /git update-ref refs\/gsd\/pr-published\/main\/feature <rebased commit/);
       assert.equal(git(dir, 'show', 'feature-pr:code.txt'), 'v2');
-      assert.equal(markerOf(dir), git(dir, 'rev-parse', 'feature'));
+      assert.equal(pendingOf(dir), git(dir, 'rev-parse', 'feature'));
     } finally { teardown(); }
   });
 
@@ -169,8 +178,8 @@ describe('#5469 pr-branch published marker (real git)', () => {
     try {
       commitRound(dir, 1);
       assert.equal(publish(dir).status, 0);
-      const m1 = markerOf(dir);
-      assert.equal(m1, git(dir, 'rev-parse', 'feature'), 'round 1 must record the marker');
+      const m1 = git(dir, 'rev-parse', 'feature');
+      assert.equal(pendingOf(dir), m1, 'round 1 must record the pending tip');
       mergePr(dir);
       git(dir, 'checkout', '-q', 'main');
       write(dir, 'code.txt', 'main-diverged\n');
@@ -179,7 +188,65 @@ describe('#5469 pr-branch published marker (real git)', () => {
       commitRound(dir, 2);
       const r = publish(dir);
       assert.notEqual(r.status, 0, 'conflict must halt');
-      assert.equal(markerOf(dir), m1, 'marker must stay at the last published tip');
+      assert.equal(markerOf(dir), m1, 'marker is the merged round-1 tip');
+      assert.equal(pendingOf(dir), '', 'failed round 2 must not record a pending tip');
+    } finally { teardown(); }
+  });
+
+  test('discarded -pr branch: unpublished commits are replayed, pending is dropped', () => {
+    const dir = repo();
+    try {
+      commitRound(dir, 1);
+      assert.equal(publish(dir).status, 0);
+      git(dir, 'branch', '-D', 'feature-pr');
+      commitRound(dir, 2);
+      const r = publish(dir);
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(loggedOf(r).length, 4, `discarded round 1 must be replayed:\n${r.stdout}`);
+      assert.equal(markerOf(dir), '', 'nothing was published');
+      assert.equal(pendingOf(dir), git(dir, 'rev-parse', 'feature'));
+    } finally { teardown(); }
+  });
+
+  test('squash-merged -pr: documented manual commands re-anchor the next run', () => {
+    const dir = repo();
+    try {
+      commitRound(dir, 1);
+      assert.equal(publish(dir).status, 0);
+      git(dir, 'checkout', '-q', 'main');
+      git(dir, 'checkout', 'feature-pr', '--', 'code.txt');
+      commitAll(dir, 'feat: squashed r1');
+      git(dir, 'checkout', '-q', 'feature');
+      commitRound(dir, 2);
+      const refused = publish(dir);
+      assert.notEqual(refused.status, 0);
+      const cmd = refused.stderr.match(/git update-ref \S+ \$\(git rev-parse \S+\) && git branch -D \S+/);
+      assert.ok(cmd, `refusal must print the squash/rebase command:\n${refused.stderr}`);
+      spawnSync('sh', ['-c', cmd[0]], { cwd: dir, env: ISOLATED_ENV(dir), timeout: GIT_TIMEOUT_MS });
+      const r = publish(dir);
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(loggedOf(r).length, 2, `only round 2 may be replayed:\n${r.stdout}`);
+      assert.ok(loggedOf(r).every((l) => l.includes('r2')));
+    } finally { teardown(); }
+  });
+
+  test('markers are keyed by target: a release run does not anchor a main run', () => {
+    const dir = repo();
+    try {
+      git(dir, 'branch', 'release', 'main');
+      commitRound(dir, 1);
+      assert.equal(publish(dir, 'release').status, 0);
+      mergePr(dir, 'release');
+      commitRound(dir, 2);
+      assert.equal(publish(dir, 'release').status, 0);
+      const releaseMarker = refOf(dir, 'refs/gsd/pr-published/release/feature');
+      assert.ok(releaseMarker, 'release marker promoted');
+      git(dir, 'branch', '-D', 'feature-pr');
+      const r = publish(dir, 'main');
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(loggedOf(r).length, 4, `main must replay from main, not from the release marker:\n${r.stdout}`);
+      assert.equal(markerOf(dir), '');
+      assert.equal(refOf(dir, 'refs/gsd/pr-published/release/feature'), releaseMarker);
     } finally { teardown(); }
   });
 });

@@ -2,4 +2,4 @@
 type: Fixed
 pr: 68
 ---
-**`/gsd-pr-branch` anchors replay on a published marker and handles an existing `-pr` branch** — the replay starts after the last published tip recorded in `refs/gsd/pr-published/<working-branch>`, so commits already published are not re-picked. A leftover `-pr` branch is replaced when already merged and refused by name when not (#5469).
+**`/gsd-pr-branch` replays only commits after the last published tip and handles an existing `-pr` branch** — the last built tip is promoted to `refs/gsd/pr-published/<target>/<working-branch>` once the `-pr` branch is merged, so discarded work is replayed. A leftover `-pr` branch is replaced when already merged and refused by name, with squash/rebase recovery commands, when not (#5469).

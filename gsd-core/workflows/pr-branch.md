@@ -36,17 +36,31 @@ Check preconditions:
 - Working tree must be clean
 
 ```bash
+PR_BRANCH="${CURRENT_BRANCH}-pr"
+TIP=$(git rev-parse "$CURRENT_BRANCH")
+MARKER_REF="refs/gsd/pr-published/$TARGET/$CURRENT_BRANCH"
+PENDING_REF="refs/gsd/pr-built/$TARGET/$CURRENT_BRANCH"
+
+# The last build counts as published only once its -pr branch is merged; a deleted
+# -pr branch means it was discarded, so its commits must be replayed.
+P=$(git rev-parse -q --verify "$PENDING_REF")
+if [ -n "$P" ]; then
+  if ! git rev-parse -q --verify "refs/heads/$PR_BRANCH" >/dev/null; then
+    git update-ref -d "$PENDING_REF"
+  elif git merge-base --is-ancestor "$PR_BRANCH" "$TARGET"; then
+    git update-ref "$MARKER_REF" "$P" && git update-ref -d "$PENDING_REF"
+  fi
+fi
+
 # BASE bounds every commit range below: the last published tip when still an ancestor
 # (repeat publish picks only new commits), else $TARGET.
-TIP=$(git rev-parse "$CURRENT_BRANCH")
-MARKER_REF="refs/gsd/pr-published/$CURRENT_BRANCH"
 BASE="$TARGET"
 M=$(git rev-parse -q --verify "$MARKER_REF")
 if [ -n "$M" ]; then
   if git merge-base --is-ancestor "$M" "$CURRENT_BRANCH"; then
     BASE="$M"
   else
-    echo "WARNING: $MARKER_REF is not an ancestor of $CURRENT_BRANCH (history rewritten); using $TARGET as base." >&2
+    echo "WARNING: $MARKER_REF is not an ancestor of $CURRENT_BRANCH (history rewritten); using $TARGET as base. Re-anchor: git update-ref $MARKER_REF <rebased commit equivalent to last published tip>" >&2
   fi
 fi
 AHEAD=$(git rev-list --count "$BASE".."$CURRENT_BRANCH" 2>/dev/null)
@@ -249,6 +263,8 @@ Classify commits:
 ```bash
 # Get all commits ahead of the base: these are the only candidates to pick
 git log --oneline "$BASE".."$CURRENT_BRANCH" --no-merges
+# Default pick list, oldest first; drop commits classified as skip.
+INCLUDED_COMMITS=$(git rev-list --reverse --no-merges "$BASE".."$CURRENT_BRANCH")
 ```
 
 **Canonical path declarations.** These three lines are the single source of truth for the
@@ -366,14 +382,14 @@ Mixed planning commits: {N} ({included — structural + transient/other, plannin
 
 <step name="create_pr_branch">
 ```bash
-PR_BRANCH="${CURRENT_BRANCH}-pr"
-
 # Create PR branch from target. A leftover branch is reset only when already merged.
 if git rev-parse -q --verify "refs/heads/$PR_BRANCH" >/dev/null; then
   if git merge-base --is-ancestor "$PR_BRANCH" "$TARGET"; then
     git checkout -q -B "$PR_BRANCH" "$TARGET"
   else
-    echo "$PR_BRANCH exists and is unpublished/unmerged; publish it, or git branch -D $PR_BRANCH, then re-run." >&2
+    echo "$PR_BRANCH exists and is unpublished/unmerged; run one, then re-run. Merged by squash/rebase:" >&2
+    echo "  git update-ref $MARKER_REF \$(git rev-parse $PENDING_REF) && git branch -D $PR_BRANCH" >&2
+    echo "Discarding: git branch -D $PR_BRANCH" >&2
     exit 1
   fi
 else
@@ -553,12 +569,12 @@ value means the PR branch would DELETE planning files the target branch tracks
 them). That is data loss, not filtering — report it, do not tell the user to push, and
 rebuild the branch.
 
-When both gates pass, record the published tip so the next run picks only newer commits
-(`$TIP`, never HEAD). A failed write warns; it never aborts:
+When both gates pass, record the built tip as pending (`$TIP`, never HEAD); the next run
+promotes it to published once `$PR_BRANCH` is merged. A failed write warns; it never aborts:
 
 ```bash
 if [ "$FORBIDDEN" = 0 ] && [ "$PLANNING_DELETIONS" = 0 ]; then
-  git update-ref "$MARKER_REF" "$TIP" || echo "WARNING: could not record $MARKER_REF; next run will replay commits." >&2
+  git update-ref "$PENDING_REF" "$TIP" || echo "WARNING: could not record $PENDING_REF; next run will replay commits." >&2
 fi
 ```
 
