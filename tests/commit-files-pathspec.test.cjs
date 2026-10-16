@@ -21,6 +21,8 @@ const { spawnSync } = require('child_process');
 const { createTempGitProject, cleanup, runGsdTools } = require('./helpers.cjs');
 const { execFileSync } = require('node:child_process');
 const { gitOrThrow } = require('./helpers/git-fixture.cjs');
+const { scanFencedBlocks, stripFencedCode, scanInlineCodeSpans } = require('../gsd-core/bin/lib/markdown-sectionizer.cjs');
+const { splitLines } = require('../gsd-core/bin/lib/text-lines.cjs');
 // #3145: class-norm timeout, not a per-suite value — see helpers/timeouts.cjs.
 const { GIT_TIMEOUT_MS, PROBE_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
 const {
@@ -3332,9 +3334,10 @@ describe('agent prompts scope raw git commit with a pathspec (#5211)', () => {
     const offenders = [];
     for (const f of fs.readdirSync(agentsDir).filter((n) => n.endsWith('.md')).sort()) {
       const md = fs.readFileSync(path.join(agentsDir, f), 'utf8');
-      const segments = [];
-      const rest = md.replace(/^[ \t]*```[^\n]*\n([\s\S]*?)^[ \t]*```/gm, (_, body) => { segments.push(body); return ''; });
-      for (const m of rest.matchAll(/`([^`\n]+)`/g)) segments.push(m[1]);
+      const lines = splitLines(md);
+      const segments = scanFencedBlocks(lines).map((b) =>
+        lines.slice(b.openLineIdx + 1, b.closeLineIdx === -1 ? lines.length : b.closeLineIdx).join('\n'));
+      for (const s of scanInlineCodeSpans(stripFencedCode(md).text)) segments.push(s.content);
       for (const seg of segments) {
         for (const cmd of unscopedCommits(seg)) offenders.push(`${f}: ${cmd.split('\n')[0]}`);
       }
