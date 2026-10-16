@@ -36,9 +36,22 @@ Check preconditions:
 - Working tree must be clean
 
 ```bash
-AHEAD=$(git rev-list --count "$TARGET".."$CURRENT_BRANCH" 2>/dev/null)
+# BASE bounds every commit range below: the last published tip when still an ancestor
+# (repeat publish picks only new commits), else $TARGET.
+TIP=$(git rev-parse "$CURRENT_BRANCH")
+MARKER_REF="refs/gsd/pr-published/$CURRENT_BRANCH"
+BASE="$TARGET"
+M=$(git rev-parse -q --verify "$MARKER_REF")
+if [ -n "$M" ]; then
+  if git merge-base --is-ancestor "$M" "$CURRENT_BRANCH"; then
+    BASE="$M"
+  else
+    echo "WARNING: $MARKER_REF is not an ancestor of $CURRENT_BRANCH (history rewritten); using $TARGET as base." >&2
+  fi
+fi
+AHEAD=$(git rev-list --count "$BASE".."$CURRENT_BRANCH" 2>/dev/null)
 if [ "$AHEAD" = "0" ]; then
-  echo "No commits ahead of $TARGET — nothing to filter."
+  echo "No commits ahead of $BASE — nothing to filter."
   exit 0
 fi
 
@@ -234,8 +247,8 @@ After processing all selected sub-repos, remove the temp file and continue to
 Classify commits:
 
 ```bash
-# Get all commits ahead of target
-git log --oneline "$TARGET".."$CURRENT_BRANCH" --no-merges
+# Get all commits ahead of the base: these are the only candidates to pick
+git log --oneline "$BASE".."$CURRENT_BRANCH" --no-merges
 ```
 
 **Canonical path declarations.** These three lines are the single source of truth for the
@@ -355,8 +368,17 @@ Mixed planning commits: {N} ({included — structural + transient/other, plannin
 ```bash
 PR_BRANCH="${CURRENT_BRANCH}-pr"
 
-# Create PR branch from target
-git checkout -b "$PR_BRANCH" "$TARGET"
+# Create PR branch from target. A leftover branch is reset only when already merged.
+if git rev-parse -q --verify "refs/heads/$PR_BRANCH" >/dev/null; then
+  if git merge-base --is-ancestor "$PR_BRANCH" "$TARGET"; then
+    git checkout -q -B "$PR_BRANCH" "$TARGET"
+  else
+    echo "$PR_BRANCH exists and is unpublished/unmerged; publish it, or git branch -D $PR_BRANCH, then re-run." >&2
+    exit 1
+  fi
+else
+  git checkout -b "$PR_BRANCH" "$TARGET"
+fi
 ```
 
 Cherry-pick the included commits, in order, filtering `$FILTER_PATHS` out of each one.
@@ -530,6 +552,15 @@ value means the PR branch would DELETE planning files the target branch tracks
 (`git diff --name-status --no-renames "$TARGET".."$PR_BRANCH" | grep "^D" | grep "\.planning/"` lists
 them). That is data loss, not filtering — report it, do not tell the user to push, and
 rebuild the branch.
+
+When both gates pass, record the published tip so the next run picks only newer commits
+(`$TIP`, never HEAD). A failed write warns; it never aborts:
+
+```bash
+if [ "$FORBIDDEN" = 0 ] && [ "$PLANNING_DELETIONS" = 0 ]; then
+  git update-ref "$MARKER_REF" "$TIP" || echo "WARNING: could not record $MARKER_REF; next run will replay commits." >&2
+fi
+```
 
 Display results:
 ```

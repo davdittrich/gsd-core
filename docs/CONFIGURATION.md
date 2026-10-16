@@ -834,7 +834,7 @@ Pick by which question you are actually asking:
 | You want | Setting | What you give up |
 |---|---|---|
 | Planning never enters git | `planning.commit_docs: false` | Parallel executor worktrees; planning git history |
-| Planning is versioned locally but never published | `planning.commit_docs: true` + `planning.pr_strict: true` | Nothing — but the working branch itself must not be pushed; publish the generated `-pr` branch |
+| Planning is versioned locally but never published | `planning.commit_docs: true` + `planning.pr_strict: true` | Nothing — but the working branch itself must not be pushed; publish the generated `-pr` branch. `/gsd-pr-branch` records the last published tip in `refs/gsd/pr-published/<working-branch>` after a verified build and replays only commits after it. A leftover already-merged `-pr` branch is replaced; an unmerged one is refused by name. After a rebase the marker is ignored and replay falls back to the target. Reset with `git update-ref -d refs/gsd/pr-published/<working-branch>` |
 
 The two are independent keys and can be set together, but `pr_strict` is inert when `commit_docs` is `false`: with nothing committed, there is nothing for the PR-branch filter to remove.
 
