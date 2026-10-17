@@ -148,8 +148,8 @@ To use uncommitted mode:
 
 3. **Existing tracked files:** If `.planning/` was previously tracked:
    ```bash
-   git rm -r --cached .planning/
    git diff --cached --quiet -- ':!.planning' || { echo "unrelated staged paths; unstage them first" >&2; exit 1; }
+   git rm -r --cached .planning/
    git commit -m "chore: stop tracking planning docs"
    ```
 

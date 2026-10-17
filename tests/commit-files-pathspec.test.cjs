@@ -3334,7 +3334,9 @@ describe('shipped prompts scope raw git commit with a pathspec (#5211)', () => {
         rest = line.slice(i + 1);
         q = null;
       }
-      const kept = rest.slice(0, rest.length - commentPortion(rest).length);
+      // After a closing quote the 'x' makes commentPortion see mid-word: a `#`
+      // glued to the quote is literal in the shell.
+      const kept = rest.slice(0, rest.length - commentPortion(head ? 'x' + rest : rest).length);
       for (let i = 0; i < kept.length; i += 1) {
         const ch = kept[i];
         if (q) {
@@ -3346,7 +3348,8 @@ describe('shipped prompts scope raw git commit with a pathspec (#5211)', () => {
       return head + kept;
     }).join('\n');
   };
-  const unscopedCommits = (raw) => {
+  // `inline`: a bare `git commit` in a prose code span names the command, it is not an invocation.
+  const unscopedCommits = (raw, inline = false) => {
     const out = [];
     const text = stripComments(raw);
     const toks = tokenize(text);
@@ -3360,7 +3363,7 @@ describe('shipped prompts scope raw git commit with a pathspec (#5211)', () => {
         prev = toks[j];
       }
       const dd = argv.indexOf('--');
-      if (argv.length > 0 && dd === -1 || dd !== -1 && dd === argv.length - 1) out.push(text.slice(toks[i].start, prev.end));
+      if ((dd === -1 && (argv.length > 0 || !inline)) || (dd !== -1 && dd === argv.length - 1)) out.push(text.slice(toks[i].start, prev.end));
     }
     return out;
   };
@@ -3370,6 +3373,16 @@ describe('shipped prompts scope raw git commit with a pathspec (#5211)', () => {
     assert.equal(unscopedCommits('# note\ngit commit -m "x"').length, 1);
     assert.equal(unscopedCommits('git commit -m x --').length, 1);
     assert.equal(unscopedCommits('git commit -m "x" -- a b').length, 0);
+  });
+
+  test('a bare git commit (editor mode, no args) is unscoped', () => {
+    assert.equal(unscopedCommits('git commit').length, 1);
+    assert.equal(unscopedCommits('git commit', true).length, 0);
+    assert.equal(unscopedCommits('git commit\ngit commit -m "x" -- a').length, 1);
+  });
+
+  test('a # glued to a closing quote is literal, not a comment', () => {
+    assert.equal(unscopedCommits('echo "a\nb"#tag;git commit -m z').length, 1);
   });
 
   test('a # inside a multiline quoted message is not a comment', () => {
@@ -3398,10 +3411,10 @@ describe('shipped prompts scope raw git commit with a pathspec (#5211)', () => {
       const md = fs.readFileSync(path.join(root, f), 'utf8');
       const lines = splitLines(md);
       const segments = scanFencedBlocks(lines).map((b) =>
-        lines.slice(b.openLineIdx + 1, b.closeLineIdx === -1 ? lines.length : b.closeLineIdx).join('\n'));
-      for (const s of scanInlineCodeSpans(stripFencedCode(md).text)) segments.push(s.content);
-      for (const seg of segments) {
-        for (const cmd of unscopedCommits(seg)) {
+        [lines.slice(b.openLineIdx + 1, b.closeLineIdx === -1 ? lines.length : b.closeLineIdx).join('\n'), false]);
+      for (const s of scanInlineCodeSpans(stripFencedCode(md).text)) segments.push([s.content, true]);
+      for (const [seg, inline] of segments) {
+        for (const cmd of unscopedCommits(seg, inline)) {
           const key = `${f}: ${cmd.split('\n')[0]}`;
           if (WHOLE_INDEX_ALLOWLIST.has(key)) seen.add(key);
           else offenders.push(key);
