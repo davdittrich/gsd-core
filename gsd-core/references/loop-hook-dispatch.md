@@ -68,14 +68,17 @@ Dispatch the referenced unit. Exactly one of `ref.skill`, `ref.agent`, or `ref.c
   `` ` ``, `$(`, or a newline would terminate the assignment and run as its own statement
   before any shell-side check could execute. A value that fails is a malformed manifest:
   record a warning, skip that hook, continue to the next entry. Only a value that has passed
-  is run. When `context` is present, append `context.phase`; when absent, run the command with
-  no phase argument at all — never substitute an empty string for a missing token:
+  is run. When `context` is present, append `context.phase`; when absent, append the host
+  workflow's `${PHASE_NUMBER}` if it binds one, otherwise pass no phase argument — never
+  substitute an empty string for a missing token:
 
   ```bash
   # placeholders are filled in by you from the envelope, not by the shell
   # context present
   gsd_run ${ref.command} --phase "${context.phase}" --raw
-  # context absent
+  # context absent, host binds PHASE_NUMBER
+  gsd_run ${ref.command} --phase "${PHASE_NUMBER}" --raw
+  # context absent, no PHASE_NUMBER
   gsd_run ${ref.command} --raw
   ```
 

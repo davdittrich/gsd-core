@@ -78,6 +78,16 @@ inference when both are available — `STATE.current_phase` is project lifecycle
 status, not a claim about which phase the current invocation is scoped to, and
 diverges from it whenever one phase plans/verifies while another executes.
 
+## Consequences
+
+- `context` appears in the `loop render-hooks` envelope only when `--phase` is
+  passed and resolves. Without `--phase`, the envelope is unchanged.
+- An unresolvable, ambiguous, foreign-prefixed, escaping, or mismatched
+  `--phase`/`--phase-dir` omits `context` and appends a warning; hooks still
+  dispatch and the command does not exit non-zero.
+- Handlers must treat `context` as optional and fall back to their prior
+  behavior when it is absent.
+
 ## Rationale
 
 - **The gap is narrower than "no context exists," and that is exactly why it
@@ -126,10 +136,9 @@ diverges from it whenever one phase plans/verifies while another executes.
   - It would need new containment logic where `guardedFindPhase` already
     resolves the same fact, duplicating an invariant this repo's own
     [ADR-3473](3473-enforcement-by-construction.md) ("one owner per invariant")
-    argues against. Note the codebase's `resolvePath`
-    (`src/check-command-router.cts`) is a path *joiner*, not a confiner — it
-    returns an absolute input unchanged — so no reusable confinement helper
-    exists to lean on, exactly as #4030's triage observed.
+    argues against. Confinement helpers exist (`tryWithinRoot` /
+    `assertWithinRoot`, `src/security.cts`), but they answer only "is this
+    path inside the project", not "is this the phase's directory".
   - **Confinement would not be sufficient even once written.** `--phase 05
     --phase-dir .planning/phases/07-other` names two different in-project
     phases; both survive any containment check, and the pair is still
