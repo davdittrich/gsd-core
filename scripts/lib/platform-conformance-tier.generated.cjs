@@ -264,6 +264,7 @@ module.exports = {
   "tests/review-build-prompt-optional-sections.test.cjs",
   "tests/review-default-reviewers-config.test.cjs",
   "tests/review-lane-availability.test.cjs",
+  "tests/review-lane-invocation.test.cjs",
   "tests/review-lane-runner.test.cjs",
   "tests/review-lane-windows-spawn-resolution.test.cjs",
   "tests/review-model-config.test.cjs",
@@ -299,6 +300,7 @@ module.exports = {
   "tests/slug-derivation-drift-guard.test.cjs",
   "tests/state-todos-render.test.cjs",
   "tests/state.platform.test.cjs",
+  "tests/subject-first-line.platform.test.cjs",
   "tests/tdd-review-checkpoint-cross-plan.test.cjs",
   "tests/teams-status.test.cjs",
   "tests/test-gate-watch-mode.test.cjs",
@@ -329,5 +331,6 @@ module.exports = {
   "tests/worktree-cleanup.test.cjs",
   "tests/worktree-safety.test.cjs",
   "tests/worktree.test.cjs",
+  "tests/xtrace-phase-timing.platform.test.cjs",
   ],
 };
