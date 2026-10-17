@@ -296,8 +296,6 @@ Read `@~/.claude/gsd-core/references/scout-codebase.md` — it contains the phas
 
 <step name="dispatch_discuss_pre_hooks">
 ```bash
-# A roadmap-only phase has no directory yet; --phase resolves on-disk directories, so create it first.
-DISCUSS_NEW_DIR=$(printf '%s' "$INIT" | jq -r 'select(.phase_dir == null) | .expected_phase_dir // empty'); [ -z "$DISCUSS_NEW_DIR" ] || mkdir -p "$DISCUSS_NEW_DIR"
 DISCUSS_PRE_HOOKS_JSON=$(gsd_run loop render-hooks discuss:pre --raw --phase "${PHASE_NUMBER}")
 ```
 Apply each entry in `activeHooks` per @~/.claude/gsd-core/references/loop-hook-dispatch.md. Empty list → continue to `analyze_phase`.
