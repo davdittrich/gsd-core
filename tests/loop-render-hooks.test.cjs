@@ -1903,7 +1903,6 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     test(`[e2e] ${file} :: ${point} call site assigns its phase var and delivers it to a third-party handler`, (t) => {
       const fx = makeThirdPartyStepFixture(PHASE_SCOPED_POINTS);
       t.after(() => { cleanup(fx.home); cleanup(fx.project); });
-      // allow-test-rule: source-text-is-the-product (#4030) — the workflow call line is the argv under test
       const lines = splitLines(fs.readFileSync(path.join(ROOT, file), 'utf8'));
       let seen = 0;
       lines.forEach((line, idx) => {
@@ -2142,7 +2141,6 @@ describe('every phase-scoped render-hooks call site actually carries --phase', (
 
   for (const [file, point, expectedCount] of SITES) {
     test(`${file} :: ${point} carries --phase at all ${expectedCount} call site(s)`, () => {
-      // allow-test-rule: source-text-is-the-product (#4030) — the shipped workflow call sites are the product
       const content = fs.readFileSync(path.join(ROOT, file), 'utf8');
       const { bare, withPhase } = phaseSiteCounts(content, point);
       assert.strictEqual(bare.length, expectedCount,
@@ -2157,7 +2155,6 @@ describe('every phase-scoped render-hooks call site actually carries --phase', (
 // #4030: with no envelope context, a ref.command falls back to the host's
 // PHASE_NUMBER, else no phase flag at all — never an empty token.
 test('loop-hook-dispatch: context-absent ref.command uses PHASE_NUMBER if bound, else no --phase', () => {
-  // allow-test-rule: source-text-is-the-product (#4030) — the dispatch contract prose is what the agent executes
   const lines = splitLines(fs.readFileSync(path.join(ROOT, 'gsd-core/references/loop-hook-dispatch.md'), 'utf8')).map((l) => l.trim());
   const bound = lines.indexOf('# context absent, host binds PHASE_NUMBER');
   const unbound = lines.indexOf('# context absent, no PHASE_NUMBER');
