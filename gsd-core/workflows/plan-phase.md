@@ -1437,7 +1437,7 @@ This step is derived entirely from existing PLAN frontmatter — no extra LLM pa
 gsd_run query roadmap.annotate-dependencies "${PHASE_NUMBER}"
 ```
 
-This operation is idempotent: if wave headers or cross-cutting constraints already exist in the ROADMAP phase section, the command returns without modifying the file. Skip this step if `plan_count` is 0.
+Re-running regenerates the annotation from current PLAN frontmatter; an unchanged result writes nothing, and an unrecognised checklist row is skipped (`skipped: "unrecognised_checklist_row"`). Skip this step if `plan_count` is 0.
 
 ## 13d. Commit Plans if commit_docs is true
 
