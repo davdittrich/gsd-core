@@ -34,6 +34,22 @@ const { scanPhasePlans } = planScanMod;
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import planningScopeMod = require('./planning-scope.cjs');
 const { SCOPE } = planningScopeMod;
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+import planDocumentMod = require('./plan-document.cjs');
+const { parsePlanDocument } = planDocumentMod;
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+import taskContentResolutionMod = require('./task-content-resolution.cjs');
+const {
+  resolveTaskContent,
+  splitTrackerId,
+  loadResolverCapabilities,
+  ResolverAmbiguousError,
+  ResolverFailedError,
+  ResolverTimeoutError,
+  ResolverMalformedOutputError,
+} = taskContentResolutionMod;
+
+type CapabilityLike = Parameters<typeof resolveTaskContent>[0]['capabilities'][number];
 
 // ─── Decision matching ────────────────────────────────────────────────────────
 
@@ -169,6 +185,89 @@ export function extractPlanDesignatedSections(planContent: string | null | undef
   parts.push(bodyParts.join('\n'));
   parts.push(extractXmlTagBodies(cleaned));
   return parts.join('\n\n');
+}
+
+export interface TrackerResolveDeps {
+  loadCapabilities?: (cwd: string) => CapabilityLike[];
+  resolveTaskContentFn?: typeof resolveTaskContent;
+  /** Test seam: monotonic-ish clock for the aggregate budget. */
+  now?: () => number;
+}
+
+/** Aggregate wall-clock budget for all resolver spawns in one gate run; checked before each spawn, so worst case is this plus one resolver timeout. */
+export const TRACKER_RESOLVE_BUDGET_MS = 120_000;
+
+const unreadable = (reason: string, span: string): Observed<never> => ({ kind: 'unreadable', reason, span });
+
+/**
+ * Extra scannable text per plan (same index) from tracker-resolved task content; '' for plans without `tracker-id=`.
+ * `missingResolver` names the first tracker id with no installed resolver: coverage is monotone (a mention anywhere counts), so
+ * that can only cause a false "uncovered" — callers go `unreadable` only when a decision would otherwise be uncovered.
+ */
+export function resolveTrackerBodies(projectDir: string, planContents: string[], deps: TrackerResolveDeps = {}): Observed<{ bodies: string[]; missingResolver: string | null }> {
+  let missingResolver: string | null = null;
+  let capabilities: CapabilityLike[] | null = null;
+  const seen = new Map<string, string[]>();
+  const resolveFn = deps.resolveTaskContentFn ?? resolveTaskContent;
+  const bodies: string[] = [];
+  // shortcut: bound = budget + one resolver's own timeoutMs (capability-declared, uncapped here) + registry load; upgrade if a capability declares a huge timeoutMs.
+  const now = deps.now ?? (() => performance.now());
+  const startedAt = now();
+  for (const raw of planContents) {
+    const content = stripCommentsAndFences(raw);
+    if (!/\btracker-id\s*=/i.test(content)) {
+      bodies.push('');
+      continue;
+    }
+    const parts: string[] = [];
+    for (const task of parsePlanDocument(content).tasks) {
+      const trackerId = task.trackerId;
+      if (trackerId === null) continue;
+      const cached = seen.get(trackerId);
+      if (cached) {
+        parts.push(...cached);
+        continue;
+      }
+      // The id segment goes to the resolver binary as one argv element: a leading '-' reads as an option, control chars are never legitimate.
+      const split = splitTrackerId(trackerId);
+      if (split && (split.id.trimStart().startsWith('-') || /[\u0000-\u001f\u007f]/.test(trackerId))) {
+        return unreadable('tracker-id rejected: id must not start with "-" or contain control characters', trackerId);
+      }
+      if (now() - startedAt > TRACKER_RESOLVE_BUDGET_MS) {
+        return unreadable(`tracker resolution exceeded the ${TRACKER_RESOLVE_BUDGET_MS} ms aggregate budget`, trackerId);
+      }
+      if (capabilities === null) {
+        try {
+          capabilities = (deps.loadCapabilities ?? loadResolverCapabilities)(projectDir);
+        } catch (err) {
+          return unreadable(`capability registry unreadable: ${err instanceof Error ? err.message : String(err)}`, trackerId);
+        }
+      }
+      try {
+        const result = resolveFn({ trackerId, capabilities });
+        if (result.kind === 'no-resolver') {
+          missingResolver ??= `${trackerId}: no task-content resolver installed for tracker prefix "${split?.prefix}"`;
+        }
+        const c = result.kind === 'resolved' ? result.content : null;
+        // Per field: an unclosed fence in one field must not swallow the rest.
+        const texts = c ? [c.action, c.verify, ...c.acceptanceCriteria, ...c.readFirst, c.done].filter((v): v is string => v !== null).map(stripCommentsAndFences) : [];
+        seen.set(trackerId, texts);
+        parts.push(...texts);
+      } catch (err) {
+        if (
+          err instanceof ResolverAmbiguousError ||
+          err instanceof ResolverFailedError ||
+          err instanceof ResolverTimeoutError ||
+          err instanceof ResolverMalformedOutputError
+        ) {
+          return unreadable(`tracker task content unresolved: ${err.message}`, trackerId);
+        }
+        throw err;
+      }
+    }
+    bodies.push(parts.join('\n'));
+  }
+  return evidenceFound({ bodies, missingResolver });
 }
 
 // ─── Messages ─────────────────────────────────────────────────────────────────
