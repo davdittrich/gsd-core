@@ -14,10 +14,10 @@ _To add your capability, see the [registry README](./README.md)._
 - **Repository:** https://github.com/davdittrich/gsd-beads — [latest release](https://github.com/davdittrich/gsd-beads/releases/latest)
 - **What it is:** Ties gsd-core's plan, execute, verify and ship lifecycle to Beads \(bd\) issue tracking: syncs PLAN.md tasks into bd issues under a phase epic, recalls open issues that may touch a phase before planning, closes completed tasks' issues after each wave, writes BEADS.md, and blocks /gsd-ship while blocking\_open or diverged is not 0. Needs the bd binary; every step degrades to a no-op with a STATE.md note when bd is missing.
 - **Author:** Dennis A. V. Dittrich
-- **Every interaction with GSD:** Loop Extension Points: plan:pre, plan:post, execute:wave:pre, execute:wave:post, verify:post, ship:pre; hook kinds: step, contribution, gate; configKeys: beads.enabled, beads.epic\_per, beads.ship\_gate, beads.sync\_mode; runtimeCompat: all; produces: BEADS-RECALL.md, PLAN.md, BEADS.md; consumes: CONTEXT.md, PLAN.md, UAT.md, BEADS.md
+- **Every interaction with GSD:** Loop Extension Points: plan:pre, plan:post, execute:wave:pre, execute:wave:post, verify:post, ship:pre; hook kinds: step, contribution, gate; configKeys: beads.enabled, beads.epic\_per, beads.ship\_gate, beads.sync\_mode; runtimeCompat: all; produces: BEADS-RECALL.md, BEADS.md, PLAN.md; consumes: BEADS-RECALL.md, BEADS.md, CONTEXT.md, PLAN.md, UAT.md
 - **Install:**
 ```sh
-gsd capability install https://github.com/davdittrich/gsd-beads.git#v1.8.1
+gsd capability install https://github.com/davdittrich/gsd-beads.git#v1.9.1
 ```
 - **Uninstall:**
 ```sh

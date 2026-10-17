@@ -8,7 +8,7 @@
     "author": "Dennis A. V. Dittrich",
     "license": "MIT",
     "enginesGsd": ">=1.11.0",
-    "install": "gsd capability install https://github.com/davdittrich/gsd-beads.git#v1.8.1",
+    "install": "gsd capability install https://github.com/davdittrich/gsd-beads.git#v1.9.1",
     "uninstall": "gsd capability remove beads",
     "interactions": {
       "loopExtensionPoints": [
@@ -36,14 +36,15 @@
       ],
       "produces": [
         "BEADS-RECALL.md",
-        "PLAN.md",
-        "BEADS.md"
+        "BEADS.md",
+        "PLAN.md"
       ],
       "consumes": [
+        "BEADS-RECALL.md",
+        "BEADS.md",
         "CONTEXT.md",
         "PLAN.md",
-        "UAT.md",
-        "BEADS.md"
+        "UAT.md"
       ]
     },
     "discussion": "https://github.com/open-gsd/gsd-core/discussions/5308"
