@@ -295,4 +295,45 @@ describe('#5469 pr-branch published marker (real git)', () => {
       assert.equal(refOf(dir, 'refs/gsd/pr-published/release/feature'), releaseMarker);
     } finally { teardown(); }
   });
+
+  test('target merged into the feature branch after a publish: teammate commits are not picked', () => {
+    const dir = repo();
+    try {
+      commitRound(dir, 1);
+      assert.equal(publish(dir).status, 0);
+      git(dir, 'checkout', '-q', 'main');
+      git(dir, 'merge', '-q', '--no-ff', '-m', 'Merge pr', 'feature-pr');
+      for (const n of [1, 2]) { write(dir, 'o.txt', `teammate${n}\n`); commitAll(dir, `chore: teammate${n}`); }
+      git(dir, 'checkout', '-q', 'feature');
+      git(dir, 'merge', '-q', '--no-edit', 'main');
+      commitRound(dir, 2);
+      const r = publish(dir);
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(loggedOf(r).length, 2, `only round 2 may be listed:\n${r.stdout}`);
+      assert.doesNotMatch(r.stdout, /teammate/);
+      assert.equal(git(dir, 'show', 'feature-pr:code.txt'), 'v2');
+    } finally { teardown(); }
+  });
+
+  test('-pr rebased before merge: merged branch tip still promotes the marker', () => {
+    const dir = repo();
+    try {
+      commitRound(dir, 1);
+      assert.equal(publish(dir).status, 0);
+      const tip1 = git(dir, 'rev-parse', 'feature');
+      git(dir, 'checkout', '-q', 'main');
+      write(dir, 'other.txt', 'x\n');
+      commitAll(dir, 'chore: unrelated');
+      git(dir, 'rebase', '-q', 'main', 'feature-pr');
+      git(dir, 'checkout', '-q', 'main');
+      git(dir, 'merge', '-q', '--no-ff', '-m', 'Merge pr', 'feature-pr');
+      git(dir, 'checkout', '-q', 'feature');
+      commitRound(dir, 2);
+      const r = publish(dir);
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(loggedOf(r).length, 2, `only round 2 may be replayed:\n${r.stdout}`);
+      assert.ok(loggedOf(r).every((l) => l.includes('r2')));
+      assert.equal(markerOf(dir), tip1);
+    } finally { teardown(); }
+  });
 });

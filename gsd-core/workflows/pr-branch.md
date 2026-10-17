@@ -47,7 +47,8 @@ BUILT_REF="refs/gsd/pr-built-head/$TARGET/$CURRENT_BRANCH"
 # discarded, so its commits must be replayed.
 P=$(git rev-parse -q --verify "$PENDING_REF")
 if [ -n "$P" ]; then
-  if git merge-base --is-ancestor "$BUILT_REF" "$TARGET" 2>/dev/null; then
+  if git merge-base --is-ancestor "$BUILT_REF" "$TARGET" 2>/dev/null \
+    || { git rev-parse -q --verify "refs/heads/$PR_BRANCH" >/dev/null && git merge-base --is-ancestor "refs/heads/$PR_BRANCH" "$TARGET"; }; then
     git update-ref "$MARKER_REF" "$P" && git update-ref -d "$PENDING_REF" && git update-ref -d "$BUILT_REF"
   elif ! git rev-parse -q --verify "refs/heads/$PR_BRANCH" >/dev/null; then
     git update-ref -d "$PENDING_REF"; git update-ref -d "$BUILT_REF" 2>/dev/null
@@ -65,7 +66,7 @@ if [ -n "$M" ]; then
     echo "WARNING: $MARKER_REF is not an ancestor of $CURRENT_BRANCH (history rewritten); using $TARGET as base. Re-anchor: git update-ref $MARKER_REF <rebased commit equivalent to last published tip>" >&2
   fi
 fi
-AHEAD=$(git rev-list --count "$BASE".."$CURRENT_BRANCH" 2>/dev/null)
+AHEAD=$(git rev-list --count "$CURRENT_BRANCH" --not "$BASE" "$TARGET" 2>/dev/null)
 if [ "$AHEAD" = "0" ]; then
   echo "No commits ahead of $BASE — nothing to filter."
   exit 0
@@ -264,9 +265,9 @@ Classify commits:
 
 ```bash
 # Get all commits ahead of the base: these are the only candidates to pick
-git log --oneline "$BASE".."$CURRENT_BRANCH" --no-merges
+git log --oneline --no-merges "$CURRENT_BRANCH" --not "$BASE" "$TARGET"
 # Default pick list, oldest first; drop commits classified as skip.
-INCLUDED_COMMITS=$(git rev-list --reverse --no-merges "$BASE".."$CURRENT_BRANCH")
+INCLUDED_COMMITS=$(git rev-list --reverse --no-merges "$CURRENT_BRANCH" --not "$BASE" "$TARGET")
 ```
 
 **Canonical path declarations.** These three lines are the single source of truth for the
