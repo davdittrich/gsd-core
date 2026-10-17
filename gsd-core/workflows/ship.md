@@ -189,7 +189,7 @@ Verify the work is ready to ship:
    - **`blocking == false`** (advisory) → never halts. If `block == true` or the result carries a non-empty message, print `⚠ {hook.capId} advisory: {message}`, then continue.
    - **`blocking == true` and `block == false`** → continue silently.
 
-   **Step dispatch** (unless a blocking gate halted): `kind == "step"` per @gsd-core/references/loop-hook-dispatch.md; honor `onError` (skip → warn and continue); steps never block ship. ⚠ Validate `ref.command` in-context before any shell use. Then continue to the `push_branch` step.
+   **Step dispatch** (unless a blocking gate halted): `kind == "step"` per @gsd-core/references/loop-hook-dispatch.md; honor `consumes` (skip the hook if a consumed artifact is absent) and treat `onError: halt` as `skip` with a warning, since steps never block ship. ⚠ Validate `ref.command` and `ref.agent` (against `^[A-Za-z0-9][A-Za-z0-9._-]*$`) in-context before any shell use or dispatch; skip a hook that fails. Then continue to the `push_branch` step.
 </step>
 
 <step name="push_branch">
