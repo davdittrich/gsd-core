@@ -419,18 +419,19 @@ export async function probeHttpLanes<L extends { slug: string; transport: string
   resolve: (lane: L) => { ok: true; plan: LanePlan } | { ok: false; detail: string },
   deps: RunnerDeps,
 ): Promise<{ rows: string[]; warnings: string[] }> {
-  const warnings: string[] = [];
-  // Probes run concurrently (each has its own timeout); Promise.all keeps descriptor order.
-  const rows = await Promise.all(
+  // Probes run concurrently (each has its own timeout); Promise.all keeps descriptor order, and
+  // warnings are collected from the results afterwards so their order never depends on resolve timing.
+  const results = await Promise.all(
     lanes
       .filter((l) => l.transport === 'openai-http' && (selected.length === 0 || selected.includes(l.slug)))
       .map(async (lane) => {
         const r = resolve(lane);
-        if (!r.ok) warnings.push(`${lane.slug}: ${r.detail}`);
         const up = r.ok && (await probeLane({ ...r.plan, requiresBinaries: [] }, deps)).available;
-        return `${lane.slug}:${up ? 'available' : 'missing'}`;
+        return { row: `${lane.slug}:${up ? 'available' : 'missing'}`, warning: r.ok ? null : `${lane.slug}: ${r.detail}` };
       }),
   );
+  const rows = results.map((x) => x.row);
+  const warnings = results.flatMap((x) => (x.warning === null ? [] : [x.warning]));
   return { rows, warnings };
 }
 
