@@ -71,13 +71,11 @@ Verify the work is ready to ship:
 
 1a. **Phase marked complete?** (#5221) Verified is not complete: `/gsd:verify-work` completes the phase.
    ```bash
-   if [ -f .planning/ROADMAP.md ]; then
-     ANALYZE=$(gsd_run query roadmap.analyze) || { echo "roadmap.analyze failed — see the error above" >&2; exit 1; }
-     if [[ "$ANALYZE" == @file:* ]]; then ANALYZE=$(cat "${ANALYZE#@file:}"); fi
-     # unchecked_phases lists only unticked checklist entries; table-only rows never appear (fail-open).
-     UNCHECKED=$(jq -er --arg p "$PHASE_NUMBER" 'def n:split(".")|map(sub("^0+(?=[0-9])";""))|join(".");first(.unchecked_phases[]?|select(tostring|n==($p|n)))//""' <<<"$ANALYZE") || { echo "roadmap.analyze output unparseable" >&2; exit 1; }
-     [ -z "$UNCHECKED" ] || { echo "PHASE_NOT_COMPLETE: Run /gsd:verify-work ${PHASE_NUMBER} (completes the phase), then re-run /gsd:ship" >&2; exit 1; }
-   fi
+   ANALYZE=$(gsd_run query roadmap.analyze ${GSD_WS:+--ws=${GSD_WS##* }}) || { echo "roadmap.analyze failed — see the error above" >&2; exit 1; }
+   if [[ "$ANALYZE" == @file:* ]]; then ANALYZE=$(cat "${ANALYZE#@file:}"); fi
+   # unchecked_phases lists only unticked checklist entries; table-only rows and a missing ROADMAP never appear (fail-open).
+   UNCHECKED=$(jq -er --arg p "$PHASE_NUMBER" 'def n:split(".")|map(sub("^0+(?=[0-9])";""))|join(".");first(.unchecked_phases[]?|select(tostring|n==($p|n)))//""' <<<"$ANALYZE") || { echo "roadmap.analyze output unparseable" >&2; exit 1; }
+   [ -z "$UNCHECKED" ] || { echo "PHASE_NOT_COMPLETE: Run /gsd:verify-work ${PHASE_NUMBER} (completes the phase), then re-run /gsd:ship" >&2; exit 1; }
    ```
    A missing ROADMAP.md or a phase with no checklist entry skips the check; an analyze failure stops.
 

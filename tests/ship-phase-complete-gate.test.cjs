@@ -12,7 +12,7 @@ const SHIP = 'gsd-core/workflows/ship.md';
 const analyze = (number, complete) => JSON.stringify({ phases: [{ number, roadmap_complete: complete }], unchecked_phases: complete ? [] : [number] });
 
 describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, () => {
-  const lines = () => span(SHIP, 'if [ -f .planning/ROADMAP.md ]', 'fi');
+  const lines = () => span(SHIP, 'ANALYZE=$(gsd_run query roadmap.analyze', '[ -z "$UNCHECKED" ]');
   const run = (stdout, rc, phase = '3') => runBash(lines(), { stdout, rc }, { preamble: [`PHASE_NUMBER=${phase}`, 'cd "$(mktemp -d)"; mkdir .planning; : > .planning/ROADMAP.md'], probe: 'echo CONTINUED' });
 
   test('complete phase continues', () => {
@@ -47,8 +47,23 @@ describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, ()
     assert.match(r.stdout, /CONTINUED/);
   });
 
-  test('missing ROADMAP.md skips the check without calling analyze', () => {
-    const r = runBash(lines(), { stdout: '', rc: 69 }, { preamble: ['PHASE_NUMBER=3', 'cd "$(mktemp -d)"'], probe: 'echo CONTINUED' });
+  test('missing ROADMAP.md (analyze reports not found, exit 0) skips the check', () => {
+    const r = runBash(lines(), { stdout: JSON.stringify({ error: 'ROADMAP.md not found', phases: [] }), rc: 0 }, { preamble: ['PHASE_NUMBER=3', 'cd "$(mktemp -d)"'], probe: 'echo CONTINUED' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /CONTINUED/);
+  });
+
+  test('workstream layout (no root .planning/ROADMAP.md) still runs the gate', () => {
+    const r = runBash(lines(), { stdout: analyze('3', false), rc: 0 }, { preamble: ['PHASE_NUMBER=3', 'cd "$(mktemp -d)"; mkdir -p .planning/workstreams/alpha; : > .planning/workstreams/alpha/ROADMAP.md'], probe: 'echo CONTINUED' });
+    assert.equal(r.status, 1, r.stdout);
+    assert.match(r.stderr, /PHASE_NOT_COMPLETE/);
+  });
+
+  test('--ws reaches roadmap.analyze so the workstream roadmap is the one read', () => {
+    const r = runBash(lines(), { stdout: analyze('3', true), rc: 0 }, { preamble: [
+      'PHASE_NUMBER=3; GSD_WS="--ws alpha"', 'cd "$(mktemp -d)"; mkdir .planning; : > .planning/ROADMAP.md',
+      'gsd_run() { [ "$*" = "query roadmap.analyze --ws=alpha" ] || { echo "unexpected args: $*" >&2; return 2; }; printf %s "$STUB_OUT"; }',
+    ], probe: 'echo CONTINUED' });
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /CONTINUED/);
   });
