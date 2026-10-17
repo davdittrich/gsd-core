@@ -23,6 +23,7 @@ const {
   resolveLoopHooks,
   renderLoopHooks,
   resolveActiveHooksForPoint,
+  PHASE_CONTEXT_REASON,
   _getNestedConfigValue,
   _resolveActivationValue,
   _readRawConfigKey,
@@ -1583,8 +1584,8 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     t.after(() => cleanup(dir));
     const result = resolveActiveHooksForPoint(dir, 'plan:pre', { phase: '' });
     assert.strictEqual(result.context, undefined);
-    assert.ok(result.warnings.some((w) => w.includes('did not match a phase directory')),
-      `expected an unresolvable-token warning, got: ${JSON.stringify(result.warnings)}`);
+    assert.strictEqual(result.contextReason, PHASE_CONTEXT_REASON.UNRESOLVED,
+      `expected an unresolvable-token reason, got: ${JSON.stringify(result.warnings)}`);
   });
 
   test('[negative] resolveActiveHooksForPoint called in-process with phaseDir: \'\' and no phase warns', (t) => {
@@ -1592,8 +1593,8 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     t.after(() => cleanup(dir));
     const result = resolveActiveHooksForPoint(dir, 'plan:pre', { phaseDir: '' });
     assert.strictEqual(result.context, undefined);
-    assert.ok(result.warnings.some((w) => w.includes('--phase-dir requires --phase')),
-      `expected the phase-dir-without-phase warning, got: ${JSON.stringify(result.warnings)}`);
+    assert.strictEqual(result.contextReason, PHASE_CONTEXT_REASON.PHASE_DIR_WITHOUT_PHASE,
+      `expected the phase-dir-without-phase reason, got: ${JSON.stringify(result.warnings)}`);
   });
 
   // --config-dir and --active-cap had no covered error paths; pin them so a
