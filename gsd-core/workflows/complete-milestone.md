@@ -644,7 +644,7 @@ If `section_manifest` is `null` or `"git-tag"` is in its `included` list: read a
 Commit the REQUIREMENTS.md deletion (archive files and ROADMAP.md were already committed in the safety commit in `reorganize_roadmap_and_delete_originals`).
 
 ```bash
-git commit -m "chore: remove REQUIREMENTS.md for v[X.Y] milestone"
+git commit -m "chore: remove REQUIREMENTS.md for v[X.Y] milestone" -- .planning/REQUIREMENTS.md
 ```
 
 Confirm: "Committed: chore: remove REQUIREMENTS.md for v[X.Y] milestone"

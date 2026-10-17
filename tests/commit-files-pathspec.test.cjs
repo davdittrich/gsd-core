@@ -3295,7 +3295,7 @@ cmdCommit(${JSON.stringify(tmpDir)}, 'docs: probe', ['.planning/STATE.md'], fals
   });
 });
 
-describe('agent prompts scope raw git commit with a pathspec (#5211)', () => {
+describe('shipped prompts scope raw git commit with a pathspec (#5211)', () => {
   // A bare `git commit -m ...` commits the whole index, sweeping in files other
   // sessions staged. Prompts must prescribe `git commit -m "..." -- <paths>`.
   // Scope: fenced blocks and inline code spans only (prose that merely names
@@ -3303,7 +3303,19 @@ describe('agent prompts scope raw git commit with a pathspec (#5211)', () => {
   // next operator or unquoted newline, so a multi-line -m body is one command.
   // tokenize() stops at the first unquoted `#`, so comments are stripped per
   // line first or a later commit in the same block would be hidden.
-  const agentsDir = path.join(__dirname, '..', 'agents');
+  const root = path.join(__dirname, '..');
+  const promptFiles = () => {
+    const out = [];
+    const walk = (dir) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) walk(full);
+        else if (e.name.endsWith('.md')) out.push(path.relative(root, full).split(path.sep).join('/'));
+      }
+    };
+    for (const d of ['agents', 'gsd-core/workflows', 'gsd-core/references']) walk(path.join(root, d));
+    return out.sort();
+  };
   const unscopedCommits = (raw) => {
     const out = [];
     const text = raw.split('\n').map((l) => l.slice(0, l.length - commentPortion(l).length)).join('\n');
@@ -3330,19 +3342,40 @@ describe('agent prompts scope raw git commit with a pathspec (#5211)', () => {
     assert.equal(unscopedCommits('git commit -m "x" -- a b').length, 0);
   });
 
+  // Deliberate whole-index commits: a pathspec would break or defeat them.
+  // Key: `<file>: <first line of the command>`.
+  const WHOLE_INDEX_ALLOWLIST = new Map([
+    ['gsd-core/workflows/complete-milestone/detail/elaboration.md: git commit -m "feat: $branch for v[X.Y]"', 'squash merge: commit the merge result'],
+    ['gsd-core/workflows/complete-milestone/detail/elaboration.md: git commit -m "feat: $MILESTONE_BRANCH for v[X.Y]"', 'squash merge: commit the merge result'],
+    [`gsd-core/workflows/complete-milestone/detail/elaboration.md: git commit -m "Merge branch '$branch' for v[X.Y]"`, 'merge commit: git refuses a partial commit mid-merge'],
+    [`gsd-core/workflows/complete-milestone/detail/elaboration.md: git commit -m "Merge branch '$MILESTONE_BRANCH' for v[X.Y]"`, 'merge commit: git refuses a partial commit mid-merge'],
+    ['gsd-core/workflows/pr-branch.md: git commit -q -C "$HASH"', 'cherry-pick replay: reuses the source commit message over the staged result'],
+    ['gsd-core/workflows/ship.md: git commit --allow-empty -m "chore: trigger CI (recover from ship-note skip-token)"', 'empty commit: no paths by design'],
+    ['gsd-core/workflows/undo.md: git commit -m "revert(${TARGET_PHASE}): undo phase ${TARGET_PHASE} — ${REVERT_REASON}"', 'commits the staged `git revert --no-commit` result'],
+    ['gsd-core/workflows/undo.md: git commit -m "revert(${TARGET_PLAN}): undo plan ${TARGET_PLAN} — ${REVERT_REASON}"', 'commits the staged `git revert --no-commit` result'],
+    ['gsd-core/workflows/undo.md: git commit -m "revert: undo ${N} selected commits — ${REVERT_REASON}"', 'commits the staged `git revert --no-commit` result'],
+  ]);
+
   test('every git commit with arguments carries a -- pathspec', () => {
     const offenders = [];
-    for (const f of fs.readdirSync(agentsDir).filter((n) => n.endsWith('.md')).sort()) {
-      const md = fs.readFileSync(path.join(agentsDir, f), 'utf8');
+    const seen = new Set();
+    for (const f of promptFiles()) {
+      const md = fs.readFileSync(path.join(root, f), 'utf8');
       const lines = splitLines(md);
       const segments = scanFencedBlocks(lines).map((b) =>
         lines.slice(b.openLineIdx + 1, b.closeLineIdx === -1 ? lines.length : b.closeLineIdx).join('\n'));
       for (const s of scanInlineCodeSpans(stripFencedCode(md).text)) segments.push(s.content);
       for (const seg of segments) {
-        for (const cmd of unscopedCommits(seg)) offenders.push(`${f}: ${cmd.split('\n')[0]}`);
+        for (const cmd of unscopedCommits(seg)) {
+          const key = `${f}: ${cmd.split('\n')[0]}`;
+          if (WHOLE_INDEX_ALLOWLIST.has(key)) seen.add(key);
+          else offenders.push(key);
+        }
       }
     }
+    assert.deepStrictEqual([...WHOLE_INDEX_ALLOWLIST.keys()].filter((k) => !seen.has(k)), [],
+      'stale WHOLE_INDEX_ALLOWLIST entries: remove them');
     assert.deepStrictEqual(offenders, [],
-      'unscoped `git commit` in agent prompts sweeps foreign staged files (#5211); append `-- <paths>`');
+      'unscoped `git commit` in shipped prompts sweeps foreign staged files (#5211); append `-- <paths>`');
   });
 });
