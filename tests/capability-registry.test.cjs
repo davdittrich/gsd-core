@@ -5313,6 +5313,25 @@ describe('#1196 — discuss loop wiring + wired-point guard', () => {
       );
     });
 
+    test('boundary: cap declaring a ship:pre step is accepted against real getWiredKinds(ROOT) (#5316)', () => {
+      const cap = makeCapWithStep('ship:pre');
+      const { getWiredKinds, scanWiredKinds } = require('../scripts/gen-loop-host-contract.cjs');
+      const errs = validateHooksWired(cap, getWiredKinds(ROOT));
+      assert.deepEqual(errs, [], `ship:pre must dispatch step hooks. Errors: ${errs.join('; ')}`);
+
+      const workflow = fs.readFileSync(path.join(ROOT, 'gsd-core', 'workflows', 'ship.md'), 'utf8');
+      const render = workflow.indexOf('SHIP_PRE_HOOKS_JSON=$(gsd_run loop render-hooks ship:pre --raw)');
+      const gateLoop = workflow.indexOf('kind == "gate"', render);
+      const stepDispatch = workflow.indexOf('**Step dispatch**', render);
+      assert.ok(
+        render !== -1 && gateLoop > render && stepDispatch > gateLoop,
+        'ship:pre step dispatch must follow the gate loop',
+      );
+      // Red proof: without the step arm the scanner credits only `gate`.
+      const withoutArm = workflow.replace(/^.*\*\*Step dispatch\*\*.*$/m, '');
+      assert.ok(!scanWiredKinds(withoutArm).get('ship:pre').has('step'), 'scanner must flag a ship.md lacking the step arm');
+    });
+
     // ─── #3866: the verify lane must be open to every hook kind ────────────────
     //
     // verify-work.md's verify_pre_hooks step historically dispatched only
