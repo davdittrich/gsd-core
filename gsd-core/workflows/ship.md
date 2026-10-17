@@ -104,7 +104,7 @@ Verify the work is ready to ship:
    ```
    If `gh` not found or not authenticated: provide setup instructions and exit.
 
-6. **Capability ship gates (generic dispatch).**
+6. **Capability ship gates and steps (generic dispatch).**
 
    Resolve active `ship:pre` hooks from the capability registry — the registry evaluates each hook's `when` condition, so do **not** read `workflow.security_enforcement` or `workflow.windows_enforce` directly:
 
@@ -189,7 +189,7 @@ Verify the work is ready to ship:
    - **`blocking == false`** (advisory) → never halts. If `block == true` or the result carries a non-empty message, print `⚠ {hook.capId} advisory: {message}`, then continue.
    - **`blocking == true` and `block == false`** → continue silently.
 
-   **Step dispatch** (once all gates pass): `kind == "step"` per @gsd-core/references/loop-hook-dispatch.md; honor `onError` (skip → warn and continue); steps never block ship. ⚠ Validate `ref.command` in-context before any shell use. Then continue to the next preflight check.
+   **Step dispatch** (unless a blocking gate halted): `kind == "step"` per @gsd-core/references/loop-hook-dispatch.md; honor `onError` (skip → warn and continue); steps never block ship. ⚠ Validate `ref.command` in-context before any shell use. Then continue to the `push_branch` step.
 </step>
 
 <step name="push_branch">
