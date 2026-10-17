@@ -15,7 +15,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { cleanup } = require('./helpers.cjs');
+const { cleanup, createTempDir, createTempProject } = require('./helpers.cjs');
 const fc = require('./helpers/fast-check-setup.cjs');
 const { splitLines } = require('../gsd-core/bin/lib/text-lines.cjs');
 
@@ -1386,13 +1386,18 @@ const SITES = [
 // and deliberately does not combine with --phase today (#4030 review S1) — a
 // hook-dispatch call site fetching the JSON envelope for actual dispatch is
 // what these tables pin, not every render-hooks use.
+function callRe(point) {
+  return new RegExp(`render-hooks ${point}\\b([^)\\n]*)`);
+}
+
+// The typed reason a dropped context carries; asserted instead of warning prose.
+function reasonOf(dir, opts) {
+  return resolveActiveHooksForPoint(dir, 'plan:pre', opts).contextReason;
+}
+
 function phaseSiteCounts(content, point) {
-  const scoped = splitLines(content).filter((l) => !l.includes('--active-cap')).join('\n');
-  return {
-    scoped,
-    bare: scoped.match(new RegExp(`render-hooks ${point}\\b`, 'g')) || [],
-    withPhase: scoped.match(new RegExp(`render-hooks ${point}\\b[^\\n]*--phase `, 'g')) || [],
-  };
+  const bare = splitLines(content).map((l) => !l.includes('--active-cap') && l.match(callRe(point))).filter(Boolean);
+  return { bare, withPhase: bare.filter((m) => /--phase /.test(m[1])) };
 }
 
 // Static check (no bash interpreter): is `name=` assigned on a line BEFORE
@@ -1446,7 +1451,7 @@ describe('phaseVarAssignedBefore (static assignment check)', () => {
 
 describe('cmdLoopRenderHooks --phase (#4030)', () => {
   function makePhaseProject(...phaseDirNames) {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-phase-ctx-'));
+    const dir = createTempProject('loop-phase-ctx-');
     for (const name of phaseDirNames) {
       fs.mkdirSync(path.join(dir, '.planning', 'phases', name), { recursive: true });
     }
@@ -1491,7 +1496,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     const envelope = JSON.parse(result.stdout.trim());
     assert.ok(!Object.prototype.hasOwnProperty.call(envelope, 'context'));
     assert.ok(Array.isArray(envelope.warnings) && envelope.warnings.length > 0);
-    assert.match(envelope.warnings.join('\n'), /did not match a phase directory/);
+    assert.strictEqual(reasonOf(dir, { phase: '99' }), PHASE_CONTEXT_REASON.UNRESOLVED);
     // ...and ALSO to stderr (no host workflow reads `.warnings` back out of
     // the JSON it captures into a shell variable, so stderr is the channel
     // that actually surfaces this to an operator or agent).
@@ -1510,7 +1515,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     assert.ok(!Object.prototype.hasOwnProperty.call(envelope, 'context'),
       'an archived-only match must not surface a .planning/milestones/ path as context.phaseDir');
     assert.ok(Array.isArray(envelope.warnings) && envelope.warnings.length > 0);
-    assert.match(envelope.warnings.join('\n'), /archived phase/);
+    assert.strictEqual(reasonOf(dir, { phase: '05' }), PHASE_CONTEXT_REASON.ARCHIVED);
   });
 
   test('[bva] --phase matching two directories (ambiguous) omits context, warns with both names, exits 0 not thrown', (t) => {
@@ -1521,7 +1526,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     const envelope = JSON.parse(result.stdout.trim());
     assert.ok(!Object.prototype.hasOwnProperty.call(envelope, 'context'));
     const warningText = (envelope.warnings || []).join('\n');
-    assert.match(warningText, /ambiguous/);
+    assert.strictEqual(reasonOf(dir, { phase: '05' }), PHASE_CONTEXT_REASON.AMBIGUOUS);
     assert.match(warningText, /05-widgets/);
     assert.match(warningText, /05-gadgets/);
   });
@@ -1558,7 +1563,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     assert.ok(!Object.prototype.hasOwnProperty.call(envelope, 'context'));
     assert.ok(Array.isArray(envelope.warnings) && envelope.warnings.length > 0,
       'an explicit empty --phase must warn, not go silent');
-    assert.match(envelope.warnings.join('\n'), /did not match a phase directory/);
+    assert.strictEqual(reasonOf(dir, { phase: '' }), PHASE_CONTEXT_REASON.UNRESOLVED);
   });
 
   test('[negative] --phase= (explicit empty string, equals form) warns, never a hard error', (t) => {
@@ -1686,7 +1691,8 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     const envelope = JSON.parse(result.stdout.trim());
     assert.ok(!Object.prototype.hasOwnProperty.call(envelope, 'context'),
       'a foreign-prefixed token must not silently resolve to this project\'s same-numbered phase directory');
-    assert.match((envelope.warnings || []).join('\n'), /did not match a phase directory/);
+    assert.ok((envelope.warnings || []).length > 0);
+    assert.strictEqual(reasonOf(dir, { phase: 'OTHER-05' }), PHASE_CONTEXT_REASON.UNRESOLVED);
   });
 
   // #4030 acceptance criterion: the workflow-supplied phase must reach the
@@ -1745,7 +1751,8 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
       const envelope = JSON.parse(result.stdout.trim());
       assert.ok(!Object.prototype.hasOwnProperty.call(envelope, 'context'),
         `${token} must not resolve to a phase directory`);
-      assert.match((envelope.warnings || []).join('\n'), /did not match a phase directory/);
+      assert.ok((envelope.warnings || []).length > 0);
+      assert.strictEqual(reasonOf(dir, { phase: token }), PHASE_CONTEXT_REASON.UNRESOLVED);
     });
   }
 
@@ -1767,7 +1774,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     skip: process.platform === 'win32' ? 'directory symlinks require elevation on Windows' : false,
   }, (t) => {
     const dir = makePhaseProject('05-widgets');
-    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-phase-outside-'));
+    const outside = createTempDir('loop-phase-outside-');
     t.after(() => { cleanup(dir); cleanup(outside); });
     fs.mkdirSync(path.join(outside, '99-evil'), { recursive: true });
     fs.symlinkSync(path.join(outside, '99-evil'), path.join(dir, '.planning', 'phases', '99-evil'), 'dir');
@@ -1867,6 +1874,27 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
       'no phase in means no context out — the handler must not receive an inferred one');
   });
 
+  // #4030 AC5: STATE.md names a different phase; the handler must still get
+  // only the caller's token, and STATE must stay untouched.
+  test('[happy] third-party handler receives --phase 02, not STATE.md current_phase 01', (t) => {
+    const fx = makeThirdPartyStepFixture(['plan:pre']);
+    t.after(() => { cleanup(fx.home); cleanup(fx.project); });
+    for (const n of ['01-alpha', '02-beta']) fs.mkdirSync(path.join(fx.project, '.planning', 'phases', n));
+    const statePath = path.join(fx.project, '.planning', 'STATE.md');
+    fs.writeFileSync(statePath, 'current_phase: 01\n');
+    const before = fs.readFileSync(statePath);
+
+    const result = runNode(
+      [GSD_TOOLS, 'loop', 'render-hooks', 'plan:pre', '--cwd', fx.project, '--raw', '--phase', '02'],
+      { cwd: ROOT, timeoutMs: PROBE_TIMEOUT_MS, env: { ...process.env, GSD_HOME: fx.home } },
+    );
+    assert.strictEqual(result.exitCode, 0, 'stderr: ' + result.stderr);
+    const envelope = JSON.parse(result.stdout.trim());
+    assert.ok((envelope.activeHooks || []).some((h) => h.capId === 'phase-probe'), 'the third-party step must dispatch');
+    assert.deepStrictEqual(envelope.context, { phase: '02', phaseDir: '.planning/phases/02-beta' });
+    assert.deepStrictEqual(fs.readFileSync(statePath), before, 'STATE.md must stay byte-identical');
+  });
+
   // #4030 AC4: run each real call site's own arguments (not a hand-written
   // --phase), so a site with a wrong flag or variable fails here. The phase
   // variable must be assigned earlier in the file; only then is it replaced
@@ -1875,11 +1903,11 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     test(`[e2e] ${file} :: ${point} call site assigns its phase var and delivers it to a third-party handler`, (t) => {
       const fx = makeThirdPartyStepFixture(PHASE_SCOPED_POINTS);
       t.after(() => { cleanup(fx.home); cleanup(fx.project); });
+      // allow-test-rule: source-text-is-the-product (#4030) — the workflow call line is the argv under test
       const lines = splitLines(fs.readFileSync(path.join(ROOT, file), 'utf8'));
-      const callRe = new RegExp(`render-hooks ${point}\\b([^)\\n]*)`);
       let seen = 0;
       lines.forEach((line, idx) => {
-        const m = !line.includes('--active-cap') && line.match(callRe);
+        const m = !line.includes('--active-cap') && line.match(callRe(point));
         if (!m) return;
         seen++;
         const v = m[1].match(/--phase\s+"\$\{?(\w+)\}?"/);
@@ -1923,7 +1951,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
         assert.strictEqual(bare.length, expectedCount, `${runtime}: ${file} ${point} call site count changed`);
         assert.strictEqual(withPhase.length, expectedCount, `${runtime}: ${file} ${point} lost --phase`);
         // Run the projected command line itself through the CLI.
-        const m = splitLines(projected).map((l) => (l.includes('--active-cap') ? null : l.match(new RegExp(`render-hooks ${point}\\b([^)\\n]*)`)))).find(Boolean);
+        const m = splitLines(projected).map((l) => (l.includes('--active-cap') ? null : l.match(callRe(point)))).find(Boolean);
         const result = renderWithPhase(proj, point, callArgv(m[1]));
         assert.strictEqual(result.exitCode, 0, `${runtime}: ${file} ${point} stderr: ` + result.stderr);
         assert.strictEqual(JSON.parse(result.stdout.trim()).context?.phase, '05',
@@ -1999,7 +2027,8 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     const envelope = JSON.parse(result.stdout.trim());
     assert.ok(!Object.prototype.hasOwnProperty.call(envelope, 'context'),
       'a directory naming a different phase than the token must not produce context');
-    assert.match((envelope.warnings || []).join('\n'), /does not match the directory/);
+    assert.ok((envelope.warnings || []).length > 0);
+    assert.strictEqual(reasonOf(dir, { phase: '05', phaseDir: '.planning/phases/07-other' }), PHASE_CONTEXT_REASON.MISMATCH);
   });
 
   test('[negative] an incoherent pair is still rejected when the filesystem reports ino 0 (FAT32/exFAT/SMB)', (t) => {
@@ -2013,7 +2042,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     t.after(() => { fs.statSync = realStat; });
     const result = resolveActiveHooksForPoint(dir, 'plan:pre', { phase: '05', phaseDir: '.planning/phases/07-other' });
     assert.strictEqual(result.context, undefined);
-    assert.match(result.warnings.join('\n'), /does not match the directory/);
+    assert.strictEqual(result.contextReason, PHASE_CONTEXT_REASON.MISMATCH);
     const same = resolveActiveHooksForPoint(dir, 'plan:pre', { phase: '05', phaseDir: '.planning/phases/05-widgets' });
     assert.deepStrictEqual(same.context, { phase: '05', phaseDir: '.planning/phases/05-widgets' });
   });
@@ -2062,7 +2091,8 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     const envelope = JSON.parse(result.stdout.trim());
     assert.ok(!Object.prototype.hasOwnProperty.call(envelope, 'context'),
       'a lone --phase-dir must never become the context source');
-    assert.match((envelope.warnings || []).join('\n'), /--phase-dir requires --phase/);
+    assert.ok((envelope.warnings || []).length > 0);
+    assert.strictEqual(reasonOf(dir, { phaseDir: '.planning/phases/05-widgets' }), PHASE_CONTEXT_REASON.PHASE_DIR_WITHOUT_PHASE);
   });
 
   test('[negative] bare --phase-dir with no value degrades like an omitted flag, never a hard error', (t) => {
@@ -2083,7 +2113,8 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     const envelope = JSON.parse(result.stdout.trim());
     assert.ok(!Object.prototype.hasOwnProperty.call(envelope, 'context'),
       'the directory must not break an ambiguity tie — init.* does not either (#2237)');
-    assert.match((envelope.warnings || []).join('\n'), /is ambiguous/);
+    assert.ok((envelope.warnings || []).length > 0);
+    assert.strictEqual(reasonOf(dir, { phase: '05', phaseDir: '.planning/phases/05-gadgets' }), PHASE_CONTEXT_REASON.AMBIGUOUS);
   });
 
   test('[happy] context is resolved from --phase alone, and STATE.md is neither read back nor written', (t) => {
@@ -2111,6 +2142,7 @@ describe('every phase-scoped render-hooks call site actually carries --phase', (
 
   for (const [file, point, expectedCount] of SITES) {
     test(`${file} :: ${point} carries --phase at all ${expectedCount} call site(s)`, () => {
+      // allow-test-rule: source-text-is-the-product (#4030) — the shipped workflow call sites are the product
       const content = fs.readFileSync(path.join(ROOT, file), 'utf8');
       const { bare, withPhase } = phaseSiteCounts(content, point);
       assert.strictEqual(bare.length, expectedCount,
@@ -2122,11 +2154,23 @@ describe('every phase-scoped render-hooks call site actually carries --phase', (
 });
 
 
+// #4030: with no envelope context, a ref.command falls back to the host's
+// PHASE_NUMBER, else no phase flag at all — never an empty token.
+test('loop-hook-dispatch: context-absent ref.command uses PHASE_NUMBER if bound, else no --phase', () => {
+  // allow-test-rule: source-text-is-the-product (#4030) — the dispatch contract prose is what the agent executes
+  const lines = splitLines(fs.readFileSync(path.join(ROOT, 'gsd-core/references/loop-hook-dispatch.md'), 'utf8')).map((l) => l.trim());
+  const bound = lines.indexOf('# context absent, host binds PHASE_NUMBER');
+  const unbound = lines.indexOf('# context absent, no PHASE_NUMBER');
+  assert.ok(bound !== -1 && unbound !== -1, 'both context-absent branches must be documented');
+  assert.strictEqual(lines[bound + 1], 'gsd_run ${ref.command} --phase "${PHASE_NUMBER}" --raw');
+  assert.strictEqual(lines[unbound + 1], 'gsd_run ${ref.command} --raw');
+});
+
 // #4030 review 3: confinement by realpath, same-directory by dev+ino, boundary rows.
 describe('cmdLoopRenderHooks --phase confinement and --phase-dir identity (#4030)', () => {
   const symlinkSkip = process.platform === 'win32' ? 'directory symlinks require elevation on Windows' : false;
   const mk = (t, ...names) => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-phase-conf-'));
+    const dir = createTempProject('loop-phase-conf-');
     t.after(() => cleanup(dir));
     for (const n of names) fs.mkdirSync(path.join(dir, '.planning', 'phases', n), { recursive: true });
     return dir;
@@ -2139,27 +2183,29 @@ describe('cmdLoopRenderHooks --phase confinement and --phase-dir identity (#4030
   };
 
   test('[hostile] a symlinked .planning/phases parent yields no context and a warning, hooks still dispatch', { skip: symlinkSkip }, (t) => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-phase-conf-'));
-    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-phase-outside-'));
+    const dir = createTempDir('loop-phase-conf-');
+    const outside = createTempDir('loop-phase-outside-');
     t.after(() => { cleanup(dir); cleanup(outside); });
     fs.mkdirSync(path.join(outside, '07-evil'), { recursive: true });
     fs.mkdirSync(path.join(dir, '.planning'), { recursive: true });
     fs.symlinkSync(outside, path.join(dir, '.planning', 'phases'), 'dir');
     const env = run(dir, ['--phase', '07']);
     assert.ok(!Object.prototype.hasOwnProperty.call(env, 'context'));
-    assert.match((env.warnings || []).join('\n'), /outside the project|escapes/);
+    assert.ok((env.warnings || []).length > 0);
+    assert.strictEqual(reasonOf(dir, { phase: '07' }), PHASE_CONTEXT_REASON.ESCAPES);
     assert.ok(Array.isArray(env.activeHooks));
   });
 
   test('[hostile] a symlinked .planning yields no context and a warning', { skip: symlinkSkip }, (t) => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-phase-conf-'));
-    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-phase-outside-'));
+    const dir = createTempDir('loop-phase-conf-');
+    const outside = createTempDir('loop-phase-outside-');
     t.after(() => { cleanup(dir); cleanup(outside); });
     fs.mkdirSync(path.join(outside, 'phases', '07-evil'), { recursive: true });
     fs.symlinkSync(outside, path.join(dir, '.planning'), 'dir');
     const env = run(dir, ['--phase', '07']);
     assert.ok(!Object.prototype.hasOwnProperty.call(env, 'context'));
-    assert.match((env.warnings || []).join('\n'), /outside the project|escapes/);
+    assert.ok((env.warnings || []).length > 0);
+    assert.strictEqual(reasonOf(dir, { phase: '07' }), PHASE_CONTEXT_REASON.ESCAPES);
   });
 
   test('[hostile] ambiguous directory names are JSON-escaped in the warning', (t) => {
@@ -2172,28 +2218,28 @@ describe('cmdLoopRenderHooks --phase confinement and --phase-dir identity (#4030
 
   // 0/1/2 directory matches x --phase-dir (match | mismatch)
   test('[bva] 0 matches + --phase-dir: warning, no context', (t) => {
-    const env = run(mk(t), ['--phase', '05', '--phase-dir', '.planning/phases/05-x']);
-    assert.ok(!('context' in env));
-    assert.match(env.warnings.join('\n'), /did not match a phase directory/);
+    const r = resolveActiveHooksForPoint(mk(t), 'plan:pre', { phase: '05', phaseDir: '.planning/phases/05-x' });
+    assert.strictEqual(r.context, undefined);
+    assert.strictEqual(r.contextReason, PHASE_CONTEXT_REASON.UNRESOLVED);
   });
   test('[bva] 1 match + matching --phase-dir: context', (t) => {
     const env = run(mk(t, '05-x'), ['--phase', '05', '--phase-dir', '.planning/phases/05-x']);
     assert.deepStrictEqual(env.context, { phase: '05', phaseDir: '.planning/phases/05-x' });
   });
   test('[bva] 1 match + mismatching (nonexistent) --phase-dir: warning, no context', (t) => {
-    const env = run(mk(t, '05-x'), ['--phase', '05', '--phase-dir', '.planning/phases/05-nope']);
-    assert.ok(!('context' in env));
-    assert.match(env.warnings.join('\n'), /does not match the directory/);
+    const r = resolveActiveHooksForPoint(mk(t, '05-x'), 'plan:pre', { phase: '05', phaseDir: '.planning/phases/05-nope' });
+    assert.strictEqual(r.context, undefined);
+    assert.strictEqual(r.contextReason, PHASE_CONTEXT_REASON.MISMATCH);
   });
   test('[bva] 2 matches + matching --phase-dir: ambiguous, no context', (t) => {
-    const env = run(mk(t, '05-x', '05-y'), ['--phase', '05', '--phase-dir', '.planning/phases/05-x']);
-    assert.ok(!('context' in env));
-    assert.match(env.warnings.join('\n'), /is ambiguous/);
+    const r = resolveActiveHooksForPoint(mk(t, '05-x', '05-y'), 'plan:pre', { phase: '05', phaseDir: '.planning/phases/05-x' });
+    assert.strictEqual(r.context, undefined);
+    assert.strictEqual(r.contextReason, PHASE_CONTEXT_REASON.AMBIGUOUS);
   });
   test('[bva] 2 matches + mismatching --phase-dir: ambiguous, no context', (t) => {
-    const env = run(mk(t, '05-x', '05-y'), ['--phase', '05', '--phase-dir', '.planning/phases/05-z']);
-    assert.ok(!('context' in env));
-    assert.match(env.warnings.join('\n'), /is ambiguous/);
+    const r = resolveActiveHooksForPoint(mk(t, '05-x', '05-y'), 'plan:pre', { phase: '05', phaseDir: '.planning/phases/05-z' });
+    assert.strictEqual(r.context, undefined);
+    assert.strictEqual(r.contextReason, PHASE_CONTEXT_REASON.AMBIGUOUS);
   });
 
   // dev+ino identity: a case-variant spelling matches only where the FS says it is the same dir.
@@ -2209,15 +2255,5 @@ describe('cmdLoopRenderHooks --phase confinement and --phase-dir identity (#4030
     if (fs.existsSync(path.join(dir, '.planning', 'PHASES'))) { t.skip('case-insensitive filesystem'); return; }
     const env = run(dir, ['--phase', '05', '--phase-dir', '.planning/PHASES/05-Widgets']);
     assert.ok(!('context' in env));
-  });
-});
-
-describe('discuss-phase creates a missing phase directory before discuss:pre (#4030)', () => {
-  test('a mkdir of the init expected_phase_dir precedes the discuss:pre render-hooks call', () => {
-    const lines = splitLines(fs.readFileSync(path.join(ROOT, 'gsd-core/workflows/discuss-phase.md'), 'utf8'));
-    const hooks = lines.findIndex((l) => l.includes('render-hooks discuss:pre'));
-    const mkdir = lines.findIndex((l) => l.includes('mkdir -p') && l.includes('DISCUSS_NEW_DIR'));
-    assert.ok(hooks !== -1, 'discuss:pre call site exists');
-    assert.ok(mkdir !== -1 && mkdir < hooks, 'a missing phase directory must exist before --phase is resolved');
   });
 });

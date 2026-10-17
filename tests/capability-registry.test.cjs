@@ -5293,6 +5293,7 @@ describe('#1196 — discuss loop wiring + wired-point guard', () => {
         `execute:wave:pre must dispatch step hooks before executor spawning. Errors: ${errs.join('; ')}`,
       );
 
+      // allow-test-rule: source-text-is-the-product (#4030) — the shipped execute-phase call site is the product
       const workflow = fs.readFileSync(path.join(ROOT, 'gsd-core', 'workflows', 'execute-phase.md'), 'utf8');
       // #4030: anchor on the call-site prefix, not the full literal — --phase/GSD_WS
       // args now follow --raw, tolerating that legitimate CLI extension.
