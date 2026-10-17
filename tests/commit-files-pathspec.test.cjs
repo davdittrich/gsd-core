@@ -3316,9 +3316,39 @@ describe('shipped prompts scope raw git commit with a pathspec (#5211)', () => {
     for (const d of ['agents', 'gsd-core/workflows', 'gsd-core/references']) walk(path.join(root, d));
     return out.sort();
   };
+  // commentPortion restarts quote state per line, so a `#` after a newline
+  // inside a quoted message looked like a comment and ate the closing quote.
+  const stripComments = (raw) => {
+    let q = null;
+    return raw.split('\n').map((line) => {
+      let head = '';
+      let rest = line;
+      if (q) {
+        let i = 0;
+        for (; i < line.length; i += 1) {
+          if (line[i] === '\\' && q === '"') i += 1;
+          else if (line[i] === q) break;
+        }
+        if (i >= line.length) return line;
+        head = line.slice(0, i + 1);
+        rest = line.slice(i + 1);
+        q = null;
+      }
+      const kept = rest.slice(0, rest.length - commentPortion(rest).length);
+      for (let i = 0; i < kept.length; i += 1) {
+        const ch = kept[i];
+        if (q) {
+          if (ch === '\\' && q === '"') i += 1;
+          else if (ch === q) q = null;
+        } else if (ch === '\\') i += 1;
+        else if (ch === '"' || ch === "'") q = ch;
+      }
+      return head + kept;
+    }).join('\n');
+  };
   const unscopedCommits = (raw) => {
     const out = [];
-    const text = raw.split('\n').map((l) => l.slice(0, l.length - commentPortion(l).length)).join('\n');
+    const text = stripComments(raw);
     const toks = tokenize(text);
     for (let i = 0; i + 1 < toks.length; i += 1) {
       if (toks[i].op || toks[i].redir || toks[i].value !== 'git' || toks[i + 1].value !== 'commit') continue;
@@ -3342,6 +3372,10 @@ describe('shipped prompts scope raw git commit with a pathspec (#5211)', () => {
     assert.equal(unscopedCommits('git commit -m "x" -- a b').length, 0);
   });
 
+  test('a # inside a multiline quoted message is not a comment', () => {
+    assert.equal(unscopedCommits('git commit -m "first\n# body"\ngit commit -m "later"').length, 2);
+  });
+
   // Deliberate whole-index commits: a pathspec would break or defeat them.
   // Key: `<file>: <first line of the command>`.
   const WHOLE_INDEX_ALLOWLIST = new Map([
@@ -3349,6 +3383,7 @@ describe('shipped prompts scope raw git commit with a pathspec (#5211)', () => {
     ['gsd-core/workflows/complete-milestone/detail/elaboration.md: git commit -m "feat: $MILESTONE_BRANCH for v[X.Y]"', 'squash merge: commit the merge result'],
     [`gsd-core/workflows/complete-milestone/detail/elaboration.md: git commit -m "Merge branch '$branch' for v[X.Y]"`, 'merge commit: git refuses a partial commit mid-merge'],
     [`gsd-core/workflows/complete-milestone/detail/elaboration.md: git commit -m "Merge branch '$MILESTONE_BRANCH' for v[X.Y]"`, 'merge commit: git refuses a partial commit mid-merge'],
+    ['gsd-core/references/planning-config.md: git commit -m "chore: stop tracking planning docs"', 'commits the index removals: a -- .planning/ pathspec fails after git rm --cached; a staged-paths guard precedes it'],
     ['gsd-core/workflows/pr-branch.md: git commit -q -C "$HASH"', 'cherry-pick replay: reuses the source commit message over the staged result'],
     ['gsd-core/workflows/ship.md: git commit --allow-empty -m "chore: trigger CI (recover from ship-note skip-token)"', 'empty commit: no paths by design'],
     ['gsd-core/workflows/undo.md: git commit -m "revert(${TARGET_PHASE}): undo phase ${TARGET_PHASE} — ${REVERT_REASON}"', 'commits the staged `git revert --no-commit` result'],

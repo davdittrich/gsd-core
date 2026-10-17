@@ -62,6 +62,7 @@ _GSD_SHIM_NAME="gsd-tools.cjs"; _GSD_RUNTIME_ROOT="${RUNTIME_DIR:-$(git rev-pars
 # is excluded from staging ONLY when commit_docs is false — otherwise this path is
 # byte-identical to an unconditional `git add -A`, unchanged from before #3585.
 COMMIT_DOCS=$(gsd_run query config-get commit_docs --raw 2>/dev/null || echo "true")
+git diff --cached --quiet || { echo "index not clean: unstage unrelated paths first" >&2; exit 1; }
 if [ "$COMMIT_DOCS" = "false" ]; then
   git add -A -- ':!.planning'
   git commit -m "fix: {concise description of what changed}" -- . ':!.planning'

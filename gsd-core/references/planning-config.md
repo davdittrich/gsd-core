@@ -149,7 +149,8 @@ To use uncommitted mode:
 3. **Existing tracked files:** If `.planning/` was previously tracked:
    ```bash
    git rm -r --cached .planning/
-   git commit -m "chore: stop tracking planning docs" -- .planning/
+   git diff --cached --quiet -- ':!.planning' || { echo "unrelated staged paths; unstage them first" >&2; exit 1; }
+   git commit -m "chore: stop tracking planning docs"
    ```
 
 4. **Branch merges:** When using `branching_strategy: phase` or `milestone`, the `complete-milestone` workflow automatically strips `.planning/` files from staging before merge commits when `commit_docs: false`.
