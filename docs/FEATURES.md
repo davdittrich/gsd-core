@@ -3002,7 +3002,7 @@ not exist yet. The whole run is refused as `build_failure`, ahead of the generic
 
 Which paths count as test files is one list, `src/tdd-test-files.cts`, shared by the
 behavior-adding check and the RED-commit pathspec in `execute-phase.md` (a test pins the
-two together): `*.test.*`, `*.spec.*`, `tests/` or `test/` and `__tests__/` directories,
+two together): `*.test.*`, `*.spec.*`, `tests/` and `__tests__/` directories at any depth (the behavior-adding check also accepts `test/`),
 `*_test.go`, `test_*.py`, `*_test.py`, `*_test.exs`, `*_spec.rb` and `*_test.rb`.
 
 The upstream parsers (`tap-parser` and `saxes`) ship as reproducible bundles,
