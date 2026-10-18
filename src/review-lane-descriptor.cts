@@ -762,6 +762,7 @@ export const PARITY_VIOLATION = Object.freeze({
   REGISTRY_LANE_UNDECLARED: 'registry_lane_undeclared',
   DESCRIPTOR_LANE_NOT_IN_REGISTRY: 'descriptor_lane_not_in_registry',
   BESPOKE_LEG_PRESENT: 'bespoke_leg_present',
+  AVAILABILITY_FALLBACK_MISMATCH: 'availability_fallback_mismatch',
   DUPLICATE_SLUG: 'duplicate_slug',
   DUPLICATE_FLAG: 'duplicate_flag',
   DUPLICATE_SECTION: 'duplicate_section',
@@ -895,6 +896,7 @@ export function checkReviewerLaneParity(input: ParityInput): ParityResult {
   const seenSlug = new Set<string>();
   const seenFlag = new Set<string>();
   const seenSection = new Set<string>();
+  const httpSlugs = new Set<string>();
 
   // The declared parameter type says `ReviewerLane[]`, but this function is a
   // trust boundary — narrow from `unknown` rather than believing the annotation.
@@ -914,6 +916,7 @@ export function checkReviewerLaneParity(input: ParityInput): ParityResult {
 
     if (seenSlug.has(slug)) add(PARITY_VIOLATION.DUPLICATE_SLUG, slug);
     seenSlug.add(slug);
+    if (lane.transport === 'openai-http') httpSlugs.add(slug);
 
     const flags: unknown[] = Array.isArray(lane.flags) ? (lane.flags as unknown[]) : [];
     for (const flag of flags) {
@@ -968,6 +971,22 @@ export function checkReviewerLaneParity(input: ParityInput): ParityResult {
   const markerSlugs = countOccurrences(sliceStep(workflowText, INVOKE_STEP_RE), LEG_MARKER_RE);
   for (const slug of markerSlugs.keys()) {
     add(PARITY_VIOLATION.BESPOKE_LEG_PRESENT, slug);
+  }
+
+  // --- the availability call's `||` fallback must name exactly the openai-http lanes ---
+  //
+  // review.md prints these rows only when an older gsd-tools lacks `review-lane availability`, so
+  // they are a second hand-kept copy of the roster. Checked only when the call is present.
+  const availabilityLine = workflowText.split('\n').find((line) => line.includes('review-lane availability'));
+  if (availabilityLine !== undefined) {
+    if (!availabilityLine.includes('review-lane availability ||')) {
+      add(PARITY_VIOLATION.AVAILABILITY_FALLBACK_MISMATCH, 'no-fallback');
+    }
+    const fallback = new Set(
+      Array.from(availabilityLine.matchAll(/(?:'|\\n)([a-z_]{1,32}):missing/g), (m) => m[1]),
+    );
+    for (const slug of fallback) if (!httpSlugs.has(slug)) add(PARITY_VIOLATION.AVAILABILITY_FALLBACK_MISMATCH, slug);
+    for (const slug of httpSlugs) if (!fallback.has(slug)) add(PARITY_VIOLATION.AVAILABILITY_FALLBACK_MISMATCH, slug);
   }
 
   return { ok: violations.length === 0, violations };

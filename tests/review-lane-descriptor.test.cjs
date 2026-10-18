@@ -163,6 +163,26 @@ describe('reviewer lane parity — descriptor vs registry (ADR-2782 Phase 5b)', 
   });
 });
 
+describe('reviewer lane parity — availability fallback rows', () => {
+  test('the shipped fallback names exactly the first-party openai-http lanes', () => {
+    assert.deepStrictEqual(
+      check().violations.filter((v) => v.reason === PARITY_VIOLATION.AVAILABILITY_FALLBACK_MISMATCH),
+      [],
+    );
+  });
+
+  test('a stale fallback row and a dropped lane are both violations', () => {
+    const wf = WORKFLOW_TEXT.replace('llama_cpp:missing', 'ghost:missing');
+    const r = reasons(check({ workflowText: wf }));
+    assert.ok(r.includes(`${PARITY_VIOLATION.AVAILABILITY_FALLBACK_MISMATCH}:ghost`));
+    assert.ok(r.includes(`${PARITY_VIOLATION.AVAILABILITY_FALLBACK_MISMATCH}:llama_cpp`));
+  });
+  test('an availability call without its || fallback is a violation', () => {
+    const wf = WORKFLOW_TEXT.replace('review-lane availability ||', 'review-lane availability #');
+    assert.ok(reasons(check({ workflowText: wf })).includes(`${PARITY_VIOLATION.AVAILABILITY_FALLBACK_MISMATCH}:no-fallback`));
+  });
+});
+
 describe('reviewer lane parity — anti-parity: no bespoke leg may return', () => {
   test('a re-added per-CLI leg marker is a violation', () => {
     // The regex flipped polarity in Phase 5b: matching a leg marker is now the failure. Without
@@ -698,6 +718,7 @@ describe('reviewer lane descriptor — declared shape (ADR-2782 D1/D2/D6/D7)', (
     // Adding a reason is three coordinated changes: enum, emitting site, and
     // this assertion.
     assert.deepStrictEqual(Object.keys(PARITY_VIOLATION).sort(), [
+      'AVAILABILITY_FALLBACK_MISMATCH',
       'BESPOKE_LEG_PRESENT',
       'DESCRIPTOR_LANE_NOT_IN_REGISTRY',
       'DESCRIPTOR_LANE_NOT_IN_ROSTER',
