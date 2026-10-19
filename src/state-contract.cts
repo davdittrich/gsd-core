@@ -405,7 +405,9 @@ export function publishStateContract(cwd: string, deps?: StateContractDeps): { p
     // info/exclude (never a tracked file). Best-effort; failure stays invisible.
     try {
       const planningDir = path.dirname(statePath);
-      const revParse = execGit(['rev-parse', '--show-prefix', '--git-path', 'info/exclude'], { cwd: planningDir });
+      // cwd must pick the repo: drop inherited repository-location variables (e.g. inside a git hook).
+      const env = { GIT_DIR: undefined, GIT_WORK_TREE: undefined, GIT_INDEX_FILE: undefined };
+      const revParse = execGit(['rev-parse', '--show-prefix', '--git-path', 'info/exclude'], { cwd: planningDir, env });
       // stdout is trimmed, so an empty prefix (planning dir is the git root) drops its line.
       const lines = splitLines(String(revParse.stdout));
       const excludeRel = lines[lines.length - 1];
@@ -423,7 +425,7 @@ export function publishStateContract(cwd: string, deps?: StateContractDeps): { p
         // rewrites without a commit. The exclude is shared by linked worktrees but
         // the index bit is per worktree, so this runs every publish. Fails
         // harmlessly when untracked.
-        execGit(['update-index', '--skip-worktree', '--', 'state.json'], { cwd: planningDir });
+        execGit(['update-index', '--skip-worktree', '--', 'state.json'], { cwd: planningDir, env });
       }
     } catch {
       // REQ-SC-04: ignoring is optional; never perturb the publish result.

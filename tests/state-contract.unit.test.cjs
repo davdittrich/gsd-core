@@ -1277,6 +1277,17 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
     git(tmpDir, 'check-ignore', '-q', 'a[x]b/.planning/state.json');
   });
 
+  test('ignoresInheritedGitDirEnv', (t) => {
+    const tmpDir = createTempGitProject();
+    const other = createTempGitProject();
+    t.after(() => { delete process.env.GIT_DIR; cleanup(tmpDir); cleanup(other); });
+    process.env.GIT_DIR = path.join(other, '.git');
+    publishStateContract(tmpDir, fixedDeps());
+    delete process.env.GIT_DIR;
+    assert.ok(lines(excludeOf(tmpDir)).includes('/.planning/state.json'));
+    assert.ok(!lines(excludeOf(other)).includes('/.planning/state.json'));
+  });
+
   test('planningRootIsTheGitRoot', (t) => {
     const tmpDir = createTempProject();
     t.after(() => cleanup(tmpDir));
