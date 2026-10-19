@@ -406,7 +406,7 @@ export function publishStateContract(cwd: string, deps?: StateContractDeps): { p
     try {
       const planningDir = path.dirname(statePath);
       // cwd must pick the repo: drop inherited repository-location variables (e.g. inside a git hook).
-      const env = { GIT_DIR: undefined, GIT_WORK_TREE: undefined, GIT_INDEX_FILE: undefined };
+      const env = { GIT_DIR: undefined, GIT_WORK_TREE: undefined, GIT_INDEX_FILE: undefined, GIT_COMMON_DIR: undefined };
       const revParse = execGit(['rev-parse', '--show-prefix', '--git-path', 'info/exclude'], { cwd: planningDir, env });
       // stdout is trimmed, so an empty prefix (planning dir is the git root) drops its line.
       const lines = splitLines(String(revParse.stdout));
@@ -423,9 +423,12 @@ export function publishStateContract(cwd: string, deps?: StateContractDeps): { p
         }
         // A copy tracked before #5505 stays in the index; skip-worktree hides its
         // rewrites without a commit. The exclude is shared by linked worktrees but
-        // the index bit is per worktree, so this runs every publish. Fails
-        // harmlessly when untracked.
-        execGit(['update-index', '--skip-worktree', '--', 'state.json'], { cwd: planningDir, env });
+        // the index bit is per worktree, so this runs every publish. `ls-files -v` takes
+        // no index lock; only a tracked, not-yet-marked copy (`H`) needs update-index.
+        const tag = execGit(['ls-files', '-v', '--', 'state.json'], { cwd: planningDir, env });
+        if (tag.exitCode === 0 && String(tag.stdout).startsWith('H')) {
+          execGit(['update-index', '--skip-worktree', '--', 'state.json'], { cwd: planningDir, env });
+        }
       }
     } catch {
       // REQ-SC-04: ignoring is optional; never perturb the publish result.

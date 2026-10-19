@@ -200,8 +200,8 @@ in-progress phase is identified from `STATE.md`. Regenerating the progress table
 resolves most disagreements.
 
 **Should I commit `state.json`?** No. The first boundary command in each clone
-adds `/<prefix>state.json` (e.g. `/.planning/state.json`) to `.git/info/exclude`
-and marks an already-tracked copy skip-worktree: it stays in the index, is not
+adds `/<prefix>state.json` (e.g. `/.planning/state.json`) to `.git/info/exclude`,
+and every boundary command marks an already-tracked copy skip-worktree in that worktree: it stays in the index, is not
 deleted, and needs no commit. Tracking it again is unsupported. If a pull, merge, or checkout
 that changes it upstream fails with "local changes would be overwritten", run
 `git update-index --no-skip-worktree <path> && git checkout -- <path>` on the blocked file

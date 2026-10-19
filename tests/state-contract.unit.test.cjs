@@ -1280,12 +1280,33 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
   test('ignoresInheritedGitDirEnv', (t) => {
     const tmpDir = createTempGitProject();
     const other = createTempGitProject();
-    t.after(() => { delete process.env.GIT_DIR; cleanup(tmpDir); cleanup(other); });
+    const prior = process.env.GIT_DIR;
+    t.after(() => {
+      if (prior === undefined) delete process.env.GIT_DIR; else process.env.GIT_DIR = prior;
+      cleanup(tmpDir); cleanup(other);
+    });
+    const before = fs.readFileSync(excludeOf(other), 'utf8');
     process.env.GIT_DIR = path.join(other, '.git');
     publishStateContract(tmpDir, fixedDeps());
-    delete process.env.GIT_DIR;
+    if (prior === undefined) delete process.env.GIT_DIR; else process.env.GIT_DIR = prior;
     assert.ok(lines(excludeOf(tmpDir)).includes('/.planning/state.json'));
-    assert.ok(!lines(excludeOf(other)).includes('/.planning/state.json'));
+    assert.strictEqual(fs.readFileSync(excludeOf(other), 'utf8'), before);
+  });
+
+  test('anExcludeFailureStillPublishes', (t) => {
+    const tmpDir = createTempGitProject();
+    t.after(() => cleanup(tmpDir));
+    const exclude = excludeOf(tmpDir);
+    fs.unlinkSync(exclude);
+    fs.mkdirSync(exclude, { recursive: true });
+    assert.strictEqual(publishStateContract(tmpDir, fixedDeps()).published, true);
+  });
+
+  test('aNonGitProjectPublishesWithoutCreatingDotGit', (t) => {
+    const tmpDir = createTempProject();
+    t.after(() => cleanup(tmpDir));
+    assert.strictEqual(publishStateContract(tmpDir, fixedDeps()).published, true);
+    assert.ok(!fs.existsSync(path.join(tmpDir, '.git')));
   });
 
   test('planningRootIsTheGitRoot', (t) => {
