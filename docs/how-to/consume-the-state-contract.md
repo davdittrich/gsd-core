@@ -204,8 +204,8 @@ adds `/<prefix>state.json` (e.g. `/.planning/state.json`) to `.git/info/exclude`
 and marks an already-tracked copy skip-worktree: it stays in the index, is not
 deleted, and needs no commit. Tracking it again is unsupported. If a pull, merge, or checkout
 that changes it upstream fails with "local changes would be overwritten", run
-`git update-index --no-skip-worktree .planning/state.json && git checkout -- .planning/state.json`
-and retry; the next boundary command re-applies the flag.
+`git update-index --no-skip-worktree <path> && git checkout -- <path>` on the blocked file
+(`.planning/state.json`, or `.planning/workstreams/<name>/state.json`) and retry; the next boundary command re-applies the flag.
 If you keep `.planning/` out of your repo entirely, see
 [Keep planning docs out of a shared repo](keep-planning-docs-private.md).
 
