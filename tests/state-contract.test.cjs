@@ -47,9 +47,10 @@
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const { execFileSync } = require('node:child_process');
 const path = require('node:path');
 
-const { createTempProject, createTempDir, cleanup, runGsdTools } = require('./helpers.cjs');
+const { createTempProject, createTempGitProject, createTempDir, cleanup, runGsdTools } = require('./helpers.cjs');
 
 const { STATE_CONTRACT_VERSION } = require('../gsd-core/bin/lib/state-contract.cjs');
 
@@ -444,5 +445,52 @@ describe('state contract — call-site wiring (integration, real CLI)', () => {
     const second = runGsdTools(['phase', 'complete', '1'], tmpDir);
     assert.ok(second.success, `second (no-op) phase complete call must genuinely succeed: ${second.error}`);
     assert.strictEqual(fs.existsSync(statePathOf(tmpDir)), false, 'the second, no-op phase complete call must not publish state.json');
+  });
+});
+
+// #5505: state.json is a derived cache — the workflow's final scoped
+// `commit --files .planning/STATE.md` must leave a clean tree.
+describe('state.json never dirties the tree (#5505)', () => {
+  const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' });
+  const BEGIN = ['state', 'begin-phase', '--phase', '2', '--name', 'Hardening', '--plans', '2'];
+  const STATE_MD = '# Project State\n\n**Current Phase:** 2\n**Current Phase Name:** Hardening\n**Total Phases:** 3\n**Current Plan:** 0\n**Total Plans in Phase:** 0\n**Status:** Ready to plan\n**Last Activity:** 2024-01-01\n';
+
+  function scenario(t, { wsName, preTracked }) {
+    const tmpDir = createTempGitProject();
+    t.after(() => cleanup(tmpDir));
+    const dir = wsName ? path.join(tmpDir, '.planning', 'workstreams', wsName) : path.join(tmpDir, '.planning');
+    fs.mkdirSync(dir, { recursive: true });
+    const rel = path.relative(tmpDir, dir).split(path.sep).join('/');
+    fs.writeFileSync(path.join(dir, 'STATE.md'), STATE_MD);
+    fs.writeFileSync(path.join(tmpDir, '.gitignore'), 'milestone.lock\n'); // unrelated lock artifact
+    if (preTracked) fs.writeFileSync(path.join(dir, 'state.json'), '{}\n');
+    git(tmpDir, 'add', '-A');
+    git(tmpDir, 'commit', '-q', '-m', 'seed');
+    const argv = wsName ? [...BEGIN, '--ws', wsName] : BEGIN;
+    const r = runGsdTools(argv, tmpDir);
+    assert.ok(r.success, `boundary command must succeed: ${r.error}`);
+    assert.ok(fs.existsSync(path.join(dir, 'state.json')), 'state.json published');
+    const c = runGsdTools(['commit', 'docs: final', '--files', `${rel}/STATE.md`], tmpDir);
+    assert.ok(c.success, `scoped commit must succeed: ${c.error}`);
+    return { tmpDir, rel };
+  }
+
+  test('fresh state.json is ignored and the tree is clean', (t) => {
+    const { tmpDir, rel } = scenario(t, { preTracked: false });
+    assert.strictEqual(git(tmpDir, 'status', '--porcelain'), '');
+    git(tmpDir, 'check-ignore', '-q', `${rel}/state.json`);
+  });
+
+  test('pre-tracked state.json is untracked by the final commit, kept on disk', (t) => {
+    const { tmpDir, rel } = scenario(t, { preTracked: true });
+    assert.strictEqual(git(tmpDir, 'status', '--porcelain'), '');
+    assert.strictEqual(git(tmpDir, 'ls-tree', '-r', '--name-only', 'HEAD').includes(`${rel}/state.json`), false);
+    assert.ok(fs.existsSync(path.join(tmpDir, rel, 'state.json')));
+  });
+
+  test('workstream state.json is ignored and the tree is clean', (t) => {
+    const { tmpDir, rel } = scenario(t, { wsName: 'ws1', preTracked: false });
+    assert.strictEqual(git(tmpDir, 'status', '--porcelain'), '');
+    git(tmpDir, 'check-ignore', '-q', `${rel}/state.json`);
   });
 });

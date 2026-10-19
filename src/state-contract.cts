@@ -132,6 +132,7 @@ interface Owners {
   planningPaths: typeof import('./planning-workspace.cjs')['planningPaths'];
   platformReadSync: typeof import('./shell-command-projection.cjs')['platformReadSync'];
   platformWriteSync: typeof import('./shell-command-projection.cjs')['platformWriteSync'];
+  execGit: typeof import('./shell-command-projection.cjs')['execGit'];
   locateProgressTable: typeof import('./phase-lifecycle.cjs')['locateProgressTable'];
   isSentinelPhaseId: typeof import('./phase-id.cjs')['isSentinelPhaseId'];
   parsePhaseFromProse: typeof import('./phase-id.cjs')['parsePhaseFromProse'];
@@ -169,6 +170,7 @@ function owners(): Owners {
     planningPaths: planningWorkspaceMod.planningPaths,
     platformReadSync: shellCommandProjectionMod.platformReadSync,
     platformWriteSync: shellCommandProjectionMod.platformWriteSync,
+    execGit: shellCommandProjectionMod.execGit,
     locateProgressTable: phaseLifecycleMod.locateProgressTable,
     isSentinelPhaseId: phaseIdMod.isSentinelPhaseId,
     parsePhaseFromProse: phaseIdMod.parsePhaseFromProse,
@@ -373,7 +375,7 @@ export function buildStateContract(cwd: string, deps?: StateContractDeps): State
  */
 export function publishStateContract(cwd: string, deps?: StateContractDeps): { published: boolean; reason: string } {
   try {
-    const { planningPaths, platformWriteSync } = owners();
+    const { planningPaths, platformWriteSync, execGit } = owners();
     // Resolve the planning root BEFORE anything else. A resolution failure
     // (invalid GSD_WORKSTREAM/GSD_PROJECT segment — the #2245 shape) means no
     // write was ever attempted, so it must map to `no_planning_dir`, not
@@ -396,6 +398,26 @@ export function publishStateContract(cwd: string, deps?: StateContractDeps): { p
       platformWriteSync(statePath, JSON.stringify(snapshot, null, 2) + '\n');
     } catch {
       return { published: false, reason: PUBLISH_REASON.WRITE_FAILED };
+    }
+
+    // state.json is a derived cache (#5505): ignore it via the repo-local
+    // info/exclude (never a tracked file). Best-effort; failure stays invisible.
+    try {
+      const cwdOfState = path.dirname(statePath);
+      const r = execGit(['rev-parse', '--show-prefix', '--git-path', 'info/exclude'], { cwd: cwdOfState });
+      const [prefix, excludeRel] = String(r.stdout).split('\n');
+      if (r.exitCode === 0 && excludeRel) {
+        const exclude = path.resolve(cwdOfState, excludeRel);
+        const entry = `/${prefix}state.json`;
+        const existing = fs.existsSync(exclude) ? fs.readFileSync(exclude, 'utf8') : '';
+        if (!existing.split('\n').includes(entry)) {
+          fs.mkdirSync(path.dirname(exclude), { recursive: true });
+          fs.appendFileSync(exclude, (existing && !existing.endsWith('\n') ? '\n' : '') + entry + '\n');
+          execGit(['rm', '--cached', '--quiet', '--ignore-unmatch', '--', 'state.json'], { cwd: cwdOfState });
+        }
+      }
+    } catch {
+      // REQ-SC-04: ignoring is optional; never perturb the publish result.
     }
 
     return { published: true, reason: PUBLISH_REASON.PUBLISHED };

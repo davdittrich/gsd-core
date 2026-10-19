@@ -199,10 +199,16 @@ checkbox list is used instead, and a checkbox can only say complete or not — t
 in-progress phase is identified from `STATE.md`. Regenerating the progress table
 resolves most disagreements.
 
-**Should I commit `state.json`?** Your call. GSD does not add it to
-`.gitignore`. It is a derived cache — safe to delete, regenerated at the next
-boundary — so committing it mostly creates merge noise. If you keep `.planning/`
-out of your repo entirely, see
+**Should I commit `state.json`?** No — it is git-ignored by default. It is a
+derived cache, safe to delete and regenerated at every boundary command, so
+tracking it only creates merge noise and a dirty tree. On first publish GSD adds
+`/state.json` (anchored, one line per planning root, workstreams included) to
+`.git/info/exclude` and runs a one-time `git rm --cached` if a copy was already
+tracked; the file stays on disk and the staged deletion lands in your next
+commit. This is clone-local: each clone fixes itself at its first boundary
+command. Outside a git repo it does nothing. To track it anyway, remove the
+exclude line and `git add -f` the file; the untrack does not repeat. If you keep
+`.planning/` out of your repo entirely, see
 [Keep planning docs out of a shared repo](keep-planning-docs-private.md).
 
 ## Related
