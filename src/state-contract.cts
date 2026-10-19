@@ -412,15 +412,18 @@ export function publishStateContract(cwd: string, deps?: StateContractDeps): { p
       const prefix = lines.length > 1 ? lines[0] : '';
       if (revParse.exitCode === 0 && excludeRel) {
         const exclude = path.resolve(planningDir, excludeRel);
-        const entry = `/${prefix}state.json`;
+        // Escape gitignore metacharacters in the directory prefix.
+        const entry = `/${prefix.replace(/[\\*?[]/g, '\\$&')}state.json`;
         const existing = fs.existsSync(exclude) ? fs.readFileSync(exclude, 'utf8') : '';
         if (!splitLines(existing).includes(entry)) {
           fs.mkdirSync(path.dirname(exclude), { recursive: true });
           fs.appendFileSync(exclude, (existing && !existing.endsWith('\n') ? '\n' : '') + entry + '\n');
-          // A copy tracked before #5505 stays in the index; skip-worktree hides its
-          // rewrites without a commit. Fails harmlessly when untracked.
-          execGit(['update-index', '--skip-worktree', '--', 'state.json'], { cwd: planningDir });
         }
+        // A copy tracked before #5505 stays in the index; skip-worktree hides its
+        // rewrites without a commit. The exclude is shared by linked worktrees but
+        // the index bit is per worktree, so this runs every publish. Fails
+        // harmlessly when untracked.
+        execGit(['update-index', '--skip-worktree', '--', 'state.json'], { cwd: planningDir });
       }
     } catch {
       // REQ-SC-04: ignoring is optional; never perturb the publish result.

@@ -1254,6 +1254,29 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
     git(wt, 'check-ignore', '-q', '.planning/state.json');
   });
 
+  test('trackedCopyIsSkipWorktreeInEveryLinkedWorktree', (t) => {
+    const tmpDir = createTempGitProject();
+    t.after(() => cleanup(tmpDir));
+    fs.mkdirSync(planningDirOf(tmpDir), { recursive: true });
+    fs.writeFileSync(path.join(planningDirOf(tmpDir), 'state.json'), '{}\n');
+    git(tmpDir, 'add', '-f', '.planning/state.json');
+    git(tmpDir, 'commit', '-q', '-m', 'track');
+    publishStateContract(tmpDir, fixedDeps());
+    const wt = path.join(tmpDir, 'linked');
+    git(tmpDir, 'worktree', 'add', '-q', '-b', 'wt', wt);
+    publishStateContract(wt, fixedDeps());
+    assert.strictEqual(git(wt, 'status', '--porcelain', '--', '.planning/state.json').trim(), '');
+  });
+
+  test('globCharsInThePrefixAreEscaped', (t) => {
+    const tmpDir = createTempGitProject();
+    t.after(() => cleanup(tmpDir));
+    const sub = path.join(tmpDir, 'a[x]b');
+    fs.mkdirSync(planningDirOf(sub), { recursive: true });
+    publishStateContract(sub, fixedDeps());
+    git(tmpDir, 'check-ignore', '-q', 'a[x]b/.planning/state.json');
+  });
+
   test('planningRootIsTheGitRoot', (t) => {
     const tmpDir = createTempProject();
     t.after(() => cleanup(tmpDir));
