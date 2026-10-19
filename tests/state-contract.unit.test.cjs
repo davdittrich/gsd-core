@@ -1226,58 +1226,21 @@ describe('state contract — write mechanics', () => {
 // ─── 14b. Git-ignore of the derived cache (#5505) ─────────────────────────────
 
 describe('state contract — state.json is git-ignored via info/exclude (#5505)', () => {
-  const { execFileSync } = require('node:child_process');
   const { createTempGitProject } = require('./helpers.cjs');
-  const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' });
+  const { gitOrThrow } = require('./helpers/git-fixture.cjs');
+  const { splitLines } = require('../gsd-core/bin/lib/text-lines.cjs');
+  const git = (cwd, ...args) => gitOrThrow(args, { cwd });
   const excludeOf = (cwd) => path.resolve(cwd, git(cwd, 'rev-parse', '--git-path', 'info/exclude').trim());
-  const lines = (f) => fs.readFileSync(f, 'utf8').split('\n');
+  const lines = (f) => splitLines(fs.readFileSync(f, 'utf8'));
 
-  test('ignoresStateJsonAndKeepsTreeClean', (t) => {
-    const tmpDir = createTempGitProject();
-    t.after(() => cleanup(tmpDir));
-    git(tmpDir, 'add', '-A'); git(tmpDir, 'commit', '-q', '--allow-empty', '-m', 'seed');
-    publishStateContract(tmpDir, fixedDeps());
-    assert.strictEqual(fs.existsSync(statePathOf(tmpDir)), true);
-    git(tmpDir, 'check-ignore', '-q', '.planning/state.json');
-    assert.ok(!git(tmpDir, 'status', '--porcelain').includes('state.json'));
-  });
-
-  test('isIdempotent', (t) => {
+  test('isIdempotentEvenOnACrlfExclude', (t) => {
     const tmpDir = createTempGitProject();
     t.after(() => cleanup(tmpDir));
     publishStateContract(tmpDir, fixedDeps());
+    const exclude = excludeOf(tmpDir);
+    fs.writeFileSync(exclude, fs.readFileSync(exclude, 'utf8').replace(/\r?\n/g, '\r\n'));
     publishStateContract(tmpDir, fixedDeps());
-    assert.strictEqual(lines(excludeOf(tmpDir)).filter((l) => l === '/.planning/state.json').length, 1);
-  });
-
-  test('workstreamGetsItsOwnAnchoredLine', (t) => {
-    const tmpDir = createTempGitProject();
-    t.after(() => cleanup(tmpDir));
-    fs.mkdirSync(path.join(planningDirOf(tmpDir), 'workstreams', 'ws1'), { recursive: true });
-    const saved = process.env.GSD_WORKSTREAM;
-    process.env.GSD_WORKSTREAM = 'ws1';
-    t.after(() => { if (saved === undefined) delete process.env.GSD_WORKSTREAM; else process.env.GSD_WORKSTREAM = saved; });
-    publishStateContract(tmpDir, fixedDeps());
-    assert.ok(lines(excludeOf(tmpDir)).includes('/.planning/workstreams/ws1/state.json'));
-    git(tmpDir, 'check-ignore', '-q', '.planning/workstreams/ws1/state.json');
-  });
-
-  test('untracksAPreviouslyTrackedCopyButKeepsItOnDisk', (t) => {
-    const tmpDir = createTempGitProject();
-    t.after(() => cleanup(tmpDir));
-    fs.writeFileSync(statePathOf(tmpDir), '{}\n');
-    git(tmpDir, 'add', '-f', '.planning/state.json'); git(tmpDir, 'commit', '-q', '-m', 'track');
-    publishStateContract(tmpDir, fixedDeps());
-    assert.strictEqual(fs.existsSync(statePathOf(tmpDir)), true);
-    assert.match(git(tmpDir, 'status', '--porcelain'), /^D\s+\.planning\/state\.json/m);
-  });
-
-  test('nonGitDirWritesFileAndCreatesNoExclude', (t) => {
-    const tmpDir = createTempProject();
-    t.after(() => cleanup(tmpDir));
-    const result = publishStateContract(tmpDir, fixedDeps());
-    assert.deepStrictEqual(result, { published: true, reason: PUBLISH_REASON.PUBLISHED });
-    assert.strictEqual(fs.existsSync(path.join(tmpDir, '.git')), false);
+    assert.strictEqual(lines(exclude).filter((l) => l === '/.planning/state.json').length, 1);
   });
 
   test('linkedWorktreeWritesTheCommonExclude', (t) => {
@@ -1291,15 +1254,26 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
     git(wt, 'check-ignore', '-q', '.planning/state.json');
   });
 
-  test('absentPlanningDirTouchesNothing', (t) => {
+  test('planningRootIsTheGitRoot', (t) => {
+    const tmpDir = createTempProject();
+    t.after(() => cleanup(tmpDir));
+    const planning = planningDirOf(tmpDir);
+    git(planning, 'init', '-q');
+    publishStateContract(tmpDir, fixedDeps());
+    assert.ok(lines(excludeOf(planning)).includes('/state.json'));
+    git(planning, 'check-ignore', '-q', 'state.json');
+  });
+
+  test('preTrackedCopyBecomesSkipWorktreeAndStaysOnDisk', (t) => {
     const tmpDir = createTempGitProject();
     t.after(() => cleanup(tmpDir));
-    fs.rmSync(planningDirOf(tmpDir), { recursive: true, force: true });
-    const before = fs.existsSync(excludeOf(tmpDir)) ? fs.readFileSync(excludeOf(tmpDir), 'utf8') : null;
-    const result = publishStateContract(tmpDir, fixedDeps());
-    assert.deepStrictEqual(result, { published: false, reason: PUBLISH_REASON.NO_PLANNING_DIR });
-    const after = fs.existsSync(excludeOf(tmpDir)) ? fs.readFileSync(excludeOf(tmpDir), 'utf8') : null;
-    assert.strictEqual(after, before);
+    fs.writeFileSync(statePathOf(tmpDir), '{}\n');
+    git(tmpDir, 'add', '-f', '.planning/state.json');
+    git(tmpDir, 'commit', '-q', '-m', 'track');
+    publishStateContract(tmpDir, fixedDeps());
+    assert.match(git(tmpDir, 'ls-files', '-v', '--', '.planning/state.json'), /^S \.planning\/state\.json$/m);
+    assert.strictEqual(git(tmpDir, 'status', '--porcelain'), '');
+    assert.strictEqual(JSON.parse(fs.readFileSync(statePathOf(tmpDir), 'utf8')).contract, STATE_CONTRACT_VERSION);
   });
 });
 

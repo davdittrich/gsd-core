@@ -72,6 +72,7 @@ import fs from 'node:fs';
 // documented `state.cjs -> state-contract.cjs -> smart-entry.cjs -> state.cjs`
 // require cycle the file header warns about.
 import { WIRE_STATUS, parseRoadmapStatusCell } from './phase-status.cjs';
+import { splitLines } from './text-lines.cjs';
 
 // ─── Public wire vocabulary ────────────────────────────────────────────────
 
@@ -403,17 +404,22 @@ export function publishStateContract(cwd: string, deps?: StateContractDeps): { p
     // state.json is a derived cache (#5505): ignore it via the repo-local
     // info/exclude (never a tracked file). Best-effort; failure stays invisible.
     try {
-      const cwdOfState = path.dirname(statePath);
-      const r = execGit(['rev-parse', '--show-prefix', '--git-path', 'info/exclude'], { cwd: cwdOfState });
-      const [prefix, excludeRel] = String(r.stdout).split('\n');
-      if (r.exitCode === 0 && excludeRel) {
-        const exclude = path.resolve(cwdOfState, excludeRel);
+      const planningDir = path.dirname(statePath);
+      const revParse = execGit(['rev-parse', '--show-prefix', '--git-path', 'info/exclude'], { cwd: planningDir });
+      // stdout is trimmed, so an empty prefix (planning dir is the git root) drops its line.
+      const lines = splitLines(String(revParse.stdout));
+      const excludeRel = lines[lines.length - 1];
+      const prefix = lines.length > 1 ? lines[0] : '';
+      if (revParse.exitCode === 0 && excludeRel) {
+        const exclude = path.resolve(planningDir, excludeRel);
         const entry = `/${prefix}state.json`;
         const existing = fs.existsSync(exclude) ? fs.readFileSync(exclude, 'utf8') : '';
-        if (!existing.split('\n').includes(entry)) {
+        if (!splitLines(existing).includes(entry)) {
           fs.mkdirSync(path.dirname(exclude), { recursive: true });
           fs.appendFileSync(exclude, (existing && !existing.endsWith('\n') ? '\n' : '') + entry + '\n');
-          execGit(['rm', '--cached', '--quiet', '--ignore-unmatch', '--', 'state.json'], { cwd: cwdOfState });
+          // A copy tracked before #5505 stays in the index; skip-worktree hides its
+          // rewrites without a commit. Fails harmlessly when untracked.
+          execGit(['update-index', '--skip-worktree', '--', 'state.json'], { cwd: planningDir });
         }
       }
     } catch {

@@ -2762,17 +2762,6 @@ function cmdCommit(cwd: string, message: string | undefined, files: string[] | u
     return;
   }
 
-  // #5505: publishStateContract untracks a derived state.json (`git rm --cached`).
-  // `git commit -- <paths>` cannot record that deletion while the file is still on
-  // disk (it re-adds it), so a scoped commit leaves it staged-dirty. When the index
-  // now holds ONLY such deletions, fold them into the commit just made.
-  if (canScope) {
-    const left = execGit(['diff', '--cached', '--name-only', '-z'], { cwd });
-    const names = left.stdout.split('\0').filter(Boolean);
-    if (left.exitCode === 0 && names.length > 0 && names.every(f => /(^|\/)\.planning\/(.*\/)?state\.json$/.test(f))) {
-      execGit(['commit', '--amend', '--no-edit', '--no-verify'], { cwd, env: commitEnv, timeout: COMMIT_TIMEOUT_MS });
-    }
-  }
   // Get short hash
   const hashResult = execGit(['rev-parse', '--short', 'HEAD'], { cwd });
   const hash = hashResult.exitCode === 0 ? hashResult.stdout : null;
