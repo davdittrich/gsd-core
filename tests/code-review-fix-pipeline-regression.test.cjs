@@ -2,7 +2,8 @@
 // The workflow .md IS the product: its embedded bash/node snippets are loaded
 // and executed verbatim by the agent host at runtime. Testing that the deployed
 // commit-fix step exports the env var its own inline `node -e` body reads, and
-// that the docs commit stages the converged REVIEW.md alongside REVIEW-FIX.md,
+// that the docs commit stages the converged REVIEW.md alongside REVIEW-FIX.md (#3190; and alone
+// when the fix report is invalid/missing, #5527),
 // asserts the deployed contract — not an implementation detail. There is no
 // runtime API that exposes these inlined snippets; the text IS the spec.
 //
@@ -266,5 +267,62 @@ describe('#3190 — code-review-fix --auto REVIEW.md commit + FIX_REPORT_PATH en
     // An unreadable or unparseable review is not evidence of convergence — retain.
     const unknown = drive('');
     assert.strictEqual(unknown.review, true, 'an unparseable status must retain, never remove');
+  });
+
+  // #5527: the converged REVIEW.md must be committed even when the fix report is invalid or
+  // missing, else a tracked rewritten REVIEW.md stays dirty and /gsd-ship refuses. The fence is
+  // EXECUTED with a stub gsd_run that records its argv.
+  test('T7 — commit_fix_report EXECUTED: --auto REVIEW.md committed when fix report is invalid/missing/valid', { skip: !HAS_BASH }, () => {
+    const src = fs.readFileSync(WORKFLOW_PATH, 'utf8');
+    const fence = stepFence(src, 'commit_fix_report');
+
+    const drive = ({ report, auto = 'true', docs = 'true' }) => {
+      const dir = createTempDir('gsd-5527-');
+      try {
+        const reviewPath = path.join(dir, '01-REVIEW.md');
+        const fixPath = path.join(dir, '01-REVIEW-FIX.md');
+        const log = path.join(dir, 'argv.log');
+        fs.writeFileSync(reviewPath, '---\nstatus: clean\n---\n');
+        if (report !== null) fs.writeFileSync(fixPath, report);
+        const script = [
+          'set -uo pipefail',
+          'gsd_run() { { printf "%s\\n" "$@"; echo "--"; } >> "' + log + '"; }',
+          'AUTO_MODE=' + auto,
+          'COMMIT_DOCS=' + docs,
+          'PADDED_PHASE=01',
+          'REVIEW_PATH="' + reviewPath + '"',
+          'FIX_REPORT_PATH="' + fixPath + '"',
+          fence,
+        ].join('\n');
+        const res = runHook('-c', [script], { interpreter: 'bash', timeoutMs: PROBE_TIMEOUT_MS });
+        assert.strictEqual(res.exitCode, 0, 'step must not abort: ' + res.stderr);
+        const calls = (fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '').split('--\n').filter(Boolean);
+        assert.ok(calls.length <= 1, 'at most one query commit call');
+        return { argv: calls.length ? calls[0].split('\n') : null, reviewPath, fixPath };
+      } finally { cleanup(dir); }
+    };
+
+    // AC1: fix report lacks status => REVIEW.md still committed, the malformed report is not (AC3).
+    const invalid = drive({ report: '---\nfoo: bar\n---\n' });
+    assert.ok(invalid.argv, 'invalid frontmatter in --auto must still commit REVIEW.md');
+    assert.ok(invalid.argv.includes(invalid.reviewPath), 'REVIEW.md staged');
+    assert.ok(!invalid.argv.includes(invalid.fixPath), 'malformed fix report must NOT be staged');
+    assert.ok(invalid.argv.includes('docs(01): update code review report'), 'invalid: report-only message');
+
+    // AC2: fix report absent.
+    const missing = drive({ report: null });
+    assert.ok(missing.argv, 'missing fix report in --auto must still commit REVIEW.md');
+    assert.ok(missing.argv.includes(missing.reviewPath), 'REVIEW.md staged');
+    assert.ok(!missing.argv.includes(missing.fixPath), 'absent fix report must NOT be staged');
+    assert.ok(missing.argv.includes('docs(01): update code review report'), 'missing: report-only message');
+
+    // Valid path unchanged: both staged.
+    const valid = drive({ report: VALID_FIX_REPORT });
+    assert.ok(valid.argv.includes(valid.fixPath) && valid.argv.includes(valid.reviewPath), 'valid: both staged');
+    assert.ok(valid.argv.includes('docs(01): add code review fix report'), 'valid keeps its message');
+
+    // Out of scope stays out: non-auto and COMMIT_DOCS=false commit no REVIEW.md.
+    assert.ok(!drive({ report: '---\nfoo: bar\n---\n', auto: 'false' }).argv, 'non-auto invalid commits nothing');
+    assert.ok(!drive({ report: null, docs: 'false' }).argv, 'COMMIT_DOCS=false commits nothing');
   });
 });
