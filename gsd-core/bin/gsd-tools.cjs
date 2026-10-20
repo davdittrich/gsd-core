@@ -1710,7 +1710,13 @@ function dispatchOverlayCapabilityCommand({ command, args, cwd, raw, error, load
             headers: opts.body ? { 'Content-Type': 'application/json' } : undefined,
             body: opts.body,
             signal: AbortSignal.timeout(opts.timeoutMs),
+            // #5288: consent names one host (ADR-2782 D5). `follow` re-sends the body on 307/308.
+            redirect: 'manual',
           });
+          if (res.status >= 300 && res.status < 400) {
+            await res.body?.cancel().catch(() => {});
+            return { ok: false, status: res.status, body: '', error: `redirect refused (HTTP ${res.status})` };
+          }
           return { ok: res.ok, status: res.status, body: await res.text() };
         } catch (e) {
           return { ok: false, status: 0, body: '', error: e && e.message ? e.message : String(e) };

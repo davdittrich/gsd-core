@@ -54,7 +54,7 @@ export interface RunnerDeps {
    * `env` inherits unchanged, and the parent process environment is never mutated either way.
    */
   spawn: (binary: string, argv: string[], opts: { input?: string; timeoutMs: number; env?: Readonly<Record<string, string>> }) => SpawnOutcome;
-  /** Bounded HTTP POST/GET returning the RAW body — never pre-parsed, so errors stay diagnosable. */
+  /** Bounded HTTP POST/GET returning the RAW body — never pre-parsed, so errors stay diagnosable. Must refuse redirects (#5288): consent names one host. */
   httpJson: (url: string, opts: { method: 'GET' | 'POST'; body?: string; timeoutMs: number }) =>
     Promise<{ ok: boolean; status: number; body: string; error?: string }>;
   readFile: (p: string) => string;
