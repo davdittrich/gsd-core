@@ -1052,6 +1052,10 @@ function resolveGit(
       }
     }
 
+    // #5298: VCS metadata is not capability content. Left in, it would be staged, hashed and
+    // promoted — and at project scope land as an embedded repo inside the user's project.
+    fs.rmSync(path.join(cloneDir, '.git'), { recursive: true, force: true });
+
     // Read id from capability.json via the SHARED bounded reader (#1461 finding 2): a cloned repo's
     // oversized/non-regular capability.json is refused, never read unbounded.
     const manifestPath = path.join(cloneDir, 'capability.json');
