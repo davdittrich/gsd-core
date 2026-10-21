@@ -2296,7 +2296,8 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
     const warned = (session_id) => {
       const r = runHook({ ...dispatch('gsd-executor', 'opus', WORKTREE), session_id }, project);
       assert.equal(r.status, 0, r.stderr);
-      return r.stdout.includes('Agent model guard');
+      const ctx = r.stdout.trim() ? JSON.parse(r.stdout).hookSpecificOutput?.additionalContext : undefined;
+      return typeof ctx === 'string' && ctx.length > 0;
     };
     assert.equal(warned('sess-x'), false);
     assert.equal(warned('sess-y'), true);
