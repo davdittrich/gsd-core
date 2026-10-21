@@ -239,7 +239,7 @@ describe('#5354 tdd review checkpoint seal', () => {
     assert.doesNotMatch(r.payload.message, /squashed\?/);
   });
 
-  for (const [label, text] of [['plans a string', '{"plans":"x"}'], ['plans an array', '{"plans":[{"red":"a"}]}'], ['null', 'null'], ['an array', '[]'], ['a string', '"s"']]) {
+  for (const [label, text] of [['plans a string', '{"plans":"x"}'], ['plans an array', '{"plans":[{"red":"a"}]}'], ['null', 'null'], ['an array', '[]'], ['a string', '"s"'], ['no plans member', '{"foo":1}'], ['a plan entry a string', '{"plans":{"01-01":"x"}}'], ['a plan entry with a numeric red', '{"plans":{"01-01":{"red":1}}}']]) {
     test(`a wrong-shape seal (${label}) is unreadable and --record does not overwrite it`, () => {
       const { dir } = fixture(['test(01-01): red', 'feat(01-01): green']);
       w(dir, `${PHASE}/TDD-REVIEW-SEAL.json`, text);
@@ -258,6 +258,19 @@ describe('#5354 tdd review checkpoint seal', () => {
     const r = run(dir);
     assert.equal(r.payload.rows[0].status, 'NotEvaluable');
     assert.equal(r.payload.violations, 0);
+  });
+
+  test('a rebased plan whose SUMMARY hashes are unreachable but whose commits are still reachable fails, not evaluable', () => {
+    const { dir, base } = fixture(['docs(01-01): notes'], { refs: true });
+    sealGit(dir, 'checkout', '-b', 'rebased', base);
+    commit(dir, 'f0.txt', 'docs(01-01): notes');
+    w(dir, 'f0.txt', 'different content');
+    sealGit(dir, 'add', '-A'); sealGit(dir, 'commit', '--amend', '-m', 'docs(01-01): notes');
+    sealGit(dir, 'checkout', 'feature', '--', `${PHASE}/01-01-SUMMARY.md`);
+    sealGit(dir, 'commit', '-m', 'docs: summary');
+    const r = run(dir);
+    assert.equal(r.payload.rows[0].status, 'FAIL');
+    assert.equal(r.payload.violations, 1);
   });
 
   test('an un-squashed plan whose SUMMARY hashes are reachable and has no test() fails', () => {

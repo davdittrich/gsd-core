@@ -113,6 +113,11 @@ function planCommitKinds(projectDir: string, planId: string): ReadonlyMap<string
   return kinds;
 }
 
+function planCommitSubjects(projectDir: string, planId: string): ReadonlySet<string> {
+  const scope = resolveEvaluationScope(projectDir, { kind: 'plan', planId }, { pathspecs: ['.'], commitsOnly: true });
+  return new Set(scope.commits.map((commit) => commit.subject));
+}
+
 const SEAL_FILE = 'TDD-REVIEW-SEAL.json';
 type SealEntry = { red: string; green: string };
 
@@ -140,8 +145,13 @@ function parseSeal(text: string): Evidence<SealPlans> {
   try {
     const top: unknown = JSON.parse(text);
     if (!isPlainObject(top)) return evidenceUnreadable(`${SEAL_FILE} is not a JSON object`, SEAL_FILE);
-    if (top.plans === undefined) return evidenceFound({});
+    if (top.plans === undefined) return evidenceUnreadable(`${SEAL_FILE} has no "plans" object`, SEAL_FILE);
     if (!isPlainObject(top.plans)) return evidenceUnreadable(`${SEAL_FILE} "plans" is not an object`, SEAL_FILE);
+    for (const e of Object.values(top.plans)) {
+      if (!isPlainObject(e) || (e.red !== undefined && typeof e.red !== 'string') || (e.green !== undefined && typeof e.green !== 'string')) {
+        return evidenceUnreadable(`${SEAL_FILE} has a malformed plan entry`, SEAL_FILE);
+      }
+    }
     return evidenceFound(top.plans as SealPlans);
   } catch (err) {
     return evidenceFromError<SealPlans>(err, SEAL_FILE);
@@ -154,7 +164,8 @@ function readSeal(phaseDir: string): Evidence<SealPlans> {
   // lstat rejects a symlink on every OS (O_NOFOLLOW is 0 on Windows); O_NOFOLLOW + fstat on the fd is the race backstop.
   const st = sealStat(file);
   if (st.kind !== 'found') return st;
-  if (!st.value.isFile() || st.value.size > SEAL_MAX_BYTES) return evidenceUnreadable(`${SEAL_FILE} is not a regular file or exceeds ${SEAL_MAX_BYTES} bytes`, file);
+  const notRegular = (): Evidence<SealPlans> => evidenceUnreadable(`${SEAL_FILE} is not a regular file or exceeds ${SEAL_MAX_BYTES} bytes`, file);
+  if (!st.value.isFile() || st.value.size > SEAL_MAX_BYTES) return notRegular();
   let fd: number | undefined;
   let result: Evidence<SealPlans>;
   try {
@@ -162,7 +173,7 @@ function readSeal(phaseDir: string): Evidence<SealPlans> {
     fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
     const fst = fs.fstatSync(fd);
     result = !fst.isFile() || fst.size > SEAL_MAX_BYTES
-      ? evidenceUnreadable(`${SEAL_FILE} is not a regular file or exceeds ${SEAL_MAX_BYTES} bytes`, file)
+      ? notRegular()
       : parseSeal(fs.readFileSync(fd, 'utf8'));
   } catch (err) {
     result = evidenceFromError<SealPlans>(err, file);
@@ -179,10 +190,9 @@ function readSeal(phaseDir: string): Evidence<SealPlans> {
 }
 
 /** Merge `evidence` into the phase's seal via temp file + rename, refusing an existing non-regular target (a symlink would redirect the write). */
-function writeSeal(phaseDir: string, evidence: Record<string, SealEntry>): void {
+function writeSeal(phaseDir: string, evidence: Record<string, SealEntry>, prior: Evidence<SealPlans>): void {
   const file = path.join(phaseDir, SEAL_FILE);
   // Never overwrite a seal we could not read: that would silently drop earlier plans' credit.
-  const prior = readSeal(phaseDir);
   if (prior.kind === 'unreadable') throw new Error(`${SEAL_FILE} cannot be read, refusing to overwrite it: ${prior.reason}`);
   const content = `${JSON.stringify({ plans: { ...(prior.kind === 'found' ? prior.value : {}), ...evidence } }, null, 2)}\n`;
   const st = sealStat(file);
@@ -201,9 +211,15 @@ function writeSeal(phaseDir: string, evidence: Record<string, SealEntry>): void 
 /**
  * #5354: a plan was squashed away when its SUMMARY names task commits and none is reachable from
  * HEAD (a missing object counts as unreachable). No SUMMARY, no listed hash, more than
- * SUMMARY_REFS_MAX distinct hashes, or any reachable hash is an ordinary failure.
+ * SUMMARY_REFS_MAX distinct hashes, or any reachable hash is an ordinary failure. A ref whose subject
+ * still appears on a reachable plan commit was rewritten (rebase/amend), not squashed, so it does not
+ * count as unreachable.
  */
-function summaryCommitsAllUnreachable(projectDir: string, phaseDir: string, planPath: string): boolean {
+function summaryCommitsAllUnreachable(projectDir: string, phaseDir: string, planPath: string, reachableSubjects: ReadonlySet<string>): boolean {
+  const subjectOf = (id: string): string => {
+    const s = execGit(['log', '-1', '--format=%s', id], { cwd: projectDir });
+    return !s.timedOut && s.exitCode === 0 ? s.stdout.trim() : '';
+  };
   const rel = path.relative(phaseDir, planPath).split(path.sep).join('/');
   // Exit 128 means "object not found" only in a complete history: in a shallow clone or outside a repo it
   // says nothing about squashing, so it must not turn an un-squashed skipper into NotEvaluable.
@@ -219,7 +235,8 @@ function summaryCommitsAllUnreachable(projectDir: string, phaseDir: string, plan
     // More refs than the cap is an ordinary failure: SUMMARY.md is repo content and must not buy unbounded git spawns.
     return refs.length > 0 && refs.length <= SUMMARY_REFS_MAX && refs.every((id) => {
       const r = execGit(['merge-base', '--is-ancestor', id, 'HEAD'], { cwd: projectDir });
-      return !r.timedOut && (r.exitCode === 1 || (r.exitCode === 128 && historyComplete()));
+      const u = !r.timedOut && (r.exitCode === 1 || (r.exitCode === 128 && historyComplete()));
+      return u && !(r.exitCode === 1 && reachableSubjects.has(subjectOf(id)));
     });
   }
   return false;
@@ -349,7 +366,7 @@ export function evaluateTddReviewCheckpoint(input: { projectDir: string; args: r
     if (!red) missing.push('RED');
     if (!green) missing.push('GREEN');
     // #5354: credit incomplete, nothing sealed, and the SUMMARY's task commits are all gone = squashed away.
-    const notEvaluable = missing.length > 0 && !(isSha(sealed.red) || isSha(sealed.green)) && summaryCommitsAllUnreachable(projectDir, phaseDir, planPath);
+    const notEvaluable = missing.length > 0 && !(isSha(sealed.red) || isSha(sealed.green)) && summaryCommitsAllUnreachable(projectDir, phaseDir, planPath, planCommitSubjects(projectDir, planId));
     const status: TddPlanRow['status'] = notEvaluable ? 'NotEvaluable' : missing.length === 0 ? 'Pass' : 'FAIL';
     if (redSha !== undefined && greenSha !== undefined) evidence[planId] = { red: redSha, green: greenSha };
 
@@ -384,7 +401,7 @@ export function evaluateTddReviewCheckpoint(input: { projectDir: string; args: r
 
   const notEvaluableRows = rows.filter(r => r.status === 'NotEvaluable');
   for (const r of notEvaluableRows) {
-    table += `\n\nPlan ${r.planId} not evaluable: no reachable gate commits and no ${SEAL_FILE} entry (squashed?); not counted as a violation.`;
+    table += `\n\nPlan ${r.planId} not evaluable: its SUMMARY task commits are unreachable and no ${SEAL_FILE} entry exists (squashed?); not counted as a violation.`;
   }
 
   if (violations > 0) {
@@ -398,7 +415,7 @@ export function evaluateTddReviewCheckpoint(input: { projectDir: string; args: r
   // #5354: --record seals every passing plan's evidence so it survives a squash merge.
   if (phaseDir && Object.keys(evidence).length > 0 && input.args.includes('--record')) {
     try {
-      writeSeal(phaseDir, evidence);
+      writeSeal(phaseDir, evidence, sealRead);
     } catch (err) {
       const e = evidenceFromError(err, SEAL_FILE);
       return unreadableReview(phase, tddPlanFiles.length, [{ source: SEAL_FILE, reason: e.kind === 'unreadable' ? e.reason : String(err) }]);
