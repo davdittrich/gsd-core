@@ -661,8 +661,12 @@ export function execGit(args: string[], opts: { cwd?: string; env?: Record<strin
   // Non-interactive defaults: a hung credential prompt or terminal-input
   // probe must surface as a timeout, not block the tool forever. Callers
   // can override via opts.env.
+  // #5548: cwd must select the repository, so repo-location vars inherited
+  // from the parent (git sets them in hooks) are dropped; a caller that needs
+  // one passes it explicitly in opts.env.
+  const { GIT_DIR: _d, GIT_WORK_TREE: _w, GIT_INDEX_FILE: _i, ...inherited } = process.env;
   const env = {
-    ...process.env,
+    ...inherited,
     GIT_TERMINAL_PROMPT: '0',
     GCM_INTERACTIVE: 'never',
     ...(opts.env || {}),
