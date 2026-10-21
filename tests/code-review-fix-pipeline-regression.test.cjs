@@ -362,10 +362,11 @@ describe('#5019 — --auto re-review keeps the external reviewer lane evidence',
     };
     sandbox(t, (sb) => {
       fs.mkdirSync(path.join(sb.tmp, 'gsd-review-lanes-abc123'));
-      assert.match(drive(sb, 'abc123'), /<external_reviewer_evidence>X<\/external_reviewer_evidence>/);
+      assert.strictEqual(drive(sb, 'abc123'), `${BLOCK}\n\n`);
       // find -mmin -360 rounds differently on GNU and BSD (macOS keeps a file aged exactly 360 min),
       // so the 360 boundary itself is implementation-defined and deliberately not asserted.
-      for (const [min, fresh] of [[359, true], [361, false], [420, false]]) {
+      // BSD find rounds ages up to the next full minute, so the fresh sample must sit at least a minute under the 360-minute cap.
+      for (const [min, fresh] of [[350, true], [361, false], [420, false]]) {
         assert.strictEqual(drive(sb, 'abc123', min * 60000).includes('X'), fresh, `${min} min old`);
       }
       assert.strictEqual(drive(sb, 'zzz999'), '', 'suffix without a lane dir');
@@ -406,7 +407,8 @@ describe('#5019 — --auto re-review keeps the external reviewer lane evidence',
       `REVIEW_DEPTH=standard PHASE_DIR="${dir}"; PROMPT="${tpl}"; printf '%s' "$PROMPT"`].join('\n'));
     const [blockOut, prompt] = out.stdout.split('\0');
     assert.ok(blockOut.endsWith(`${block}\n\n`), 'the re-review reads back the exact block');
-    assert.ok(prompt.startsWith(`\n${block}\n\n<config>\ndepth: standard\n`), 'the re-review prompt is assembled with the block ahead of <config>');
+    const promptHead = `\n${block}\n\n<config>\ndepth: standard\n`;
+    assert.strictEqual(prompt.slice(0, promptHead.length), promptHead, 'the re-review prompt is assembled with the block ahead of <config>');
     assert.strictEqual(fs.readFileSync(cited, 'utf8'), 'lane-only finding', 'the reviewer can still re-read the cited path');
   });
 
@@ -415,15 +417,17 @@ describe('#5019 — --auto re-review keeps the external reviewer lane evidence',
     const warns = (sb, line1, ageMs) => {
       fs.writeFileSync(sb.file, `${line1}\nblock\n`);
       if (ageMs) { const d = new Date(Date.now() - ageMs); fs.utimesSync(sb.file, d, d); }
-      return bash(`export TMPDIR="${sb.tmp}"; REVIEW_PATH="${sb.review}"\n${read}`).stderr;
+      const out = bash(`export TMPDIR="${sb.tmp}"; REVIEW_PATH="${sb.review}"\n${read}\nprintf '%s' "$EXTERNAL_EVIDENCE_BLOCK"`);
+      return { block: out.stdout, warned: out.stderr !== '' };
     };
     sandbox(t, (sb) => {
       const d = path.join(sb.tmp, 'gsd-review-lanes-abc123'); fs.mkdirSync(d);
-      assert.match(warns(sb, 'abc123', 7 * 3600 * 1000), /^Warning: lane evidence .* rejected/, 'stale');
-      assert.match(warns(sb, 'zzz999'), /^Warning: lane evidence .* rejected/, 'lane dir missing');
+      const degraded = { block: '', warned: true };
+      assert.deepStrictEqual(warns(sb, 'abc123', 7 * 3600 * 1000), degraded, 'stale');
+      assert.deepStrictEqual(warns(sb, 'zzz999'), degraded, 'lane dir missing');
       fs.symlinkSync(sb.victim, path.join(sb.tmp, 'gsd-review-lanes-sym123'));
-      assert.match(warns(sb, 'sym123'), /^Warning: lane evidence .* rejected/, 'lane dir is a symlink');
-      assert.strictEqual(warns(sb, 'abc123'), '', 'fresh valid evidence: no warning');
+      assert.deepStrictEqual(warns(sb, 'sym123'), degraded, 'lane dir is a symlink');
+      assert.strictEqual(warns(sb, 'abc123').warned, false, 'fresh valid evidence: no warning');
       fs.renameSync(sb.file, path.join(sb.dir, 'moved'));
       assert.strictEqual(bash(`export TMPDIR="${sb.tmp}"; REVIEW_PATH="${sb.review}"\n${read}`).stderr, '', 'no file: no warning');
     });
@@ -508,7 +512,7 @@ describe('#5019 — --auto re-review keeps the external reviewer lane evidence',
     });
   });
 
-  test('the removal fence is byte-identical at all three sites; the loop read shares its suffix guard', () => {
+  test('the removal fence is byte-identical at every exit site; the loop read shares its suffix guard', () => {
     // Normalised: trimmed, comments dropped, so only the indent and the #5019 comments may differ.
     const fence = (src) => splitLines(src).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
     const at = (src, step) => { const l = fence(stepRegion(src, step)); const a = l.indexOf('LE="${REVIEW_PATH%.md}-lane-evidence.md"'); return l.slice(a, a + 6); };

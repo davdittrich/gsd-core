@@ -350,7 +350,7 @@ if [ "$AUTO_MODE" = "true" ]; then
       fi;;
     esac
     if [ -f "$LANE_EVIDENCE" ] && [ -z "$EXTERNAL_EVIDENCE_BLOCK" ]; then
-      echo "Warning: lane evidence $LANE_EVIDENCE rejected (older than 6h, lane dir missing or a symlink); re-reviewing without it." >&2
+      echo "Warning: lane evidence $LANE_EVIDENCE rejected (older than 6h, line 1 not a 6-char alphanumeric suffix, lane dir missing or a symlink); re-reviewing without it." >&2
     fi
     Agent(subagent_type="gsd-code-reviewer", model="{REVIEWER_MODEL}", prompt="
 ${EXTERNAL_EVIDENCE_BLOCK}<config>
