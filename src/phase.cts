@@ -1296,7 +1296,8 @@ function comparePhaseIds(a: string, b: string): number {
   const y = b.split('.').map(Number);
   for (let n = 0; n < Math.max(x.length, y.length); n++) {
     const d = (x[n] ?? -1) - (y[n] ?? -1);
-    if (d) return Number.isNaN(d) ? -1 : d;
+    if (Number.isNaN(d)) return -1;
+    if (d) return d;
   }
   return 0;
 }
@@ -1316,12 +1317,13 @@ function recordNewPhase(raw: string, cwd: string, id: string | number, descripti
   const scope = raw.slice(start, end !== undefined && end > start ? end : undefined);
   let custom = false;
   try { custom = loadConfig(cwd).phase_naming === 'custom'; } catch { /* unreadable config: numeric ids only */ }
-  const entryRe = new RegExp(`^[ \\t]*${checklistEntrySrc(resolvePhaseIdConvention(cwd), false, custom)}[^\\r\\n]*`, 'gim');
+  const entrySrc = checklistEntrySrc(resolvePhaseIdConvention(cwd), false, custom);
+  const entryRe = new RegExp(`^[ \\t]*${entrySrc}[^\\r\\n]*`, 'gim');
   const bullets = [...scope.matchAll(entryRe)].filter((m) => !insideOpenDetails(scope, m.index));
   const eol = raw.includes('\r\n') ? '\r\n' : '\n';
   const entry = `- [ ] **Phase ${id}: ${description}**`;
   // An id past CUSTOM_PHASE_ID_SRC's cap is written but not readable by analyze: report that, not 'checklist'.
-  const kind = new RegExp(`^${checklistEntrySrc(resolvePhaseIdConvention(cwd), false, custom)}`).test(entry) ? 'checklist' : 'none';
+  const kind = new RegExp(`^${entrySrc}`).test(entry) ? 'checklist' : 'none';
   if (after !== undefined) {
     const anchor = foldPhaseId(after);
     const own = bullets.filter((m) => foldPhaseId(m[1]) === anchor || foldPhaseId(m[1]).startsWith(`${anchor}.`)).at(-1);
@@ -1925,7 +1927,7 @@ function cmdPhaseInsert(
     platformWriteSync(path.join(dirPath, '.gitkeep'), '');
 
     let updatedContent: string;
-    let roadmapEntry: 'checklist' | 'progress_table' | 'none' = 'checklist';
+    let roadmapEntry: 'checklist' | 'progress_table' | 'none';
 
     if (isBulletStyle) {
       const boldBulletPattern = new RegExp(

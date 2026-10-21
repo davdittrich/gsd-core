@@ -192,55 +192,52 @@ describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, ()
       shipped(l);
     });
 
-    test('phase add writes the checklist entry in the active milestone, never under a later planned one', () => {
+    test('phase add writes the checklist entry in the active milestone, never under a later planned one', (t) => {
       const tmp = createTempProject();
-      try {
-        fs.writeFileSync(path.join(tmp, '.planning', 'STATE.md'), '---\nmilestone: v1.0\n---\n# State\n');
-        fs.writeFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), '# Roadmap\n\n## Milestones\n\n### 🚧 v1.0 Active (In Progress)\n\n'
-          + '- [x] **Phase 1: A**\n\n#### Phase 1: A\n**Goal**: g\n\n### 📋 v2.0 Planned\n\n- [ ] **Phase 3: C**\n\n#### Phase 3: C\n**Goal**: g\n');
-        const c = runGsdTools(['phase', 'add', 'New'], tmp);
-        assert.ok(c.success, c.error);
-        const n = String(JSON.parse(c.output).phase_number);
-        const roadmap = fs.readFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), 'utf8');
-        const planned = roadmap.indexOf('### 📋 v2.0');
-        const entry = roadmap.indexOf(`**Phase ${n}: New**`);
-        assert.ok(entry !== -1 && entry < planned, roadmap);
-        assert.equal(JSON.parse(runGsdTools('roadmap analyze', tmp).output).roadmap_record[n], false);
-      } finally { cleanup(tmp); }
+      t.after(() => cleanup(tmp));
+      fs.writeFileSync(path.join(tmp, '.planning', 'STATE.md'), '---\nmilestone: v1.0\n---\n# State\n');
+      fs.writeFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), '# Roadmap\n\n## Milestones\n\n### 🚧 v1.0 Active (In Progress)\n\n'
+        + '- [x] **Phase 1: A**\n\n#### Phase 1: A\n**Goal**: g\n\n### 📋 v2.0 Planned\n\n- [ ] **Phase 3: C**\n\n#### Phase 3: C\n**Goal**: g\n');
+      const c = runGsdTools(['phase', 'add', 'New'], tmp);
+      assert.ok(c.success, c.error);
+      const n = String(JSON.parse(c.output).phase_number);
+      const roadmap = fs.readFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), 'utf8');
+      const planned = roadmap.indexOf('### 📋 v2.0');
+      const entry = roadmap.indexOf(`**Phase ${n}: New**`);
+      assert.ok(entry !== -1 && entry < planned, roadmap);
+      assert.equal(JSON.parse(runGsdTools('roadmap analyze', tmp).output).roadmap_record[n], false);
     });
 
-    test('custom-id phase (phase_naming: custom): its checklist entry and table row are the record; ticked ships, unticked blocks', () => {
+    test('custom-id phase (phase_naming: custom): its checklist entry and table row are the record; ticked ships, unticked blocks', (t) => {
       const tmp = createTempProject();
-      try {
-        fs.writeFileSync(path.join(tmp, '.planning', 'config.json'), JSON.stringify({ phase_naming: 'custom' }));
-        fs.writeFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), CHECKLIST);
-        const c = runGsdTools(['phase', 'add', 'Auth', '--id', 'AUTH'], tmp);
-        assert.ok(c.success, c.error);
-        const roadmapPath = path.join(tmp, '.planning', 'ROADMAP.md');
-        const analyze = () => runGsdTools('roadmap analyze', tmp).output;
-        assert.equal(JSON.parse(analyze()).roadmap_record.AUTH, false);
-        const unticked = run(analyze(), 0, 'AUTH');
-        blocked(unticked, 'PHASE_NOT_COMPLETE');
-        assert.match(unticked.stderr, /tick its ROADMAP\.md checklist entry by hand/, 'custom-id dead end is explained');
-        fs.writeFileSync(roadmapPath, fs.readFileSync(roadmapPath, 'utf8').replace('- [ ] **Phase AUTH:', '- [x] **Phase AUTH:'));
-        assert.equal(JSON.parse(analyze()).roadmap_record.AUTH, true);
-        assert.match(run(analyze(), 0, 'AUTH').stdout, /CONTINUED/);
-        fs.writeFileSync(roadmapPath, `${CHECKLIST.replace('- [x] **Phase 1: A** - first\n', '')}\n${TABLE}| AUTH. Auth | 1/1 | In Progress | - |\n`);
-        assert.equal(JSON.parse(analyze()).roadmap_record.AUTH, false, 'custom-id table row is read');
-      } finally { cleanup(tmp); }
+      t.after(() => cleanup(tmp));
+      fs.writeFileSync(path.join(tmp, '.planning', 'config.json'), JSON.stringify({ phase_naming: 'custom' }));
+      fs.writeFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), CHECKLIST);
+      const c = runGsdTools(['phase', 'add', 'Auth', '--id', 'AUTH'], tmp);
+      assert.ok(c.success, c.error);
+      const roadmapPath = path.join(tmp, '.planning', 'ROADMAP.md');
+      const analyze = () => runGsdTools('roadmap analyze', tmp).output;
+      assert.equal(JSON.parse(analyze()).roadmap_record.AUTH, false);
+      const unticked = run(analyze(), 0, 'AUTH');
+      blocked(unticked, 'PHASE_NOT_COMPLETE');
+      assert.match(unticked.stderr, /tick its ROADMAP\.md checklist entry by hand/, 'custom-id dead end is explained');
+      fs.writeFileSync(roadmapPath, fs.readFileSync(roadmapPath, 'utf8').replace('- [ ] **Phase AUTH:', '- [x] **Phase AUTH:'));
+      assert.equal(JSON.parse(analyze()).roadmap_record.AUTH, true);
+      assert.match(run(analyze(), 0, 'AUTH').stdout, /CONTINUED/);
+      fs.writeFileSync(roadmapPath, `${CHECKLIST.replace('- [x] **Phase 1: A** - first\n', '')}\n${TABLE}| AUTH. Auth | 1/1 | In Progress | - |\n`);
+      assert.equal(JSON.parse(analyze()).roadmap_record.AUTH, false, 'custom-id table row is read');
     });
 
-    test('phase complete on a CRLF roadmap ticks the checklist line without a stray CR before "(completed"', () => {
+    test('phase complete on a CRLF roadmap ticks the checklist line without a stray CR before "(completed"', (t) => {
       const tmp = createTempProject();
-      try {
-        fs.writeFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), `${HEAD}- [ ] **Phase 1: A**\n\n### Phase 1: A\n\n**Goal**: g\n`.replace(/\n/g, '\r\n'));
-        verifiedPhase1(tmp);
-        const c = runGsdTools('phase complete 1', tmp);
-        assert.ok(c.success, c.error);
-        const out = fs.readFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), 'utf8');
-        assert.ok(out.includes('- [x] **Phase 1: A** (completed '), out);
-        assert.ok(!out.includes('\r ('), 'no stray CR before "(completed"');
-      } finally { cleanup(tmp); }
+      t.after(() => cleanup(tmp));
+      fs.writeFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), `${HEAD}- [ ] **Phase 1: A**\n\n### Phase 1: A\n\n**Goal**: g\n`.replace(/\n/g, '\r\n'));
+      verifiedPhase1(tmp);
+      const c = runGsdTools('phase complete 1', tmp);
+      assert.ok(c.success, c.error);
+      const out = fs.readFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), 'utf8');
+      assert.ok(out.includes('- [x] **Phase 1: A** (completed '), out);
+      assert.ok(!out.includes('\r ('), 'no stray CR before "(completed"');
     });
 
     const addTo = (roadmap, config, args) => {
@@ -303,18 +300,17 @@ describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, ()
       });
     }
 
-    test('CRLF roadmap: update-plan-progress then phase complete leave no stray CR before "(completed"', () => {
+    test('CRLF roadmap: update-plan-progress then phase complete leave no stray CR before "(completed"', (t) => {
       const tmp = createTempProject();
-      try {
-        fs.writeFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), `${HEAD}- [ ] **Phase 1: A**\n\n### Phase 1: A\n\n**Goal**: g\n`.replace(/\n/g, '\r\n'));
-        verifiedPhase1(tmp);
-        for (const cmd of ['roadmap update-plan-progress 1', 'phase complete 1']) {
-          const r = runGsdTools(cmd, tmp);
-          assert.ok(r.success, `${cmd}: ${r.error}`);
-          const out = fs.readFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), 'utf8');
-          assert.ok(!out.includes('\r ('), `${cmd}: stray CR before "(completed"`);
-        }
-      } finally { cleanup(tmp); }
+      t.after(() => cleanup(tmp));
+      fs.writeFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), `${HEAD}- [ ] **Phase 1: A**\n\n### Phase 1: A\n\n**Goal**: g\n`.replace(/\n/g, '\r\n'));
+      verifiedPhase1(tmp);
+      for (const cmd of ['roadmap update-plan-progress 1', 'phase complete 1']) {
+        const r = runGsdTools(cmd, tmp);
+        assert.ok(r.success, `${cmd}: ${r.error}`);
+        const out = fs.readFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), 'utf8');
+        assert.ok(!out.includes('\r ('), `${cmd}: stray CR before "(completed"`);
+      }
     });
 
     // roadmap_record keys are foldPhaseId(token); ship.md's jq `def n` must fold PHASE_NUMBER the same way.
@@ -334,16 +330,15 @@ describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, ()
       shipped(l);
     });
 
-    test('phase add-batch records every new phase', () => {
+    test('phase add-batch records every new phase', (t) => {
       const tmp = createTempProject();
-      try {
-        fs.writeFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), CHECKLIST);
-        const c = runGsdTools(['phase', 'add-batch', '--descriptions', JSON.stringify(['Two', 'Three'])], tmp);
-        assert.ok(c.success, c.error);
-        assert.deepEqual(JSON.parse(c.output).phases.map((p) => p.roadmap_entry), ['checklist', 'checklist']);
-        const a = JSON.parse(runGsdTools('roadmap analyze', tmp).output);
-        assert.deepEqual(a.roadmap_record, { 1: true, 2: false, 3: false });
-      } finally { cleanup(tmp); }
+      t.after(() => cleanup(tmp));
+      fs.writeFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), CHECKLIST);
+      const c = runGsdTools(['phase', 'add-batch', '--descriptions', JSON.stringify(['Two', 'Three'])], tmp);
+      assert.ok(c.success, c.error);
+      assert.deepEqual(JSON.parse(c.output).phases.map((p) => p.roadmap_entry), ['checklist', 'checklist']);
+      const a = JSON.parse(runGsdTools('roadmap analyze', tmp).output);
+      assert.deepEqual(a.roadmap_record, { 1: true, 2: false, 3: false });
     });
 
     test('phase insert (decimal) writes its checklist entry after the anchor phase and ships', () => {

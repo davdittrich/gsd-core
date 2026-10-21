@@ -6573,7 +6573,49 @@ describe('#5221: roadmap update-plan-progress — active milestone scope and pha
       const scope = content.slice(at);
       assert.ok(scope.trimStart().startsWith('## v2.0 Active'), `scope starts at the active milestone (k=${k})`);
       assert.ok(!scope.includes('Old Scheduler'), 'no shipped block is in scope');
-    }), { numRuns: 16 });
+    }), { numRuns: 16, seed: 5221 });
+  });
+
+  test('a Plans-headed Progress table directly above a shipped <details> does not leak into the shipped table', () => {
+    const active = ACTIVE.map((l) => l.replace('| Phase | Plans Complete |', '| Phase | Plans |'));
+    seed([...active, ...SHIPPED], { complete: true });
+    assert.strictEqual(run().updated, true);
+    assertShippedUntouched(fs.readFileSync(roadmapPath, 'utf-8'));
+  });
+
+  test('an active milestone wrapped in <details open> is found', () => {
+    seed(['<details open>', '<summary>v2.0 Active</summary>', '', ...ACTIVE, '</details>', ''], { complete: true });
+    const output = run();
+    assert.notStrictEqual(output.reason, 'missing_phase_details', JSON.stringify(output));
+    const a = runGsdTools('roadmap analyze', tmpDir);
+    assert.ok(a.success, a.error);
+    assert.notStrictEqual(JSON.parse(a.output).roadmap_record['68'], undefined);
+  });
+
+  test('milestone-grouped progress table: the record follows the STATE.md milestone', () => {
+    fs.writeFileSync(roadmapPath, [
+      '# Roadmap', '', '## v2.0 Active', '', '### Phase 1: Foo', '**Goal**: foo', '',
+      '## Progress', '',
+      '| Phase | Milestone | Plans Complete | Status | Completed |',
+      '|-------|-----------|----------------|--------|-----------|',
+      '| 1 | v1.0 | 1/1 | Complete | 2026-01-01 |',
+      '| 1 | v2.0 | 0/1 | Not started | - |',
+      '',
+    ].join('\n'));
+    const record = (milestone) => {
+      fs.writeFileSync(path.join(tmpDir, '.planning', 'STATE.md'), `---\nmilestone: ${milestone}\n---\n`);
+      const a = runGsdTools('roadmap analyze', tmpDir);
+      assert.ok(a.success, a.error);
+      return JSON.parse(a.output).roadmap_record['1'];
+    };
+    assert.strictEqual(record('v2.0'), false);
+    assert.strictEqual(record('v1.0'), true);
+  });
+
+  test('no resolvable milestone and a backlog <details> below the active phases: still updates', () => {
+    seed([...ACTIVE, ...BACKLOG], { state: false, complete: true });
+    const output = run();
+    assert.strictEqual(output.updated, true, JSON.stringify(output));
   });
 
   test('checklist-only active milestone (no Progress table) above a shipped <details>: shipped row untouched, record complete', () => {

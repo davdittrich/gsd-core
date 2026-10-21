@@ -29,7 +29,7 @@ import roadmapParserModule = require('./roadmap-parser.cjs');
 const { stripShippedMilestones, extractCurrentMilestone, extractCurrentMilestoneScoped, replaceInCurrentMilestone, activeScopeStart, listMilestoneHeadings, scanMilestonePhaseIds, collectTablePhaseRows, hasPhaseListingTableHeader } = roadmapParserModule;
 import { tokenizeHeadings } from './markdown-sectionizer.cjs';
 import { escapeCell, findTableWithColumns, parseMarkdownTable, updateTableCell } from './markdown-table.cjs';
-import { clampPercent } from './phase-lifecycle.cjs';
+import { clampPercent, normalizeMilestoneToken } from './phase-lifecycle.cjs';
 import { platformWriteSync } from './shell-command-projection.cjs';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import planningWorkspace = require('./planning-workspace.cjs');
@@ -1003,7 +1003,11 @@ function cmdRoadmapAnalyze(cwd: string, raw: boolean): void {
     if (header === -1) { tableUnreadable = /^[ \t]*(?=\|.*\|[ \t]*Plans Complete[ \t]*\|)\|[ \t]*phase[ \t]*\|/im.test(scoped); return scoped; }
     const table = parseMarkdownTable(scoped.slice(header));
     if (!table.ok) { tableUnreadable = true; return scoped; }
+    const wantMilestone = table.value.columns.includes('Milestone')
+      ? normalizeMilestoneToken(roadmapParserModule.getMilestoneInfo(cwd).value?.version)
+      : null;
     for (const r of table.value.rows) {
+      if (wantMilestone !== null && (wantMilestone === '' || normalizeMilestoneToken(r['Milestone']) !== wantMilestone)) continue;
       const cell = (r['Phase'] ?? '').trim();
       const token = cell.match(/^[A-Za-z]?\d\S*?(?=\.?(?:\s|$))/)?.[0] ?? cell.match(new RegExp(`^${CUSTOM_PHASE_ID_SRC}?(?=\\.?(?:\\s|$))`))?.[0];
       if (token && (/^[A-Za-z]?\d/.test(token) ? !isSentinelPhase(token) : isCustomId(token))) fold(token, parseRoadmapStatusCell(r['Status']) === WIRE_STATUS.COMPLETE);
@@ -1120,32 +1124,15 @@ function cmdRoadmapMilestoneScope(cwd: string, raw: boolean): void {
 
 // ─── cmdRoadmapUpdatePlanProgress ─────────────────────────────────────────────
 
-/**
- * Scope a ROADMAP.md content string down to its "Progress table" writable
- * slice, run `edit` against just that slice, then splice the result back into
- * the original content (ADR-2143 §7). Layered scoping:
- *   1. Milestone scope — `activeScopeStart` (shared with
- *      `replaceInCurrentMilestone`): past the last `</details>` before the active
- *      milestone heading, to EOF, so a same-numbered phase row in an archived
- *      milestone is never touched.
- *   2. Heading scope — within that milestone slice, the `## Progress` heading
- *      section (up to the next `#`/`##` heading) when present, else the whole
- *      milestone slice (mirrors phase-lifecycle.cjs's `deriveProgressFromRoadmap`
- *      read-side scoping, #2012 decoy avoidance — a differently-headed table
- *      sharing the same column names must not be picked up instead).
- * `edit` always returns a string and never fails — a no-op edit (table/row not
- * found within the scoped slice) simply returns its input unchanged, mirroring
- * the prior regex `.replace()`'s no-match-is-a-no-op semantics.
- */
 /** #5221: phase-id fold (leading zeros stripped per segment) keying roadmap_record; ship.md's jq `def n` folds identically (pinned by a test). */
 function foldPhaseId(token: string): string {
   return token.split('.').map((s) => s.replace(/^0+(?=\d)/, '')).join('.');
 }
 
-/** #5221: whether offset `idx` of `text` sits inside a `<details>` block that has not closed (a shipped block). */
+/** #5221: whether offset `idx` of `text` sits inside a bare <details> block (an open-attribute wrapper is the active milestone, not shipped) that has not closed. */
 function insideOpenDetails(text: string, idx: number): boolean {
   const prior = text.slice(0, idx);
-  return prior.lastIndexOf('<details') > prior.lastIndexOf('</details>');
+  return prior.lastIndexOf('<details>') > prior.lastIndexOf('</details>');
 }
 
 /** #5221: a `phase_naming: custom` id (`Phase AUTH:`). */
@@ -1170,6 +1157,26 @@ function editFromPhaseTable(scoped: string, edit: (scoped: string) => string): s
   return scoped.slice(0, at) + edit(scoped.slice(at));
 }
 
+/**
+ * Scope a ROADMAP.md content string down to its "Progress table" writable
+ * slice, run `edit` against just that slice, then splice the result back into
+ * the original content (ADR-2143 §7). Layered scoping:
+ *   1. Milestone scope — `activeScopeStart` (shared with
+ *      `replaceInCurrentMilestone`): past the last `</details>` before the active
+ *      milestone heading, to EOF, so a same-numbered phase row in an archived
+ *      milestone is never touched.
+ *   2. Heading scope — within that milestone slice, the `## Progress` heading
+ *      section (up to the next `#`/`##` heading or the first bare `<details>`
+ *      block) when present; with no Progress heading, the scope ends at the
+ *      first bare `<details>` block (a shipped block below the active
+ *      milestone), else at the end of the milestone slice (mirrors
+ *      phase-lifecycle.cjs's `deriveProgressFromRoadmap` read-side scoping,
+ *      #2012 decoy avoidance — a differently-headed table sharing the same
+ *      column names must not be picked up instead).
+ * `edit` always returns a string and never fails — a no-op edit (table/row not
+ * found within the scoped slice) simply returns its input unchanged, mirroring
+ * the prior regex `.replace()`'s no-match-is-a-no-op semantics.
+ */
 function editProgressTableSlice(content: string, edit: (scoped: string) => string, cwd?: string): string {
   const milestoneOffset = activeScopeStart(content, cwd);
   const before = content.slice(0, milestoneOffset);
@@ -1179,7 +1186,7 @@ function editProgressTableSlice(content: string, edit: (scoped: string) => strin
   const progressMatch = [...milestoneSlice.matchAll(/^##[ \t]+Progress\b/gim)].find((m) => !insideOpenDetails(milestoneSlice, m.index));
   if (!progressMatch || progressMatch.index === undefined) {
     // #5221: no Progress heading — stop at the next <details> so a shipped block below the active milestone is never the target.
-    const details = milestoneSlice.search(/^[ \t]*<details\b/m);
+    const details = milestoneSlice.search(/^[ \t]*<details>/m);
     const end = details === -1 ? milestoneSlice.length : details;
     return before + editFromPhaseTable(milestoneSlice.slice(0, end), edit) + milestoneSlice.slice(end);
   }
@@ -1187,7 +1194,7 @@ function editProgressTableSlice(content: string, edit: (scoped: string) => strin
   const headingOffset = progressMatch.index;
   const beforeHeading = milestoneSlice.slice(0, headingOffset);
   const fromHeading = milestoneSlice.slice(headingOffset);
-  const nextHeading = fromHeading.search(/\n#{1,2}[ \t]/);
+  const nextHeading = fromHeading.search(/\n(?:#{1,2}[ \t]|[ \t]*<details>)/);
   const scoped = nextHeading >= 0 ? fromHeading.slice(0, nextHeading) : fromHeading;
   const after = nextHeading >= 0 ? fromHeading.slice(nextHeading) : '';
 
