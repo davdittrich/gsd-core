@@ -414,7 +414,7 @@ Create PR from completed phase work with auto-generated body.
 
 | Condition | Message (stderr) | Fix |
 |-----------|------------------|-----|
-| Record reads incomplete | `PHASE_NOT_COMPLETE: Run /gsd:verify-work {n} (completes the phase), then re-run /gsd:ship` | Run `/gsd-verify-work {n}`. For a custom-id phase, also tick its checklist entry by hand (a second line says so). |
+| Record reads incomplete | `PHASE_NOT_COMPLETE: Run /gsd-verify-work {n} (completes the phase), then re-run /gsd-ship` | Run `/gsd-verify-work {n}`. For a custom-id phase, also tick its checklist entry by hand (a second line says so). |
 | Phase has no checklist entry and no progress-table row | `PHASE_NOT_RECORDED: ROADMAP.md has no checklist entry or progress-table row for phase {n}; ...` | Add an entry or row, run `/gsd-verify-work {n}`, re-run. |
 | Progress table does not parse (e.g. a row with the wrong cell count) | `ROADMAP_TABLE_UNREADABLE: the ROADMAP.md progress table does not parse ...` | Fix the table, re-run. |
 | `roadmap analyze` exits non-zero | `roadmap.analyze failed — see the error above` | Fix the reported error. |
