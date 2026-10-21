@@ -2,10 +2,11 @@
  * Model escalation record (#5328) — the one owner of the file
  * `resolve-execution --attempt N` writes and hooks/lib/agent-model-check.js reads.
  *
- * Single slot per agent type: `.gsd/model-escalation-<agent>.json` holds the model
- * an escalation resolved, when, and (when known) the session that asked for it.
- * The guard honours it for ESCALATION_WINDOW_MS, only for that model and, when both
- * sides know a session id, only in that session. Unauthenticated by design: a
+ * One slot per agent type and model family: `.gsd/model-escalation-<agent>.<family>.json`
+ * holds the model an escalation resolved, when, and (when known) the session that asked
+ * for it. Sibling escalations of one agent to different models therefore keep their own
+ * records. The guard honours the passed model's record for ESCALATION_WINDOW_MS and, when
+ * both sides know a session id, only in that session. Unauthenticated by design: a
  * guard against drift, not a security boundary.
  */
 
@@ -33,14 +34,15 @@ export interface EscalationRecord {
   session?: string;
 }
 
-export const escalationFile = (root: string, agentType: string): string =>
-  path.join(root, '.gsd', `model-escalation-${agentType}.json`);
-
 /** Compare at tier-alias level: `claude-sonnet-4-6` and `sonnet` are the same. */
 export function modelFamily(model: unknown): string {
   const s = String(model).toLowerCase();
   return /(?:^|[^a-z0-9])(opus|sonnet|haiku|fable)(?:$|[^a-z])/.exec(s)?.[1] ?? s;
 }
+
+// The family is model-authored, so it is reduced to file-name-safe characters and capped.
+export const escalationFile = (root: string, agentType: string, model: string): string =>
+  path.join(root, '.gsd', `model-escalation-${agentType}.${modelFamily(model).replace(/[^a-z0-9._-]/g, '_').slice(0, 64)}.json`);
 
 /** Best-effort: a write failure only costs a guard warning. */
 export function writeEscalation(
@@ -49,7 +51,7 @@ export function writeEscalation(
   if (!GUARDED_AGENT_TYPES.has(agentType)) return; // also keeps agentType, a file name, from traversing
   try {
     const dir = path.join(root, '.gsd');
-    const file = escalationFile(root, agentType);
+    const file = escalationFile(root, agentType, model);
     fs.mkdirSync(dir, { recursive: true });
     // Catches a planted .gsd symlink; racing a swap after this needs repo write access already.
     if (fs.lstatSync(dir).isSymbolicLink()) return;
@@ -87,15 +89,15 @@ export function writeEscalation(
   } catch { /* best-effort */ }
 }
 
-/** Parsed record, or null when absent, a symlink, non-regular, oversized or unparseable. */
-export function readEscalation(root: string, agentType: string): EscalationRecord | null {
+/** Parsed record for `passedModel`'s family, or null when absent, a symlink, non-regular, oversized or unparseable. */
+export function readEscalation(root: string, agentType: string, passedModel: string): EscalationRecord | null {
   // Own no-follow open, not the shared reader (it follows links; SKILL.md and others rely on that).
   // O_NOFOLLOW closes the lstat-then-open race; win32 lacks it (and O_NONBLOCK), so there the lstat
   // alone refuses a link, and a swap after it needs repo write access, which forges a record anyway.
   const { O_RDONLY, O_NONBLOCK, O_NOFOLLOW } = fs.constants;
   let fd: number | undefined;
   try {
-    const file = escalationFile(root, agentType);
+    const file = escalationFile(root, agentType, passedModel);
     if (fs.lstatSync(file).isSymbolicLink()) return null;
     fd = fs.openSync(file, O_RDONLY | (O_NONBLOCK || 0) | (O_NOFOLLOW || 0));
     if (!fs.fstatSync(fd).isFile()) return null; // FIFO, device

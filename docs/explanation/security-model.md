@@ -314,9 +314,9 @@ one hard block this hook owns.
 **Runtime hook: `gsd-agent-isolation-guard.js` — model check.** The
 `hooks.agent_model_guard` check (Claude Code only) is advisory,
 defence-in-depth: it warns by default and denies only when set to `"deny"`.
-The legitimate-escalation record `.gsd/model-escalation-<agent>.json`
+The legitimate-escalation record `.gsd/model-escalation-<agent>.<family>.json`
 is unauthenticated, so any orchestrator that passes the same model within its
-10-minute window in the same session is allowed (when the runtime exposes a session id); it is a single slot per agent type, and nothing
+10-minute window in the same session is allowed (when the runtime exposes a session id); it is one slot per agent type and model family, and nothing
 clears it before it expires. The check fails open on any inability to
 verify, so it is not a security boundary.
 

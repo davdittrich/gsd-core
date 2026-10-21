@@ -3,7 +3,7 @@
 // Agent()/Task() call passes match the one GSD resolved for that agent?
 // Baseline is resolveModelInternal (what `init` records and the workflow
 // tells the model to pass). A fresh, session-matching `resolve-execution
-// --attempt N` record (gsd-core/bin/lib/model-escalation.cjs) legitimises
+// --attempt N` record for the passed model's family (gsd-core/bin/lib/model-escalation.cjs) legitimises
 // the escalated model. Never fails closed: any inability to verify is an allow.
 
 const path = require('path');
@@ -82,7 +82,7 @@ function checkAgentModel(data, { clock = Date } = {}) {
     if (passed && esc.modelFamily(passed) === esc.modelFamily(expected)) return ALLOW;
     if (passed) {
       const session = typeof data.session_id === 'string' && data.session_id ? data.session_id : undefined;
-      if (esc.escalationAllows(esc.readEscalation(root, type), passed, { now: clock.now(), session })) return ALLOW;
+      if (esc.escalationAllows(esc.readEscalation(root, type, passed), passed, { now: clock.now(), session })) return ALLOW;
     }
     return verdict(mode, type, passed, expected);
   } catch {
