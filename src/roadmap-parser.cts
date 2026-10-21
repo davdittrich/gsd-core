@@ -1488,21 +1488,37 @@ function replaceInCurrentMilestone(
  * `<details>` blocks are (an `open` block cannot be told from the active wrapper).
  */
 function maskArchivedDetails(content: string, cwd: string): { visible: string; restore: (edited: string) => string } {
+  if (!/<details\b/i.test(content)) return { visible: content, restore: (edited) => edited };
   const ranges = currentMilestoneRawRanges(content, cwd);
   const active = ranges ? [ranges.primary, ...(ranges.details ? [ranges.details] : [])] : [];
   const blocks: string[] = [];
   let nonce = 0;
   while (content.includes(`<!-- gsd-archived-details-${nonce}-`)) nonce += 1;
   const marker = (i: number): string => `<!-- gsd-archived-details-${nonce}-${i} -->`;
-  const visible = content.replace(/<details\b[^>]*>[\s\S]*?<\/details\s*>/gi, (block, offset: number) => {
-    const end = offset + block.length;
+  // Depth-aware: an outer block closes at its own `</details>`, so a nested
+  // collapsed section inside an archive is masked with it.
+  const tag = /<details\b[^>]*>|<\/details\s*>/gi;
+  let visible = '';
+  let last = 0;
+  let depth = 0;
+  let start = 0;
+  for (let m = tag.exec(content); m; m = tag.exec(content)) {
+    if (m[0][1] !== '/') {
+      if (depth++ === 0) start = m.index;
+      continue;
+    }
+    if (depth === 0 || --depth > 0) continue;
+    const end = m.index + m[0].length;
+    const block = content.slice(start, end);
     const keep = ranges
-      ? active.some((r) => offset < r.end && end > r.start)
+      ? active.some((r) => start < r.end && end > r.start)
       : !/^<details\s*>/i.test(block);
-    if (keep) return block;
+    if (keep) continue;
     blocks.push(block);
-    return marker(blocks.length - 1);
-  });
+    visible += content.slice(last, start) + marker(blocks.length - 1);
+    last = end;
+  }
+  visible += content.slice(last);
   const restore = (edited: string): string => {
     let restored = edited;
     for (let i = 0; i < blocks.length; i++) {

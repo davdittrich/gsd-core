@@ -1275,7 +1275,7 @@ function cmdRoadmapUpdatePlanProgress(cwd: string, phaseNum: string | null | und
     // phase-id-owner: deliberately unmigrated (#4984 revert) — see comment above.
     const phaseHeadingAnchor = `#{2,4}\\s*Phase\\s+${phasePattern}${OPTIONAL_PHASE_TAG_SOURCE}(?=[:\\s])`;
     // #4247: target detection runs against the ORIGINAL content's active
-    // (post-</details>) region — the same milestone scoping every writer
+    // (archive-masked) text — the same milestone scoping every writer
     // below applies — so the gate asks "does the file carry a writable phase
     // representation" rather than "did some regex fire mid-transform".
     // Heading target: the exact grammar `planSectionPattern` /
@@ -1607,14 +1607,12 @@ function cmdRoadmapUpdatePlanProgress(cwd: string, phaseNum: string | null | und
       roadmapContent = roadmapContent.replace(coreUtils.planRowPattern(planId), '$1x$2');
     }
 
-    // Compute the active (post-</details>) region offset ONCE.  Both the
+    // Detection and insertion both read the archive-masked text.  Both the
     // missing-plan DETECTION and the row INSERTION must use the same active
     // region string so that a plan row that exists only in an archived <details>
     // block is not counted as "already present" in the active milestone section.
     // (Finding 1 code-review: detection was previously running against the full
     //  roadmapContent, causing archived rows to suppress active-section inserts.)
-    const activeRegion = roadmapContent;
-
     // Compute which plan files are MISSING a checkbox row in the ACTIVE region.
     // This handles three cases:
     //   (a) Fresh template — no rows at all: all plans are missing.
@@ -1636,9 +1634,9 @@ function cmdRoadmapUpdatePlanProgress(cwd: string, phaseNum: string | null | und
     // distinct plan whose row does not count as 5-01's presence.
     const missingPlans = phaseInfo!.plans.filter((planFile) => {
       const planEscaped = escapeRegex(planFile);
-      if (new RegExp(`-\\s*\\[[x ]\\]\\s*(?:\\*\\*)?${planEscaped}`, 'i').test(activeRegion)) return false;
+      if (new RegExp(`-\\s*\\[[x ]\\]\\s*(?:\\*\\*)?${planEscaped}`, 'i').test(roadmapContent)) return false;
       const stem = planFile.replace(/-PLAN\.md$/i, '');
-      return !coreUtils.planRowPattern(stem, { anyState: true }).test(activeRegion);
+      return !coreUtils.planRowPattern(stem, { anyState: true }).test(roadmapContent);
     });
 
     if (missingPlans.length > 0) {
@@ -1671,9 +1669,8 @@ function cmdRoadmapUpdatePlanProgress(cwd: string, phaseNum: string | null | und
 
       // Archived `<details>` blocks are already hidden (maskArchivedDetails), so
       // archived duplicate phase headings cannot receive rows.
-      const scopedReplace = (src: string, pat: RegExp) => src.replace(pat, inserter);
-      const regionA = scopedReplace(activeRegion, insertRowsPatternA);
-      const withRows = regionA !== activeRegion ? regionA : scopedReplace(activeRegion, insertRowsPatternB);
+      const regionA = roadmapContent.replace(insertRowsPatternA, inserter);
+      const withRows = regionA !== roadmapContent ? regionA : roadmapContent.replace(insertRowsPatternB, inserter);
       if (withRows !== roadmapContent) {
         roadmapContent = withRows;
         // Mark any newly-inserted rows that already have summaries as complete

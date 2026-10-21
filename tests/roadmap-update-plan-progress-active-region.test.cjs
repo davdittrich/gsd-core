@@ -42,6 +42,8 @@ const SHAPES = {
   'uppercase <DETAILS> archive': () => `# Roadmap\n\n${archive('', 'DETAILS')}\n${ACTIVE_BODY}`,
   '<details open> archive': () => `# Roadmap\n\n${archive(' open', 'details')}\n${ACTIVE_BODY}`,
   'archive after the active section (newest-first)': () => `# Roadmap\n\n${ACTIVE_BODY}\n${archive('', 'details')}`,
+  'nested <details> inside the archive': () =>
+    `# Roadmap\n\n<details>\n<summary>v1.0 ✅ SHIPPED</summary>\n\n<details>\n<summary>inner</summary>\n\nx\n</details>\n\n${ARCHIVE_BODY}\n</details>\n\n${ACTIVE_BODY}`,
   '<details open> wraps the active milestone': () =>
     `# Roadmap\n\n${archive('', 'details')}\n<details open>\n<summary>v2.0 🚧 Active</summary>\n\n${ACTIVE_BODY}\n</details>\n`,
 };
@@ -65,8 +67,7 @@ describe('roadmap update-plan-progress active-region scoping (#5553)', () => {
       const result = runGsdTools(['roadmap', 'update-plan-progress', '1'], tmpDir);
       assert.ok(result.success, result.error);
       const out = fs.readFileSync(roadmapPath, 'utf-8');
-      const archived = out.match(/<(details|DETAILS)[^>]*>[\s\S]*?<\/\1>/)[0];
-      assert.ok(archived.includes(ARCHIVE_BODY), `archive must be byte-identical:\n${archived}`);
+      assert.ok(out.includes(ARCHIVE_BODY), `archive must be byte-identical:\n${out}`);
       assert.match(out, /- \[x\] 01-01-PLAN\.md/, 'active plan line ticked');
       assert.match(out, /\*\*Plans:\*\* 1\/1/, 'active Plans line updated');
     });
