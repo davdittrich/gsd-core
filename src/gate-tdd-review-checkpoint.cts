@@ -120,6 +120,8 @@ const isSha = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{4
 
 // A real seal is a few hundred bytes per plan; anything bigger is not read (the file is repo content, so hostile).
 const SEAL_MAX_BYTES = 64 * 1024;
+/** #5354: most distinct SUMMARY task commits probed per plan; each costs one `git merge-base` spawn. */
+const SUMMARY_REFS_MAX = 64;
 
 /** lstat, so a symlink is seen as a symlink. Never throws. */
 function sealStat(file: string): Evidence<fs.Stats> {
@@ -154,17 +156,26 @@ function readSeal(phaseDir: string): Evidence<SealPlans> {
   if (st.kind !== 'found') return st;
   if (!st.value.isFile() || st.value.size > SEAL_MAX_BYTES) return evidenceUnreadable(`${SEAL_FILE} is not a regular file or exceeds ${SEAL_MAX_BYTES} bytes`, file);
   let fd: number | undefined;
+  let result: Evidence<SealPlans>;
   try {
     // O_NONBLOCK: a FIFO swapped in after lstat must not hang open(); fstat isFile() then rejects it.
     fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
     const fst = fs.fstatSync(fd);
-    if (!fst.isFile() || fst.size > SEAL_MAX_BYTES) return evidenceUnreadable(`${SEAL_FILE} is not a regular file or exceeds ${SEAL_MAX_BYTES} bytes`, file);
-    return parseSeal(fs.readFileSync(fd, 'utf8'));
+    result = !fst.isFile() || fst.size > SEAL_MAX_BYTES
+      ? evidenceUnreadable(`${SEAL_FILE} is not a regular file or exceeds ${SEAL_MAX_BYTES} bytes`, file)
+      : parseSeal(fs.readFileSync(fd, 'utf8'));
   } catch (err) {
-    return evidenceFromError<SealPlans>(err, file);
-  } finally {
-    if (fd !== undefined) fs.closeSync(fd);
+    result = evidenceFromError<SealPlans>(err, file);
   }
+  // Closed outside a finally so a close() failure cannot mask (by throwing over) the read's result: it is reported as unreadable.
+  if (fd !== undefined) {
+    try {
+      fs.closeSync(fd);
+    } catch (err) {
+      return evidenceFromError<SealPlans>(err, file);
+    }
+  }
+  return result;
 }
 
 /** Merge `evidence` into the phase's seal via temp file + rename, refusing an existing non-regular target (a symlink would redirect the write). */
@@ -189,8 +200,8 @@ function writeSeal(phaseDir: string, evidence: Record<string, SealEntry>): void 
 
 /**
  * #5354: a plan was squashed away when its SUMMARY names task commits and none is reachable from
- * HEAD (a missing object counts as unreachable). No SUMMARY, no listed hash, or any reachable hash
- * is an ordinary failure.
+ * HEAD (a missing object counts as unreachable). No SUMMARY, no listed hash, more than
+ * SUMMARY_REFS_MAX distinct hashes, or any reachable hash is an ordinary failure.
  */
 function summaryCommitsAllUnreachable(projectDir: string, phaseDir: string, planPath: string): boolean {
   const rel = path.relative(phaseDir, planPath).split(path.sep).join('/');
@@ -204,8 +215,9 @@ function summaryCommitsAllUnreachable(projectDir: string, phaseDir: string, plan
   for (const candidate of summaryCandidates(rel)) {
     const summary = readTextEvidence(path.join(phaseDir, candidate));
     if (summary.kind !== 'found') continue;
-    const refs = extractTaskCommitRefs(summary.value);
-    return refs.length > 0 && refs.every((id) => {
+    const refs = [...new Set(extractTaskCommitRefs(summary.value))];
+    // More refs than the cap is an ordinary failure: SUMMARY.md is repo content and must not buy unbounded git spawns.
+    return refs.length > 0 && refs.length <= SUMMARY_REFS_MAX && refs.every((id) => {
       const r = execGit(['merge-base', '--is-ancestor', id, 'HEAD'], { cwd: projectDir });
       return !r.timedOut && (r.exitCode === 1 || (r.exitCode === 128 && historyComplete()));
     });

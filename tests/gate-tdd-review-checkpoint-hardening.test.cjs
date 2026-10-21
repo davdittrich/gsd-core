@@ -377,11 +377,51 @@ describe('#5354 tdd review checkpoint seal', () => {
     assert.equal(run(dir).outcome, 'unreadable');
   });
 
-  test('a FIFO seal is unreadable and never hangs the open', posix, (t) => {
+  test('a FIFO seal is rejected by the lstat regular-file check', posix, (t) => {
     const { dir } = fixture([], { summary: false });
     const fifo = path.join(dir, SEAL);
     try { execFileSync('mkfifo', [fifo], { timeout: GIT_TIMEOUT_MS }); } catch { t.skip('mkfifo unavailable'); return; }
     assert.equal(run(dir).outcome, 'unreadable');
+  });
+
+  test('a FIFO swapped in after lstat never hangs the open (O_NONBLOCK) and fstat rejects it', posix, (t) => {
+    const { dir } = fixture([], { summary: false });
+    const fifo = path.join(dir, SEAL);
+    try { execFileSync('mkfifo', [fifo], { timeout: GIT_TIMEOUT_MS }); } catch { t.skip('mkfifo unavailable'); return; }
+    const regular = path.join(dir, 'regular.json');
+    fs.writeFileSync(regular, sealOf(sha('a'), sha('b')));
+    // lstat lies (as if the FIFO replaced a regular file after the check), so only open()+fstat stand between us and a hang.
+    t.mock.method(fs, 'lstatSync', () => fs.statSync(regular));
+    assert.equal(run(dir).outcome, 'unreadable');
+  });
+
+  test('a close() failure on the seal is reported unreadable, not thrown', (t) => {
+    const { dir } = fixture([], { summary: false });
+    w(dir, SEAL, sealOf(sha('a'), sha('b')));
+    t.mock.method(fs, 'closeSync', () => { throw Object.assign(new Error('close failed'), { code: 'EIO' }); });
+    assert.equal(run(dir).outcome, 'unreadable');
+  });
+
+  // Each distinct SUMMARY hash costs one `git merge-base` spawn, so the count is capped (64).
+  const REFS_CAP = 64;
+  for (const [label, count, status] of [['limit-1', REFS_CAP - 1, 'NotEvaluable'], ['limit', REFS_CAP, 'NotEvaluable'], ['limit+1', REFS_CAP + 1, 'FAIL']]) {
+    test(`SUMMARY with ${label} (${count}) distinct unreachable task commits -> ${status}`, () => {
+      const { dir, base } = fixture(['test(01-01): red', 'feat(01-01): green']);
+      const hashes = Array.from({ length: count }, (_, i) => (i + 1).toString(16).padStart(40, 'f'));
+      w(dir, `${PHASE}/01-01-SUMMARY.md`, `# done\n\n## Task Commits\n\n${hashes.map((h, i) => `${i + 1}. **Task ${i + 1}: x** - \`${h}\``).join('\n')}\n`);
+      sealGit(dir, 'add', '-A'); sealGit(dir, 'commit', '-m', 'docs: summary');
+      squash(dir, base);
+      assert.equal(run(dir).payload.rows[0].status, status);
+    });
+  }
+
+  test('a duplicated SUMMARY hash counts once against the cap', () => {
+    const { dir, base } = fixture(['test(01-01): red', 'feat(01-01): green']);
+    const rows = Array.from({ length: REFS_CAP + 1 }, (_, i) => `${i + 1}. **Task ${i + 1}: x** - \`${'e'.repeat(40)}\``);
+    w(dir, `${PHASE}/01-01-SUMMARY.md`, `# done\n\n## Task Commits\n\n${rows.join('\n')}\n`);
+    sealGit(dir, 'add', '-A'); sealGit(dir, 'commit', '-m', 'docs: summary');
+    squash(dir, base);
+    assert.equal(run(dir).payload.rows[0].status, 'NotEvaluable');
   });
 
   test('a seal with two distinct non-hex values credits nothing and stays NotEvaluable', () => {
