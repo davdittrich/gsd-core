@@ -368,11 +368,10 @@ function excludeStateJson(planningDir: string, execGit: Owners['execGit']): void
   // cwd must pick the repo: drop inherited repository-location variables (e.g. inside a git hook).
   const env = { GIT_DIR: undefined, GIT_WORK_TREE: undefined, GIT_INDEX_FILE: undefined, GIT_COMMON_DIR: undefined };
   // Short bound: this runs on every boundary command's hot path.
-  const revParse = execGit(['rev-parse', '--show-prefix', '--git-path', 'info/exclude'], { cwd: planningDir, env, timeout: 5_000 });
-  // stdout is trimmed, so an empty prefix (planning dir is the git root) drops its line.
-  const lines = splitLines(String(revParse.stdout));
-  const excludeRel = lines[lines.length - 1];
-  const prefix = lines.length > 1 ? lines[0] : '';
+  // The prefix goes last: stdout is trimmed, and a non-empty prefix ends in `/`, so only an
+  // empty prefix (planning dir is the git root) loses its line; a leading space survives.
+  const revParse = execGit(['rev-parse', '--git-path', 'info/exclude', '--show-prefix'], { cwd: planningDir, env, timeout: 5_000 });
+  const [excludeRel, prefix = ''] = splitLines(String(revParse.stdout));
   if (revParse.exitCode !== 0 || !excludeRel) return;
   const exclude = path.resolve(planningDir, excludeRel);
   // Escape gitignore metacharacters in the directory prefix.

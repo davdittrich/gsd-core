@@ -1272,6 +1272,15 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
     }), { seed: 5505, numRuns: 15 });
   });
 
+  test('aLeadingSpaceInThePrefixSurvivesGitOutputTrimming', (t) => {
+    const tmpDir = createTempGitProject();
+    t.after(() => cleanup(tmpDir));
+    const sub = path.join(tmpDir, ' notes');
+    fs.mkdirSync(planningDirOf(sub), { recursive: true });
+    publishStateContract(sub, fixedDeps());
+    git(tmpDir, 'check-ignore', '-q', ' notes/.planning/state.json');
+  });
+
   test('aNewlineInThePlanningPathWritesNoEntry', { skip: process.platform === 'win32' }, (t) => {
     const tmpDir = createTempGitProject();
     t.after(() => cleanup(tmpDir));
