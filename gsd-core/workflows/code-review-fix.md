@@ -424,7 +424,10 @@ if [ -f "${FIX_REPORT_PATH}" ]; then
   else
     echo "Warning: REVIEW-FIX.md has invalid frontmatter (no status field). Not committing REVIEW-FIX.md."
     echo "Agent may have produced malformed output. Review manually: ${FIX_REPORT_PATH}"
-    echo "The working tree stays dirty: /gsd-ship will refuse until ${FIX_REPORT_PATH} is fixed and committed, or deleted."
+    # Only when git sees it: an ignored .planning/ (commit_docs off) leaves the tree clean.
+    if [ -n "$(git status --porcelain -- "${FIX_REPORT_PATH}" 2>/dev/null)" ]; then
+      echo "The working tree stays dirty: /gsd-ship will refuse until ${FIX_REPORT_PATH} is fixed and committed, or deleted."
+    fi
   fi
 else
   echo "Warning: REVIEW-FIX.md not found at ${FIX_REPORT_PATH}."

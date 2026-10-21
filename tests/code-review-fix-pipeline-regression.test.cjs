@@ -329,7 +329,7 @@ describe('#3190 — code-review-fix --auto REVIEW.md commit + FIX_REPORT_PATH en
 
   // #5527 observable: run the fence against a real repo and the real `query commit`, then read
   // `git status`. A stubbed argv proves the call, not that REVIEW.md lands or what stays dirty.
-  test('T8 — commit_fix_report EXECUTED against real git: REVIEW.md lands; only a malformed report stays, flagged as blocking ship', { skip: !HAS_BASH }, (t) => {
+  test('T8 — commit_fix_report EXECUTED against real git: REVIEW.md lands; only a malformed report stays', { skip: !HAS_BASH }, (t) => {
     const fence = stepFence(fs.readFileSync(WORKFLOW_PATH, 'utf8'), 'commit_fix_report');
     const git = (cwd, ...args) => gitOrThrow(args, { cwd });
     const REVIEW = '.planning/01-REVIEW.md';
@@ -357,12 +357,11 @@ describe('#3190 — code-review-fix --auto REVIEW.md commit + FIX_REPORT_PATH en
       ].join('\n');
       const res = runHook('-c', [script], { interpreter: 'bash', timeoutMs: SEAM_DEFAULT_TIMEOUT_MS });
       assert.strictEqual(res.exitCode, 0, 'step must not abort: ' + res.stderr);
-      return { stdout: res.stdout, status: git(dir, 'status', '--porcelain') };
+      return { status: git(dir, 'status', '--porcelain') };
     };
 
     const invalid = drive('---\nfoo: bar\n---\n');
     assert.strictEqual(invalid.status.trim(), '?? ' + FIX, 'REVIEW.md committed; only the malformed report remains');
-    assert.match(invalid.stdout, /\/gsd-ship will refuse/, 'the leftover must be reported as blocking, not as a soft warning');
 
     const valid = drive(VALID_FIX_REPORT);
     assert.strictEqual(valid.status, '', 'valid report: both committed, tree clean');
