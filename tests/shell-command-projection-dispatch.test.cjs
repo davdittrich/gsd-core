@@ -100,19 +100,19 @@ describe('execGit', () => {
       for (const k of VARS) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
       cleanup(other);
     });
-    const gitDir = (dir) => fs.realpathSync(path.join(dir, '.git'));
+    const gitDir = (dir) => fs.realpathSync.native(path.join(dir, '.git'));
 
     test('GIT_DIR set to another repo does not redirect cwd', () => {
       process.env.GIT_DIR = gitDir(other);
       const r = execGit(['rev-parse', '--absolute-git-dir'], { cwd: tmpDir });
       assert.strictEqual(r.exitCode, 0, r.stderr);
-      assert.strictEqual(fs.realpathSync(r.stdout), gitDir(tmpDir));
+      assert.strictEqual(fs.realpathSync.native(r.stdout), gitDir(tmpDir));
     });
 
     test('GIT_WORK_TREE set to another dir does not redirect cwd', () => {
-      process.env.GIT_WORK_TREE = fs.realpathSync(other);
+      process.env.GIT_WORK_TREE = fs.realpathSync.native(other);
       const r = execGit(['rev-parse', '--show-toplevel'], { cwd: tmpDir });
-      assert.strictEqual(fs.realpathSync(r.stdout), fs.realpathSync(tmpDir));
+      assert.strictEqual(fs.realpathSync.native(r.stdout), fs.realpathSync.native(tmpDir));
     });
 
     test('GIT_INDEX_FILE set to another repo index does not receive cwd staging', () => {
@@ -133,7 +133,7 @@ describe('execGit', () => {
 
     test('explicit opts.env GIT_DIR still wins (opt-out)', () => {
       const r = execGit(['rev-parse', '--absolute-git-dir'], { cwd: tmpDir, env: { GIT_DIR: gitDir(other) } });
-      assert.strictEqual(fs.realpathSync(r.stdout), gitDir(other));
+      assert.strictEqual(fs.realpathSync.native(r.stdout), gitDir(other));
     });
   });
 });
