@@ -6546,6 +6546,13 @@ describe('roadmap update-plan-progress active-region scoping (#5553)', () => {
     assert.match(out, /- \[x\] 01-01-PLAN\.md/);
   });
 
+  test('plain (non-<details>) shipped milestone section stays untouched', () => {
+    const shipped = `## v1.0 ✅ SHIPPED\n\n${ACTIVE_REGION_ARCHIVE_BODY}`;
+    const out = runActiveRegion(`# Roadmap\n\n${shipped}\n${ACTIVE_REGION_ACTIVE_BODY}`);
+    assert.ok(out.includes(ACTIVE_REGION_ARCHIVE_BODY), `shipped section must be byte-identical:\n${out}`);
+    assert.match(out, /- \[x\] 01-01-PLAN\.md/);
+  });
+
   test('re-run with the active section already ticked leaves a trailing archive untouched', () => {
     const ticked = ACTIVE_REGION_ACTIVE_BODY
       .replace('- [ ] **Phase 1: A**', '- [x] **Phase 1: A** (completed 2026-01-01)')

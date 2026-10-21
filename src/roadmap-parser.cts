@@ -1479,8 +1479,9 @@ function replaceInCurrentMilestone(
 }
 
 /**
- * #5553: hide every archived `<details>` block behind a placeholder; `restore`
- * puts them back byte-for-byte. Tag case, attributes and archive position
+ * #5553: hide every archived `<details>` block, and every closed milestone
+ * written as a plain heading section, behind a placeholder; `restore` puts them
+ * back byte-for-byte. Tag case, attributes and archive position
  * (before OR after the active milestone) do not matter, unlike a "region after
  * the last `</details>`" cut. A block stays visible only when it overlaps the
  * resolved active milestone range(s) AND its `<summary>` does not mark a
@@ -1491,7 +1492,9 @@ function replaceInCurrentMilestone(
  * as the old last-`</details>` cut did.
  */
 function maskArchivedDetails(content: string, cwd: string): { visible: string; restore: (edited: string) => string } {
-  if (!/<details\b/i.test(content)) return { visible: content, restore: (edited) => edited };
+  if (!/<details\b/i.test(content) && !MILESTONE_CLOSED_MARKER_PATTERN.test(content)) {
+    return { visible: content, restore: (edited) => edited };
+  }
   const ranges = currentMilestoneRawRanges(content, cwd);
   const active = ranges ? [ranges.primary, ...(ranges.details ? [ranges.details] : [])] : [];
   const blocks: string[] = [];
@@ -1509,9 +1512,10 @@ function maskArchivedDetails(content: string, cwd: string): { visible: string; r
   const scan = lines.join('\n').replace(/`[^`\n]*`/g, blank);
   // Depth-aware: an outer block closes at its own `</details>`, so a nested
   // collapsed section inside an archive is masked with it.
+  const spans: Array<{ start: number; end: number }> = [];
+  const overlapsActive = (start: number, end: number): boolean =>
+    ranges !== null && active.some((r) => start < r.end && end > r.start);
   const tag = /<details\b[^>]*>|<\/details\s*>/gi;
-  let visible = '';
-  let last = 0;
   let depth = 0;
   let start = 0;
   for (let m = tag.exec(scan); m; m = tag.exec(scan)) {
@@ -1521,15 +1525,34 @@ function maskArchivedDetails(content: string, cwd: string): { visible: string; r
     }
     if (depth === 0 || --depth > 0) continue;
     const end = m.index + m[0].length;
-    const block = content.slice(start, end);
-    const summary = block.match(/<summary[^>]*>([^<]*)<\/summary>/i);
-    const keep = ranges !== null
-      && active.some((r) => start < r.end && end > r.start)
-      && !(summary && isClosedMilestoneHeading(summary[1]));
-    if (keep) continue;
-    blocks.push(block);
-    visible += content.slice(last, start) + marker(blocks.length - 1);
-    last = end;
+    const summary = content.slice(start, end).match(/<summary[^>]*>([^<]*)<\/summary>/i);
+    if (overlapsActive(start, end) && !(summary && isClosedMilestoneHeading(summary[1]))) continue;
+    spans.push({ start, end });
+  }
+  // A closed milestone written as a plain heading section (no `<details>`) is
+  // archive too. It ends at the next heading of the same or shallower level, so
+  // a following `## Progress` table stays visible.
+  const headingTokens = tokenizeHeadings(content);
+  for (let i = 0; i < headingTokens.length; i++) {
+    const h = headingTokens[i];
+    if (h.level > 3 || /^Phase\s+\S/i.test(h.text)) continue;
+    if (!isClosedMilestoneHeading(h.text) || extractMilestoneHeadingName(h.text) === null) continue;
+    const next = headingTokens.slice(i + 1).find((t) => t.level <= h.level && !/^Phase\s+\S/i.test(t.text));
+    const end = next ? next.offset : content.length;
+    if (!overlapsActive(h.offset, end)) spans.push({ start: h.offset, end });
+  }
+  spans.sort((x, y) => x.start - y.start || y.end - x.end);
+  let visible = '';
+  let last = 0;
+  for (const span of spans) {
+    if (span.start < last) {
+      // Nested in an already-masked span: only a partial overlap extends it.
+      if (span.end <= last) continue;
+      span.start = last;
+    }
+    blocks.push(content.slice(span.start, span.end));
+    visible += content.slice(last, span.start) + marker(blocks.length - 1);
+    last = span.end;
   }
   visible += content.slice(last);
   const restore = (edited: string): string => {
