@@ -21,8 +21,9 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { createTempDir, cleanup } = require('./helpers.cjs');
 const { PROBE_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
+const { runHook, OUTCOME } = require('./helpers/process-seam.cjs');
 
 const FRAGMENT = path.join(
   __dirname, '..', 'gsd-core', 'workflows', 'execute-phase', 'steps', 'executor-isolation-dispatch.md',
@@ -135,10 +136,15 @@ test('#5531: apostrophe-bearing spliced content reaches the prompt byte-for-byte
   // ${AGENT_SKILLS} substitution. A persona has apostrophes ("user's vision").
   const persona = "<persona>\nthe user's vision; it doesn't '$(echo pwned)' `id` \"q\" \\ end\n</persona>";
   const stmt = promptAssignment().replace('${AGENT_SKILLS}', () => persona);
-  const r = spawnSync('bash', ['-c', stmt + '\nprintf "%s" "$EXECUTOR_PROMPT"'], { encoding: 'utf8', timeout: PROBE_TIMEOUT_MS });
-  assert.equal(r.status, 0, r.stderr);
+  const dir = createTempDir('gsd-5531-');
+  const script = path.join(dir, 'compose.sh');
+  fs.writeFileSync(script, stmt + '\nprintf "%s" "$EXECUTOR_PROMPT"');
+  const r = runHook(script, [], { interpreter: 'bash', timeoutMs: PROBE_TIMEOUT_MS });
+  cleanup(dir);
+  assert.equal(r.outcome, OUTCOME.EXITED, r.stderr);
+  assert.equal(r.exitCode, 0, r.stderr);
   assert.ok(r.stdout.includes(persona), 'the spliced persona must appear verbatim in the prompt');
   assert.ok(r.stdout.startsWith('<objective>'), 'the template must be intact');
   assert.ok(r.stdout.includes('</success_criteria>'), 'the template must be complete');
-  assert.ok(!r.stdout.includes('pwned\n'), 'spliced text must not be executed');
+  assert.ok(!r.stdout.includes("pwned'"), 'spliced text must not be executed');
 });
