@@ -2,4 +2,4 @@
 type: Fixed
 pr: 5541
 ---
-Code-review-fix now commits the converged REVIEW.md in --auto even when REVIEW-FIX.md is invalid or missing, so /gsd-ship no longer refuses a dirty tree
+**`/gsd-code-review-fix --auto` now commits the converged REVIEW.md even when REVIEW-FIX.md is invalid or missing** — the re-review loop rewrote the tracked REVIEW.md but only the valid-report path committed it, so the tree stayed dirty and `/gsd-ship` refused. A malformed REVIEW-FIX.md is still never committed, and the warning now says it blocks `/gsd-ship` until it is fixed or deleted. (#5527)

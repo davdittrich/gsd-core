@@ -2,8 +2,8 @@
 // The workflow .md IS the product: its embedded bash/node snippets are loaded
 // and executed verbatim by the agent host at runtime. Testing that the deployed
 // commit-fix step exports the env var its own inline `node -e` body reads, and
-// that the docs commit stages the converged REVIEW.md alongside REVIEW-FIX.md (#3190; and alone
-// when the fix report is invalid/missing, #5527),
+// that the docs commit stages the converged REVIEW.md alongside REVIEW-FIX.md
+// (#3190), and alone when the fix report is invalid or missing (#5527),
 // asserts the deployed contract — not an implementation detail. There is no
 // runtime API that exposes these inlined snippets; the text IS the spec.
 //
@@ -18,7 +18,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { runNode, runHook } = require('./helpers/process-seam.cjs');
-const { PROBE_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
+const { PROBE_TIMEOUT_MS, SEAM_DEFAULT_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
 // Same gate the shipped fences carry everywhere in this suite: bash is not assumed on win32.
 const HAS_BASH = process.platform !== 'win32';
 
@@ -39,7 +39,8 @@ function stepFence(src, name) {
   }
   assert.fail(`step "${name}" carries no bash fence`);
 }
-const { createTempDir, cleanup } = require('./helpers.cjs');
+const { createTempDir, createTempGitProject, cleanup, TOOLS_PATH } = require('./helpers.cjs');
+const { gitOrThrow } = require('./helpers/git-fixture.cjs');
 
 const ROOT = path.resolve(__dirname, '..');
 const WORKFLOW_PATH = path.join(ROOT, 'gsd-core', 'workflows', 'code-review-fix.md');
@@ -324,5 +325,46 @@ describe('#3190 — code-review-fix --auto REVIEW.md commit + FIX_REPORT_PATH en
     // Out of scope stays out: non-auto and COMMIT_DOCS=false commit no REVIEW.md.
     assert.ok(!drive({ report: '---\nfoo: bar\n---\n', auto: 'false' }).argv, 'non-auto invalid commits nothing');
     assert.ok(!drive({ report: null, docs: 'false' }).argv, 'COMMIT_DOCS=false commits nothing');
+  });
+
+  // #5527 observable: run the fence against a real repo and the real `query commit`, then read
+  // `git status`. A stubbed argv proves the call, not that REVIEW.md lands or what stays dirty.
+  test('T8 — commit_fix_report EXECUTED against real git: REVIEW.md lands; only a malformed report stays, flagged as blocking ship', { skip: !HAS_BASH }, (t) => {
+    const fence = stepFence(fs.readFileSync(WORKFLOW_PATH, 'utf8'), 'commit_fix_report');
+    const git = (cwd, ...args) => gitOrThrow(args, { cwd });
+    const REVIEW = '.planning/01-REVIEW.md';
+    const FIX = '.planning/01-REVIEW-FIX.md';
+
+    const drive = (report) => {
+      const dir = createTempGitProject('gsd-5527-');
+      t.after(() => cleanup(dir));
+      fs.writeFileSync(path.join(dir, '.planning', 'config.json'), '{"commit_docs": true}\n');
+      fs.writeFileSync(path.join(dir, REVIEW), '---\nstatus: issues_found\n---\n');
+      git(dir, 'add', '-A');
+      git(dir, 'commit', '-q', '-m', 'seed');
+      fs.writeFileSync(path.join(dir, REVIEW), '---\nstatus: clean\n---\n'); // the --auto re-review rewrite
+      fs.writeFileSync(path.join(dir, FIX), report);
+      const script = [
+        'set -uo pipefail',
+        'cd ' + JSON.stringify(dir),
+        'gsd_run() { ' + JSON.stringify(process.execPath) + ' ' + JSON.stringify(TOOLS_PATH) + ' "$@"; }',
+        'AUTO_MODE=true',
+        'COMMIT_DOCS=true',
+        'PADDED_PHASE=01',
+        'REVIEW_PATH=' + REVIEW,
+        'FIX_REPORT_PATH=' + FIX,
+        fence,
+      ].join('\n');
+      const res = runHook('-c', [script], { interpreter: 'bash', timeoutMs: SEAM_DEFAULT_TIMEOUT_MS });
+      assert.strictEqual(res.exitCode, 0, 'step must not abort: ' + res.stderr);
+      return { stdout: res.stdout, status: git(dir, 'status', '--porcelain') };
+    };
+
+    const invalid = drive('---\nfoo: bar\n---\n');
+    assert.strictEqual(invalid.status.trim(), '?? ' + FIX, 'REVIEW.md committed; only the malformed report remains');
+    assert.match(invalid.stdout, /\/gsd-ship will refuse/, 'the leftover must be reported as blocking, not as a soft warning');
+
+    const valid = drive(VALID_FIX_REPORT);
+    assert.strictEqual(valid.status, '', 'valid report: both committed, tree clean');
   });
 });
