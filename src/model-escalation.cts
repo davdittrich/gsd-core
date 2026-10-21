@@ -14,10 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { realClock, type Clock } from './clock.cjs';
 import { retryRenameSync } from './shell-command-projection.cjs';
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-import capabilityLedgerMod = require('./capability-ledger.cjs');
-
-const { readSmallRegularFile } = capabilityLedgerMod;
+import { seedGsdIgnore } from './gsd-ignore.cjs';
 
 export const ESCALATION_WINDOW_MS = 10 * 60 * 1000;
 /** Tolerated clock skew for a record stamped slightly in the future. */
@@ -43,7 +40,7 @@ export function modelFamily(model: unknown): string {
 /**
  * The family is model-authored, so it is reduced to file-name-safe characters and capped.
  * Lossy: distinct families can share a file (e.g. `a/b` and `a_b`); the worst case is a false
- * mismatch warning, never a bypass, because `escalationAllows` re-checks the stored model's family.
+ * mismatch (a warning, or a block under `deny`), never a bypass, because `escalationAllows` re-checks the stored model's family.
  */
 export const escalationFile = (root: string, agentType: string, model: string): string =>
   path.join(root, '.gsd', `model-escalation-${agentType}.${modelFamily(model).replace(/[^a-z0-9._-]/g, '_').slice(0, 64)}.json`);
@@ -59,26 +56,10 @@ export function writeEscalation(
     fs.mkdirSync(dir, { recursive: true });
     // Catches a planted .gsd symlink; racing a swap after this needs repo write access already.
     if (fs.lstatSync(dir).isSymbolicLink()) return;
-    const ignore = path.join(dir, '.gitignore');
-    try {
-      fs.writeFileSync(ignore, '*\n', { flag: 'wx' });
-    } catch {
-      // Pre-existing (e.g. the dispatch sentinel's rules only): a bare `*` already covers the record,
-      // else add our own rule. Replace by rename so a link swapped in after the lstat is not written through.
-      if (!fs.lstatSync(ignore).isSymbolicLink()) {
-        const cur = readSmallRegularFile(ignore, MAX_READ_BYTES) ?? '';
-        if (!/^\*\r?$/m.test(cur) && !/^\/model-escalation-\*\r?$/m.test(cur)) {
-          const next = `${ignore}.${process.pid}.tmp`;
-          fs.rmSync(next, { force: true }); // left by a crashed writer whose pid was reused
-          try {
-            fs.writeFileSync(next, `${cur}${cur === '' || cur.endsWith('\n') ? '' : '\n'}/model-escalation-*\n`, { flag: 'wx' });
-            retryRenameSync(next, ignore);
-          } catch {
-            fs.rmSync(next, { force: true });
-          }
-        }
-      }
-    }
+    seedGsdIgnore(dir, {
+      covers: (cur) => /^\*\r?$/m.test(cur) || /^\/model-escalation-\*\r?$/m.test(cur),
+      append: '/model-escalation-*\n',
+    });
     const rec: EscalationRecord = { model, written_at: clock.now(), ...(session ? { session } : {}) };
     // tmp + rename on every platform: the hook never reads a half-written record, and rename
     // replaces a symlink planted at `file` instead of following it. 'wx': nor is one at `tmp` followed.

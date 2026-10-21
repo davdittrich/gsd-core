@@ -2375,6 +2375,18 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
     assert.equal(fs.existsSync(tmp), false);
   });
 
+  // The record path is a non-empty directory, so the rename fails deterministically (EISDIR/ENOTEMPTY).
+  test('writeEscalation removes its tmp file and leaves the prior record when the rename fails', { skip: NO_SYMLINKS }, (t) => {
+    setup(t);
+    const esc = require('../gsd-core/bin/lib/model-escalation.cjs');
+    const record = escalationFile(project, 'gsd-executor');
+    fs.mkdirSync(record, { recursive: true });
+    fs.writeFileSync(path.join(record, 'prior'), 'keep');
+    esc.writeEscalation(project, 'gsd-executor', 'opus', undefined, { now: () => 42 });
+    assert.deepEqual(fs.readdirSync(record), ['prior']);
+    assert.deepEqual(fs.readdirSync(path.join(project, '.gsd')).filter((f) => f.endsWith('.tmp')), []);
+  });
+
   test('writeEscalation still updates .gsd/.gitignore past a stale .gitignore tmp file', (t) => {
     setup(t);
     const esc = require('../gsd-core/bin/lib/model-escalation.cjs');
