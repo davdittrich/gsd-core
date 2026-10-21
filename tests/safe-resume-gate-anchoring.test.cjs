@@ -129,6 +129,8 @@ describe('#4003 / #5164 — safe_resume_gate plan-commit lookups ask the resolve
 // These rows drive the REAL pathspec, extracted from the shipped workflow, against
 // a real git repo. Re-typing the pattern into the test would only assert that two
 // copies of a string agree; running it answers the question the gate actually asks.
+const NESTED_TEST_PATHS = ['crates/core/tests/scan_test.rs', 'src/__tests__/util.js', 'pkg/api/test_x.py'];
+
 describe('#4379 — the TDD RED pathspec is language-agnostic', () => {
   // Pull the pathspec out of the workflow rather than restating it: the thing
   // under test is what SHIPS, not a copy maintained alongside it.
@@ -151,7 +153,7 @@ describe('#4379 — the TDD RED pathspec is language-agnostic', () => {
       'tests/c.py', '__tests__/d.js',           // directory conventions
       'test_mod.py', 'mod_test.py',             // Python, outside tests/
       'lib_spec.rb', 'x_test.exs',              // Ruby, Elixir
-      'crates/core/tests/scan_test.rs', 'src/__tests__/util.js', 'pkg/api/test_x.py', // nested
+      ...NESTED_TEST_PATHS, // nested
       'src/impl.go', 'src/lib.rs',              // NOT tests — must never match
       'crates/core/src/scan.rs', 'src/test_utils/factory.py', 'test_utils/foo.py',  // NOT tests, nested + root
     ];
@@ -197,7 +199,7 @@ describe('#4379 — the TDD RED pathspec is language-agnostic', () => {
     // misses `crates/core/tests/…`.
     const dir = seedRepo(t);
     const hits = matched(dir, shippedRedPathspec());
-    for (const rel of ['crates/core/tests/scan_test.rs', 'src/__tests__/util.js', 'pkg/api/test_x.py']) {
+    for (const rel of NESTED_TEST_PATHS) {
       assert.ok(hits.has(rel), `${rel} must match`);
     }
     for (const rel of ['crates/core/src/scan.rs', 'src/test_utils/factory.py', 'test_utils/foo.py']) {

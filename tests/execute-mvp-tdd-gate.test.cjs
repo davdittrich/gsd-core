@@ -179,12 +179,14 @@ describe('#5106: test-file conventions are one definition', () => {
     assert.deepEqual([...workflowSpecs].sort(), [...TEST_FILE_PATHSPECS].sort(),
       'the workflow pathspec list and TEST_FILE_PATHSPECS must be the same set');
     // And the router recognises a literal root and nested sample of every convention.
-    for (const sample of [
+    const samples = [
       'a.test.js', 'nested/a.test.js', 'a.spec.js', 'nested/a.spec.js',
       'tests/x.js', 'nested/tests/x.js', '__tests__/x.js', 'nested/__tests__/x.js',
       'a_test.go', 'nested/a_test.go', 'test_a.py', 'nested/test_a.py', 'a_test.py', 'nested/a_test.py',
       'a_test.exs', 'nested/a_test.exs', 'a_spec.rb', 'nested/a_spec.rb', 'a_test.rb', 'nested/a_test.rb',
-    ]) {
+    ];
+    assert.equal(samples.length, 2 * TEST_FILE_PATHSPECS.length, 'one root and one nested sample per TEST_FILE_PATHSPECS entry');
+    for (const sample of samples) {
       assert.equal(isTestFilePath(sample), true, `${sample} must be recognised as a test file`);
     }
     assert.equal(isTestFilePath('placement.go'), false);
