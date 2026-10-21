@@ -12,14 +12,16 @@ const { REASON_INTERPOLATION_MAX_LEN } = require('./isolation-deny-reason.js');
 
 const ALLOW = { action: 'allow' };
 
+// Size bound for the .planning/config.json read (64 KiB; same value as the escalation-record bound).
+const CONFIG_MAX_READ_BYTES = 64 * 1024;
+
 // Strict JSON on purpose: a config this cannot parse (comments, trailing commas) fails open.
 // Runs only where the host resolves the tier aliases GSD resolves to (hostBehaviors.nativeModelAliases,
 // the fact model-resolver gates on), via the one runtime chain (GSD_RUNTIME > config.runtime > marker).
 // `mode` is read from the root config only, like the other hooks.* keys; the runtime comes from the same
 // workstream-aware loadConfig(root) the expected-model path resolves through, so both agree on it.
 function readGuardMode(root) {
-  const esc = require('../../gsd-core/bin/lib/model-escalation.cjs');
-  const text = require('../../gsd-core/bin/lib/capability-ledger.cjs').readSmallRegularFile(path.join(root, '.planning', 'config.json'), esc.MAX_READ_BYTES);
+  const text = require('../../gsd-core/bin/lib/capability-ledger.cjs').readSmallRegularFile(path.join(root, '.planning', 'config.json'), CONFIG_MAX_READ_BYTES);
   if (text === null) return { skip: true };
   const mode = (JSON.parse(text).hooks || {}).agent_model_guard;
   const runtime = require('../../gsd-core/bin/lib/runtime-slash.cjs').resolveActiveRuntime(require('../../gsd-core/bin/lib/config-loader.cjs').loadConfig(root, { persist: false }));
