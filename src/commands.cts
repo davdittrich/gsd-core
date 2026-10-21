@@ -612,7 +612,7 @@ function recordModelEscalation(cwd: string, agentType: string, model: string): v
       ? cwd
       : findProjectRoot(worktreeSafetyMod.resolveWorktreeRoot(cwd).root);
     writeEscalation(root, agentType, model, process.env['CLAUDE_CODE_SESSION_ID'] || undefined);
-  } catch { /* best-effort: a failure only costs a guard warning */ }
+  } catch { /* best-effort: with no record the guard warns, or blocks under "deny" */ }
 }
 
 /**
@@ -654,8 +654,8 @@ function cmdResolveExecution(cwd: string, agentType: string | undefined, raw: bo
     escalation = { class: opts.failureClass, ...resolved };
   }
 
-  // Only an escalated model writes a record. Nothing clears one: the record is single-slot per agent
-  // type, so a sibling plan's baseline `--attempt 0` must not drop an in-flight escalation; the
+  // Only an escalated model writes a record. Nothing clears one: the record is one slot per agent
+  // type and model family, so a sibling plan's baseline `--attempt 0` must not drop an in-flight escalation; the
   // guard's 10-minute window bounds a stale one.
   if (model && modelFamily(model) !== modelFamily(baselineModel)) recordModelEscalation(cwd, agentType, model);
 

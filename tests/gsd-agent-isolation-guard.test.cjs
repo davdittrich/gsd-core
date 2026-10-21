@@ -2023,10 +2023,11 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
   }
   const dispatch = (subagent_type, model, extra = {}) =>
     ({ hook_event_name: 'PreToolUse', tool_name: 'Agent', cwd: project, tool_input: { subagent_type, ...(model ? { model } : {}), ...extra } });
-  const escalationFile = (root, agent) => path.join(root, '.gsd', `model-escalation-${agent}.json`);
-  const writeEscalation = (root, agent, rec) => {
+  // One record per (agent, model family); `model` defaults to the common opus escalation.
+  const escalationFile = (root, agent, model = 'opus') => path.join(root, '.gsd', `model-escalation-${agent}.${model}.json`);
+  const writeEscalation = (root, agent, rec, model = rec.model || 'opus') => {
     fs.mkdirSync(path.join(root, '.gsd'), { recursive: true });
-    fs.writeFileSync(escalationFile(root, agent), typeof rec === 'string' ? rec : JSON.stringify(rec));
+    fs.writeFileSync(escalationFile(root, agent, model), typeof rec === 'string' ? rec : JSON.stringify(rec));
   };
   const evaluate = (payload, clock) => guardModule.evaluateDispatch(payload, clock ? { clock } : {});
 
@@ -2222,7 +2223,7 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
     const r = runGsdTools(['resolve-execution', 'gsd-executor', '--attempt', '1', '--failure-class', 'quota-exceeded'], project);
     assert.ok(r.success, r.error);
     assert.equal(JSON.parse(r.output).model, 'gpt-5');
-    assert.equal(JSON.parse(fs.readFileSync(escalationFile(project, 'gsd-executor'), 'utf8')).model, 'gpt-5');
+    assert.equal(JSON.parse(fs.readFileSync(escalationFile(project, 'gsd-executor', 'gpt-5'), 'utf8')).model, 'gpt-5');
   });
 
   test('family match is token-bounded: substrings of custom model names do not collide', (t) => {
@@ -2253,6 +2254,26 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
     assert.ok(runGsdTools(['resolve-execution', 'gsd-executor', '--attempt', '1'], project).success);
     assert.ok(runGsdTools(['resolve-execution', 'gsd-executor'], project).success);
     assert.equal(fs.existsSync(escalationFile(project, 'gsd-executor')), true);
+  });
+
+  test('sibling escalations of one agent to different models each keep their record under deny', (t) => {
+    setup(t, { ...ISSUE_CONFIG, hooks: { agent_model_guard: 'deny' }, dynamic_routing: { ...ISSUE_CONFIG.dynamic_routing, provider_escalation: ['gpt-5'] } });
+    assert.ok(runGsdTools(['resolve-execution', 'gsd-executor', '--attempt', '1'], project).success);
+    assert.ok(runGsdTools(['resolve-execution', 'gsd-executor', '--attempt', '1', '--failure-class', 'quota-exceeded'], project).success);
+    assert.equal(evaluate(dispatch('gsd-executor', 'opus', WORKTREE)).action, 'allow');
+    assert.equal(evaluate(dispatch('gsd-executor', 'gpt-5', WORKTREE)).action, 'allow');
+    assert.equal(evaluate(dispatch('gsd-executor', 'haiku', WORKTREE)).action, 'block', 'a model nobody escalated to');
+  });
+
+  test('writeEscalation keys by model family: same family replaces, another adds', (t) => {
+    setup(t);
+    const esc = require('../gsd-core/bin/lib/model-escalation.cjs');
+    esc.writeEscalation(project, 'gsd-executor', 'opus', undefined, { now: () => 1 });
+    esc.writeEscalation(project, 'gsd-executor', 'claude-opus-4-8', undefined, { now: () => 2 });
+    esc.writeEscalation(project, 'gsd-executor', 'a/b:c', undefined, { now: () => 3 });
+    const files = fs.readdirSync(path.join(project, '.gsd')).filter((f) => f.startsWith('model-escalation-')).sort();
+    assert.deepEqual(files, ['model-escalation-gsd-executor.a_b_c.json', 'model-escalation-gsd-executor.opus.json']);
+    assert.equal(JSON.parse(fs.readFileSync(escalationFile(project, 'gsd-executor'), 'utf8')).written_at, 2);
   });
 
   test('a sibling plan\'s baseline --attempt 0 does not drop an in-flight escalation', (t) => {
@@ -2352,6 +2373,18 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
     esc.writeEscalation(project, 'gsd-executor', 'opus', undefined, { now: () => 42 });
     assert.deepEqual(JSON.parse(fs.readFileSync(escalationFile(project, 'gsd-executor'), 'utf8')), { model: 'opus', written_at: 42 });
     assert.equal(fs.existsSync(tmp), false);
+  });
+
+  // The record path is a non-empty directory, so the rename fails deterministically (EISDIR/ENOTEMPTY).
+  test('writeEscalation removes its tmp file and leaves the prior record when the rename fails', { skip: NO_SYMLINKS }, (t) => {
+    setup(t);
+    const esc = require('../gsd-core/bin/lib/model-escalation.cjs');
+    const record = escalationFile(project, 'gsd-executor');
+    fs.mkdirSync(record, { recursive: true });
+    fs.writeFileSync(path.join(record, 'prior'), 'keep');
+    esc.writeEscalation(project, 'gsd-executor', 'opus', undefined, { now: () => 42 });
+    assert.deepEqual(fs.readdirSync(record), ['prior']);
+    assert.deepEqual(fs.readdirSync(path.join(project, '.gsd')).filter((f) => f.endsWith('.tmp')), []);
   });
 
   test('writeEscalation still updates .gsd/.gitignore past a stale .gitignore tmp file', (t) => {

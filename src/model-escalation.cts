@@ -2,10 +2,11 @@
  * Model escalation record (#5328) — the one owner of the file
  * `resolve-execution --attempt N` writes and hooks/lib/agent-model-check.js reads.
  *
- * Single slot per agent type: `.gsd/model-escalation-<agent>.json` holds the model
- * an escalation resolved, when, and (when known) the session that asked for it.
- * The guard honours it for ESCALATION_WINDOW_MS, only for that model and, when both
- * sides know a session id, only in that session. Unauthenticated by design: a
+ * One slot per agent type and model family: `.gsd/model-escalation-<agent>.<family>.json`
+ * holds the model an escalation resolved, when, and (when known) the session that asked
+ * for it. Sibling escalations of one agent to different models therefore keep their own
+ * records. The guard honours the passed model's record for ESCALATION_WINDOW_MS and, when
+ * both sides know a session id, only in that session. Unauthenticated by design: a
  * guard against drift, not a security boundary.
  */
 
@@ -13,10 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { realClock, type Clock } from './clock.cjs';
 import { retryRenameSync } from './shell-command-projection.cjs';
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-import capabilityLedgerMod = require('./capability-ledger.cjs');
-
-const { readSmallRegularFile } = capabilityLedgerMod;
+import { seedGsdIgnore } from './gsd-ignore.cjs';
 
 export const ESCALATION_WINDOW_MS = 10 * 60 * 1000;
 /** Tolerated clock skew for a record stamped slightly in the future. */
@@ -33,46 +31,36 @@ export interface EscalationRecord {
   session?: string;
 }
 
-export const escalationFile = (root: string, agentType: string): string =>
-  path.join(root, '.gsd', `model-escalation-${agentType}.json`);
-
 /** Compare at tier-alias level: `claude-sonnet-4-6` and `sonnet` are the same. */
 export function modelFamily(model: unknown): string {
   const s = String(model).toLowerCase();
   return /(?:^|[^a-z0-9])(opus|sonnet|haiku|fable)(?:$|[^a-z])/.exec(s)?.[1] ?? s;
 }
 
-/** Best-effort: a write failure only costs a guard warning. */
+/**
+ * The family is model-authored, so it is reduced to file-name-safe characters and capped.
+ * Lossy: distinct families can share a file (e.g. `a/b` and `a_b`); the worst case is a false
+ * mismatch (a warning, or a block under `deny`), never a bypass, because `escalationAllows` re-checks the stored model's family.
+ */
+export const escalationFile = (root: string, agentType: string, model: string): string =>
+  path.join(root, '.gsd', `model-escalation-${agentType}.${modelFamily(model).replace(/[^a-z0-9._-]/g, '_').slice(0, 64)}.json`);
+
+/** Best-effort: after a failed write the guard sees no record, so it warns, or blocks under `deny`. */
 export function writeEscalation(
   root: string, agentType: string, model: string, session?: string, clock: Pick<Clock, 'now'> = realClock,
 ): void {
   if (!GUARDED_AGENT_TYPES.has(agentType)) return; // also keeps agentType, a file name, from traversing
   try {
     const dir = path.join(root, '.gsd');
-    const file = escalationFile(root, agentType);
+    const file = escalationFile(root, agentType, model);
     fs.mkdirSync(dir, { recursive: true });
     // Catches a planted .gsd symlink; racing a swap after this needs repo write access already.
     if (fs.lstatSync(dir).isSymbolicLink()) return;
-    const ignore = path.join(dir, '.gitignore');
-    try {
-      fs.writeFileSync(ignore, '*\n', { flag: 'wx' });
-    } catch {
-      // Pre-existing (e.g. the dispatch sentinel's rules only): a bare `*` already covers the record,
-      // else add our own rule. Replace by rename so a link swapped in after the lstat is not written through.
-      if (!fs.lstatSync(ignore).isSymbolicLink()) {
-        const cur = readSmallRegularFile(ignore, MAX_READ_BYTES) ?? '';
-        if (!/^\*\r?$/m.test(cur) && !/^\/model-escalation-\*\r?$/m.test(cur)) {
-          const next = `${ignore}.${process.pid}.tmp`;
-          fs.rmSync(next, { force: true }); // left by a crashed writer whose pid was reused
-          try {
-            fs.writeFileSync(next, `${cur}${cur === '' || cur.endsWith('\n') ? '' : '\n'}/model-escalation-*\n`, { flag: 'wx' });
-            retryRenameSync(next, ignore);
-          } catch {
-            fs.rmSync(next, { force: true });
-          }
-        }
-      }
-    }
+    seedGsdIgnore(dir, {
+      covers: (cur) => /^\*\r?$/m.test(cur) || /^\/model-escalation-\*\r?$/m.test(cur),
+      append: (cur) => `${cur === '' || cur.endsWith('\n') ? '' : '\n'}/model-escalation-*\n`,
+      tmp: `${path.join(dir, '.gitignore')}.${process.pid}.tmp`,
+    });
     const rec: EscalationRecord = { model, written_at: clock.now(), ...(session ? { session } : {}) };
     // tmp + rename on every platform: the hook never reads a half-written record, and rename
     // replaces a symlink planted at `file` instead of following it. 'wx': nor is one at `tmp` followed.
@@ -87,15 +75,15 @@ export function writeEscalation(
   } catch { /* best-effort */ }
 }
 
-/** Parsed record, or null when absent, a symlink, non-regular, oversized or unparseable. */
-export function readEscalation(root: string, agentType: string): EscalationRecord | null {
+/** Parsed record for `passedModel`'s family, or null when absent, a symlink, non-regular, oversized or unparseable. */
+export function readEscalation(root: string, agentType: string, passedModel: string): EscalationRecord | null {
   // Own no-follow open, not the shared reader (it follows links; SKILL.md and others rely on that).
   // O_NOFOLLOW closes the lstat-then-open race; win32 lacks it (and O_NONBLOCK), so there the lstat
   // alone refuses a link, and a swap after it needs repo write access, which forges a record anyway.
   const { O_RDONLY, O_NONBLOCK, O_NOFOLLOW } = fs.constants;
   let fd: number | undefined;
   try {
-    const file = escalationFile(root, agentType);
+    const file = escalationFile(root, agentType, passedModel);
     if (fs.lstatSync(file).isSymbolicLink()) return null;
     fd = fs.openSync(file, O_RDONLY | (O_NONBLOCK || 0) | (O_NOFOLLOW || 0));
     if (!fs.fstatSync(fd).isFile()) return null; // FIFO, device
