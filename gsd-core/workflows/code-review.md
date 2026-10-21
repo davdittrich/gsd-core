@@ -535,6 +535,15 @@ An empty `REVIEW_FILES` (#3661) means nothing new to re-review — NOT a phase w
 
 ```bash
 REVIEW_PATH="${PHASE_DIR}/${PADDED_PHASE}-REVIEW.md"
+# #5019: a previous run's persisted lane evidence (and its kept lane dir) is stale on every route,
+# including the `--fix` recovery below that skips commit_review. Line 1 is data: only a 6-char
+# alphanumeric mktemp suffix is accepted, never a path.
+LE="${REVIEW_PATH%.md}-lane-evidence.md"
+if [ -f "$LE" ]; then
+  S=$(head -n 1 "$LE"); D="${TMPDIR:-/tmp}/gsd-review-lanes-$S"
+  case "$S" in *[!A-Za-z0-9]*|'') ;; ??????) [ -d "$D" ] && [ ! -L "$D" ] && rm -rf "$D";; esac
+  rm -f "$LE"
+fi
 if [ "${#REVIEW_FILES[@]}" -ne 0 ]; then
   # non-empty scope: no-op
   true
@@ -638,8 +647,9 @@ elif [ ${#EXPLICIT_REVIEWER_SLUGS[@]} -gt 0 ]; then
   # (gsd-review-prompt.md, gsd-review-<slug>.md/.err) are read-once evidence for THIS run, never
   # meant to be committed, and a second dispatch on the same phase would otherwise silently
   # overwrite the prior run's files in place. Removed by commit_review once the reviewer agent
-  # has read every cited evidence path. An early exit between here and commit_review (a
-  # checkpoint, a halt) leaves this directory on disk — the same trade-off review.md's own
+  # has read every cited evidence path (kept for `--auto` until code-review-fix.md's loop ends,
+  # #5019). An early exit between here and commit_review (a checkpoint, a halt) leaves this
+  # directory on disk — the same trade-off review.md's own
   # gather_context/cleanup pair already accepts for the identical resource class: a leftover
   # $TMPDIR entry is cheaper than a cleanup mechanism (e.g. a trap) that could fire before a
   # later step reads it. Not a regression to fix; matches established precedent.
@@ -826,7 +836,12 @@ After agent completes successfully, verify REVIEW.md was created and has valid s
 # #4209 R5: remove the reviewer-lane run dir now that the agent has read every evidence path it
 # cited (the agent ran to completion before this step, per `dispatch_reviewer_lanes` above) — a
 # no-op when no reviewer lane was dispatched (LANE_RUN_DIR stays unset).
-if [ -n "${LANE_RUN_DIR:-}" ]; then
+# #5019: an `--auto` run with evidence keeps LANE_RUN_DIR (line 1 of the file is its mktemp suffix)
+# so code-review-fix.md's re-reviews can read the same cited paths. It removes both when the loop
+# ends; `check_empty_scope` cleared any earlier run's file.
+if [ -n "${EXTERNAL_EVIDENCE_BLOCK:-}" ] && [ "${FIX_AUTO:-}" = "true" ] && [ -n "${LANE_RUN_DIR:-}" ]; then
+  printf '%s\n%s\n' "${LANE_RUN_DIR##*gsd-review-lanes-}" "$EXTERNAL_EVIDENCE_BLOCK" > "${REVIEW_PATH%.md}-lane-evidence.md"
+elif [ -n "${LANE_RUN_DIR:-}" ]; then
   rm -rf "$LANE_RUN_DIR"
 fi
 
