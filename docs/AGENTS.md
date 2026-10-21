@@ -587,7 +587,7 @@ Communication style, decision patterns, debugging approach, UX preferences, vend
 
 ## Advanced and Specialized Agents
 
-Twelve additional agents ship under `agents/gsd-*.md` and are used by specialty workflows (`/gsd-ai-integration-phase`, `/gsd-eval-review`, `/gsd-code-review`, `/gsd-code-review --fix`, `/gsd-debug`, `/gsd-map-codebase --query`, `/gsd-ingest-docs`) and by the planner pipeline. Each carries full frontmatter in its agent file; the stubs below are concise by design. The authoritative roster (with spawner and primary-doc status per agent) lives in [`docs/INVENTORY.md`](INVENTORY.md).
+Thirteen additional agents ship under `agents/gsd-*.md` and are used by specialty workflows (`/gsd-ai-integration-phase`, `/gsd-eval-review`, `/gsd-code-review`, `/gsd-code-review --fix`, `/gsd-debug`, `/gsd-map-codebase --query`, `/gsd-ingest-docs`) and by the planner pipeline. Each carries full frontmatter in its agent file; the stubs below are concise by design. The authoritative roster (with spawner and primary-doc status per agent) lives in [`docs/INVENTORY.md`](INVENTORY.md).
 
 ### gsd-pattern-mapper
 
