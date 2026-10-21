@@ -18,6 +18,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { runNode, runHook } = require('./helpers/process-seam.cjs');
 const { PROBE_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
+const fc = require('./helpers/fast-check-setup.cjs');
 // Same gate the shipped fences carry everywhere in this suite: bash is not assumed on win32.
 const HAS_BASH = process.platform !== 'win32';
 
@@ -285,7 +286,13 @@ describe('#5019 — --auto re-review keeps the external reviewer lane evidence',
     assert.notStrictEqual(b, -1, `end "${to}" not found`);
     return l.slice(a, b + 1).join('\n');
   };
-  const bash = (script) => runHook('-c', [script], { interpreter: 'bash', timeoutMs: PROBE_TIMEOUT_MS });
+  // `bash -n` first: a reflow that moves an end marker into a nested construct cuts an unbalanced
+  // snippet, which must fail loudly here instead of running a truncated fence.
+  const bash = (script, env) => {
+    const syntax = runHook('-n', ['-c', script], { interpreter: 'bash', timeoutMs: PROBE_TIMEOUT_MS });
+    assert.strictEqual(syntax.exitCode, 0, `extracted snippet is not complete shell: ${syntax.stderr}`);
+    return runHook('-c', [script], { interpreter: 'bash', timeoutMs: PROBE_TIMEOUT_MS, ...(env && { env: { ...process.env, ...env } }) });
+  };
   // A scratch TMPDIR holding lane dirs plus an outside "victim" dir the guard must never touch.
   const sandbox = (t, fn) => {
     const dir = createTempDir('gsd-5019-');
@@ -355,7 +362,6 @@ describe('#5019 — --auto re-review keeps the external reviewer lane evidence',
     };
     sandbox(t, (sb) => {
       fs.mkdirSync(path.join(sb.tmp, 'gsd-review-lanes-abc123'));
-      // allow-test-rule: source-text-is-the-product (#5019) the block IS the prompt payload handed to the reviewer
       assert.match(drive(sb, 'abc123'), /<external_reviewer_evidence>X<\/external_reviewer_evidence>/);
       // find -mmin -360 rounds differently on GNU and BSD (macOS keeps a file aged exactly 360 min),
       // so the 360 boundary itself is implementation-defined and deliberately not asserted.
@@ -383,7 +389,14 @@ describe('#5019 — --auto re-review keeps the external reviewer lane evidence',
     const read = lines(stepRegion(FIX, 'auto_iteration_loop'), '# #5019: re-surface', 'esac');
     // The re-review prompt template, run through bash so the block's place in it is executed, not grepped.
     // The reviewer agent that consumes it is the one step no test can run (stated in the PR body).
-    const tpl = lines(stepRegion(FIX, 'auto_iteration_loop'), '${EXTERNAL_EVIDENCE_BLOCK}<config>', '${AGENT_SKILLS_REVIEWER}")').slice(0, -2);
+    // Bounded by the Agent() call's own `prompt="` ... `")` syntax, not by prose lines inside it.
+    const loop = stepRegion(FIX, 'auto_iteration_loop');
+    const call = loop.indexOf('Agent(subagent_type="gsd-code-reviewer"');
+    assert.notStrictEqual(call, -1, 're-review Agent() call not found');
+    const from = loop.indexOf('prompt="', call) + 'prompt="'.length;
+    const to = loop.indexOf('")', from);
+    assert.ok(from > call && to > from, 're-review prompt literal not found');
+    const tpl = loop.slice(from, to);
     const out = bash([
       `export TMPDIR="${dir}"; REVIEW_PATH="${review}"; LANE_RUN_DIR="${lanes}"; COMMIT_DOCS=false; FIX_AUTO=true`,
       `EXTERNAL_EVIDENCE_BLOCK='${block}'`, stepFence(REVIEW, 'commit_review'),
@@ -392,9 +405,8 @@ describe('#5019 — --auto re-review keeps the external reviewer lane evidence',
       'printf "%s" "$EXTERNAL_EVIDENCE_BLOCK"', "printf '\\0'",
       `REVIEW_DEPTH=standard PHASE_DIR="${dir}"; PROMPT="${tpl}"; printf '%s' "$PROMPT"`].join('\n'));
     const [blockOut, prompt] = out.stdout.split('\0');
-    // allow-test-rule: source-text-is-the-product (#5019) the block IS the prompt payload handed to the reviewer
     assert.ok(blockOut.endsWith(`${block}\n\n`), 'the re-review reads back the exact block');
-    assert.ok(prompt.startsWith(`${block}\n\n<config>\ndepth: standard\n`), 'the re-review prompt is assembled with the block ahead of <config>');
+    assert.ok(prompt.startsWith(`\n${block}\n\n<config>\ndepth: standard\n`), 'the re-review prompt is assembled with the block ahead of <config>');
     assert.strictEqual(fs.readFileSync(cited, 'utf8'), 'lane-only finding', 'the reviewer can still re-read the cited path');
   });
 
@@ -407,7 +419,6 @@ describe('#5019 — --auto re-review keeps the external reviewer lane evidence',
     };
     sandbox(t, (sb) => {
       const d = path.join(sb.tmp, 'gsd-review-lanes-abc123'); fs.mkdirSync(d);
-      // allow-test-rule: source-text-is-the-product (#5019) the warning text is the user-facing output
       assert.match(warns(sb, 'abc123', 7 * 3600 * 1000), /^Warning: lane evidence .* rejected/, 'stale');
       assert.match(warns(sb, 'zzz999'), /^Warning: lane evidence .* rejected/, 'lane dir missing');
       fs.symlinkSync(sb.victim, path.join(sb.tmp, 'gsd-review-lanes-sym123'));
@@ -418,15 +429,15 @@ describe('#5019 — --auto re-review keeps the external reviewer lane evidence',
     });
   });
 
-  test('commit_review persists the block + keeps the lane dir only for --auto; else unchanged', { skip: !HAS_BASH }, (t) => {
+  test('commit_review persists the block + keeps the lane dir only for --auto with a valid REVIEW.md', { skip: !HAS_BASH }, (t) => {
     const fence = stepFence(REVIEW, 'commit_review');
-    const drive = (auto, stale) => {
+    const drive = (auto, reviewText) => {
       const dir = createTempDir('gsd-5019-');
       t.after(() => cleanup(dir));
       const lanes = path.join(dir, 'gsd-review-lanes-abc123'); fs.mkdirSync(lanes);
       const review = path.join(dir, '01-REVIEW.md');
       const file = path.join(dir, '01-REVIEW-lane-evidence.md');
-      if (stale) fs.writeFileSync(file, 'stale');
+      if (reviewText !== null) fs.writeFileSync(review, reviewText);
       const script = [
         `REVIEW_PATH="${review}"; LANE_RUN_DIR="${lanes}"; COMMIT_DOCS=false`,
         auto ? 'FIX_AUTO=true' : '',
@@ -436,9 +447,54 @@ describe('#5019 — --auto re-review keeps the external reviewer lane evidence',
       bash(script);
       return { file: fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null, lanes: fs.existsSync(lanes) };
     };
-    // allow-test-rule: source-text-is-the-product (#5019) the persisted file IS the re-review prompt payload
-    assert.deepStrictEqual(drive(true, false), { file: `abc123\n${BLOCK}\n`, lanes: true });
-    assert.deepStrictEqual(drive(false, false), { file: null, lanes: false });
+    const VALID = '---\nstatus: issues_found\n---\n';
+    assert.deepStrictEqual(drive(true, VALID), { file: `abc123\n${BLOCK}\n`, lanes: true });
+    assert.deepStrictEqual(drive(false, VALID), { file: null, lanes: false });
+    // No fixer loop starts on an invalid or missing REVIEW.md, so nothing may be left for it to clean.
+    assert.deepStrictEqual(drive(true, '# no frontmatter\n'), { file: null, lanes: false }, 'invalid REVIEW.md');
+    assert.deepStrictEqual(drive(true, null), { file: null, lanes: false }, 'missing REVIEW.md');
+  });
+
+  test('property: only a ^[A-Za-z0-9]{6}$ line 1 is acted on; the persist/read format round-trips', { skip: !HAS_BASH }, (t) => {
+    const read = lines(stepRegion(FIX, 'auto_iteration_loop'), '# #5019: re-surface', 'esac');
+    const removal = REMOVALS.cleanup_iteration_backups();
+    const persist = stepFence(REVIEW, 'commit_review');
+    const SUFFIX = /^[A-Za-z0-9]{6}$/;
+    const runs = { numRuns: 40 }; // every sample spawns bash
+    // Line 1 never holds a newline (it is line 1) or a NUL (a bash variable cannot).
+    // Mostly 5-7 chars over a near-miss alphabet, so the length arm admits many and only the class must reject them.
+    const near = fc.string({ unit: fc.constantFrom(...'aZ09/.*-_ ?[]'), minLength: 5, maxLength: 7 });
+    const line1 = fc.oneof(near, fc.string({ maxLength: 10 })).filter((x) => !/[\n\0]/.test(x));
+    fc.assert(fc.property(line1, (l1) => {
+      fc.pre(!SUFFIX.test(l1));
+      return sandbox(t, (sb) => {
+        // A lane dir literally named after line 1 (when that is a creatable name) must survive rejection.
+        let named = null;
+        if (l1 && !/[/\\]/.test(l1) && l1 !== '.' && l1 !== '..') { named = path.join(sb.tmp, `gsd-review-lanes-${l1}`); fs.mkdirSync(named); }
+        fs.writeFileSync(sb.file, `${l1}\nblock\n`);
+        const env = `export TMPDIR="${sb.tmp}"; REVIEW_PATH="${sb.review}"`;
+        const got = bash(`${env}\n${read}\nprintf '%s' "$EXTERNAL_EVIDENCE_BLOCK"`).stdout;
+        bash(`${env}\n${removal}`);
+        assert.strictEqual(got, '', `line 1 ${JSON.stringify(l1)} yields no block`);
+        assert.strictEqual(fs.existsSync(path.join(sb.victim, 'keep')), true, 'victim untouched');
+        if (named) assert.strictEqual(fs.existsSync(named), true, 'rejected suffix removes nothing');
+        return true;
+      });
+    }), runs);
+    const suffix = fc.string({ unit: fc.constantFrom(...'abcxyzABCXYZ0189'), minLength: 6, maxLength: 6 });
+    const block = fc.array(fc.string({ maxLength: 20 }), { minLength: 1, maxLength: 4 }).map((a) => a.join('\n'))
+      .filter((b) => b.length > 0 && !b.includes('\0') && !b.endsWith('\n'));
+    fc.assert(fc.property(suffix, block, (sfx, blk) => sandbox(t, (sb) => {
+      const lanes = path.join(sb.tmp, `gsd-review-lanes-${sfx}`); fs.mkdirSync(lanes);
+      fs.writeFileSync(sb.review, '---\nstatus: issues_found\n---\n');
+      const env = `export TMPDIR="${sb.tmp}"; REVIEW_PATH="${sb.review}"`;
+      bash(`${env}; LANE_RUN_DIR="${lanes}"; COMMIT_DOCS=false; FIX_AUTO=true; EXTERNAL_EVIDENCE_BLOCK="$GSD_BLOCK"\n${persist}`, { GSD_BLOCK: blk });
+      const got = bash(`${env}\n${read}\nprintf '%s' "$EXTERNAL_EVIDENCE_BLOCK"`).stdout;
+      assert.strictEqual(got, `${blk}\n\n`, 'the block round-trips byte-exact');
+      bash(`${env}\n${removal}`);
+      assert.deepStrictEqual([fs.existsSync(lanes), fs.existsSync(sb.file), fs.existsSync(path.join(sb.victim, 'keep'))], [false, false, true]);
+      return true;
+    })), runs);
   });
 
   test('check_review_exists removes the lane evidence before it exits 1', { skip: !HAS_BASH }, (t) => {

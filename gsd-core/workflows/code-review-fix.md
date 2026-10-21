@@ -48,7 +48,7 @@ if ! [[ "$PADDED_PHASE" =~ ^[0-9]+[A-Z]?(\.[0-9]+)*$ ]]; then
 fi
 ```
 
-**Phase validation (before config gate):** (no lane evidence is removed here: `REVIEW_PATH` is not known yet)
+**Phase validation (before config gate):** No lane evidence is removed on this exit because `REVIEW_PATH` is not known yet.
 If `phase_found` is false, report error and exit:
 ```
 Error: Phase ${PHASE_ARG} not found. Run /gsd:progress to see available phases.
@@ -526,7 +526,7 @@ both, not two competing ones.
 </step>
 
 <step name="cleanup_iteration_backups">
-Only runs if AUTO_MODE is true. If AUTO_MODE is false, skip this step entirely — except the lane-evidence removal fence at its end, which the other exits also run.
+The `.iterN.md` backup removal below runs only if AUTO_MODE is true. The #5019 lane-evidence removal fence at the end of this step runs whatever AUTO_MODE is.
 
 **Removes the `.iterN.md` scratch — deliberately AFTER `record_disposition`, not at the end of the
 loop.** #3190's rule is unchanged: on convergence the backups are spent scratch and go; on degradation
