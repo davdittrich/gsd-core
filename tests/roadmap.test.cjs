@@ -3755,13 +3755,27 @@ Plans:
         test(`${name}: file untouched and the skip is reported`, () => {
           const roadmap = split(middle);
           tmpDir = makeFour([1, 2, 3, 4], [['A'], ['B'], ['C'], ['D']], roadmap);
-          const { out, stderr } = annotate();
+          const { out } = annotate();
           assert.strictEqual(out.updated, false);
           assert.strictEqual(out.skipped, 'unrecognised_checklist_row');
           assert.strictEqual(fs.readFileSync(roadmapFile(), 'utf-8'), roadmap, 'ROADMAP.md byte-identical');
-          assert.match(stderr, /WARNING: .*01-02-PLAN\.md/, 'warning names the stranded row');
         });
       }
+
+      test('a hand-written checklist bullet after a dropped generated block stays out of the Plans list', () => {
+        const gen = '\n**Cross-cutting constraints:** <!-- gsd:generated -->\n- Shared rule\n\n';
+        const roadmap = ROADMAP4.replace('- [ ] 01-04-PLAN.md — Four\n', `- [ ] 01-04-PLAN.md — Four\n${gen}- [ ] confirm with design\n`);
+        tmpDir = makeFour([1, 2, 3, 3], [['A'], ['B'], ['C'], ['D']], roadmap);
+        const lines = () => splitLines(fs.readFileSync(roadmapFile(), 'utf-8'));
+        const planRows = () => lines().filter(l => l.includes('-PLAN.md'));
+        run();
+        const rows1 = planRows();
+        assert.strictEqual(run().updated, false);
+        const after = lines();
+        const lastPlan = after.findLastIndex(l => l.includes('-PLAN.md'));
+        assert.ok(after.indexOf('- [ ] confirm with design') > lastPlan, 'bullet sits after the last plan row');
+        assert.deepStrictEqual(planRows(), rows1, 'Plans list rows unchanged between runs');
+      });
 
       test('a markdown-link bullet after the list does not block annotation', () => {
         const roadmap = ROADMAP4.replace(

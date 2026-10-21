@@ -1950,8 +1950,8 @@ function cmdRoadmapAnnotateDependencies(cwd: string, phaseNum: string | null | u
     // only (user prose kept); group 3 the exact constraints header + bullets, never read as plans.
     // Block ends in one blank line (group 3 eats it) so later user bullets survive; legacy blocks
     // (no marker) keep bullets that are not current shared truths; the exact heading is reserved.
-    // eslint-disable-next-line local/no-unbounded-quantifier -- outer `+` has no trailing constraint to force re-partitioning; alternatives start with distinct literals; measured linear to 10.9MB
-    const plansBlockMatch = phaseSection.match(/(?:^|\r?\n)(\*{0,2}Plans\*{0,2}:[^\r\n]*\r?\n)((?:\s*-\s*\[[ x]\][^\r\n]*\r?\n?|\s*\*\*Wave\s+\d+\*\*(?: \*\(blocked on Wave \d+ completion\)\*)?[ \t]*(?:\r?\n|$)(?=\s*-\s*\[[ x]\]))+)(\s*\*\*Cross-cutting constraints:\*\*( <!-- gsd:generated -->)?[ \t]*(?:\r?\n|$)(?:[ \t]*-[ \t]+[^\r\n]*\r?\n?)*(?:[ \t]*\r?\n)?)?/i);
+    // Outer `+` has no trailing constraint to force re-partitioning; alternatives start with distinct literals; measured linear to 10.9MB.
+    const plansBlockMatch = phaseSection.match(new RegExp(String.raw`(?:^|\r?\n)(\*{0,2}Plans\*{0,2}:[^\r\n]*\r?\n)((?:[ \t]*-\s*\[[ x]\][^\r\n]*\r?\n?|\s*\*\*Wave\s+\d+\*\*(?: \*\(blocked on Wave \d+ completion\)\*)?[ \t]*(?:\r?\n|$)(?=\s*-\s*\[[ x]\]))+)(\s*\*\*Cross-cutting constraints:\*\*(${escapeRegex(GENERATED_MARK)})?[ \t]*(?:\r?\n|$)(?:[ \t]*-[ \t]+[^\r\n]*\r?\n?)*(?:[ \t]*\r?\n)?)?`, 'i'));
     if (!plansBlockMatch) return;
 
     const plansHeader = plansBlockMatch[1];
@@ -1963,10 +1963,13 @@ function cmdRoadmapAnnotateDependencies(cwd: string, phaseNum: string | null | u
     // #5321: a checklist row group 2 rejects (`- [  ]`, `* [ ]`), or an empty generated wave
     // header, splits the list; rewriting only the prefix would orphan the rest — skip loudly.
     const stranded = plansBlockMatch[3] ? undefined : findStrandedRow(splitLines(phaseSection.slice(plansBlockMatch.index! + plansBlockMatch[0].length)));
+    const warn = (head: string, tail: string): void => {
+      process.stderr.write(`[gsd-tools] WARNING: roadmap annotate-dependencies ${head}${formatDiagnosticToken(String(phaseNum))}${tail}`);
+    };
     if (stranded) {
-      process.stderr.write(
-        `[gsd-tools] WARNING: roadmap annotate-dependencies skipped — unrecognised checklist row `
-        + `"${formatDiagnosticToken(stranded.trim())}" splits the Plans list of phase ${formatDiagnosticToken(String(phaseNum))}.\n`,
+      warn(
+        `skipped — unrecognised checklist row "${formatDiagnosticToken(stranded.trim())}" splits the Plans list of phase `,
+        '.\n',
       );
       skipped = 'unrecognised_checklist_row';
       return;
@@ -2034,19 +2037,19 @@ function cmdRoadmapAnnotateDependencies(cwd: string, phaseNum: string | null | u
       const names = texts.map(formatDiagnosticToken).join('; ');
       if (unknown.length > 0 && plansBlockMatch[4]) {
         droppedGenerated = texts;
-        process.stderr.write(
-          `[gsd-tools] WARNING: roadmap annotate-dependencies dropped ${unknown.length} bullet(s) under the generated `
-          + `constraints heading that match no current plan truth in phase ${formatDiagnosticToken(String(phaseNum))}: ${names} `
-          + `— put your own bullets after a blank line.\n`,
+        warn(
+          `dropped ${unknown.length} bullet(s) under the generated `
+          + `constraints heading that match no current plan truth in phase `,
+          `: ${names} — put your own bullets after a blank line.\n`,
         );
       } else if (unknown.length > 0) {
         if (crossCuttingTruths.length === 0) annotatedLines.push('');
         annotatedLines.push(...unknown);
         staleLegacy = texts;
-        process.stderr.write(
-          `[gsd-tools] WARNING: roadmap annotate-dependencies kept ${unknown.length} bullet(s) under a pre-#5321 `
-          + `constraints block that match no current plan truth in phase ${formatDiagnosticToken(String(phaseNum))}: `
-          + `${names} — delete any that are stale.\n`,
+        warn(
+          `kept ${unknown.length} bullet(s) under a pre-#5321 `
+          + `constraints block that match no current plan truth in phase `,
+          `: ${names} — delete any that are stale.\n`,
         );
       }
     }
