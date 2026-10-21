@@ -57,16 +57,25 @@ describe('review-lane availability (#5266)', () => {
   let stall;
   let downUrl;
 
+  // Every server is recorded as it starts, so `after` closes the already-listening ones even when
+  // `before` throws midway (node:test still runs `after` hooks after a failed `before`).
+  const started = [];
+  const open = async (handler) => {
+    const s = await listen(handler);
+    started.push(s);
+    return s;
+  };
+
   before(async () => {
     tmp = createTempProject();
-    up = await listen((req, res) => { res.statusCode = req.url === '/v1/models' ? 200 : 404; res.end('{}'); });
-    unauth = await listen(status(401));
-    notFound = await listen(status(404));
-    boom = await listen(status(500));
-    target = await listen(status(200));
-    redirector = await listen((req, res) => { res.statusCode = 302; res.setHeader('Location', `${target.url}/v1/models`); res.end(); });
-    hang = await listen(() => {});
-    stall = await listen((req, res) => { res.writeHead(200); res.write('{'); });
+    up = await open((req, res) => { res.statusCode = req.url === '/v1/models' ? 200 : 404; res.end('{}'); });
+    unauth = await open(status(401));
+    notFound = await open(status(404));
+    boom = await open(status(500));
+    target = await open(status(200));
+    redirector = await open((req, res) => { res.statusCode = 302; res.setHeader('Location', `${target.url}/v1/models`); res.end(); });
+    hang = await open(() => {});
+    stall = await open((req, res) => { res.writeHead(200); res.write('{'); });
     const closed = http.createServer();
     await new Promise((r) => closed.listen(0, '127.0.0.1', r));
     downUrl = `http://127.0.0.1:${closed.address().port}`;
@@ -74,8 +83,8 @@ describe('review-lane availability (#5266)', () => {
   });
 
   after(async () => {
-    for (const s of [up, unauth, notFound, boom, target, redirector, hang, stall]) await closeServer(s);
-    cleanup(tmp);
+    for (const s of started) await closeServer(s);
+    if (tmp) cleanup(tmp);
   });
 
   const availability = async (review, extraArgs = []) => {
@@ -89,8 +98,8 @@ describe('review-lane availability (#5266)', () => {
   };
 
   test('descriptor defaults equal the old review.md curl table (hosts, path, timeout, order)', () => {
-    const http_lanes = REVIEWER_LANES.filter((l) => l.transport === 'openai-http');
-    const rows = http_lanes.map((lane) => {
+    const httpLanes = REVIEWER_LANES.filter((l) => l.transport === 'openai-http');
+    const rows = httpLanes.map((lane) => {
       const r = resolveLanePlan({ lane, configGet: () => undefined, runDir: '/run', repoRoot: '/repo' });
       assert.equal(r.ok, true, `${lane.slug} failed to resolve`);
       return [lane.slug, r.plan.host, lane.probe.path, lane.probe.timeoutMs];
@@ -138,10 +147,24 @@ describe('review-lane availability (#5266)', () => {
     assert.deepEqual(lines, ['ollama:available']);
   });
 
-  test('unset hosts resolve descriptor defaults and report every http lane in descriptor order', async () => {
-    const lines = await availability({});
-    assert.equal(lines.length, 3);
-    lines.forEach((l, i) => assert.match(l, new RegExp(`^${['ollama', 'lm_studio', 'llama_cpp'][i]}:(available|missing)$`)));
+  // review.md's `||` fallback: only a failed/unsupported subcommand degrades to all-missing, loudly.
+  const AVAIL_LINE = fs
+    .readFileSync(path.join(__dirname, '..', 'gsd-core', 'workflows', 'review.md'), 'utf8')
+    .split(/\r?\n/)
+    .find((l) => l.startsWith('gsd_run review-lane availability'));
+  const runLine = (stub) => run('bash', ['-c', `gsd_run() { ${stub}; }\n${AVAIL_LINE}`]);
+
+  test('review.md fallback: a failing subcommand prints a warning and every http lane as missing', { skip: process.platform === 'win32' }, async () => {
+    assert.ok(AVAIL_LINE, 'availability call found in review.md');
+    const { stdout, stderr } = await runLine('return 3');
+    assert.deepEqual(splitLines(stdout.trim()), ['ollama:missing', 'lm_studio:missing', 'llama_cpp:missing']);
+    assert.match(stderr, /WARNING: review-lane availability failed/);
+  });
+
+  test('review.md fallback: a succeeding subcommand is passed through with no fallback rows or warning', { skip: process.platform === 'win32' }, async () => {
+    const { stdout, stderr } = await runLine("printf 'ollama:available\\n'");
+    assert.equal(stdout, 'ollama:available\n');
+    assert.equal(stderr, '');
   });
 
   test('an installed third-party openai-http lane is never probed (ADR-2782 D5 egress/consent)', async (t) => {

@@ -53,6 +53,8 @@
  * rediscovered.
  */
 
+import { splitLines } from './text-lines.cjs';
+
 /** ADR-2782 D2 — closed transport discriminator; selects the invoke sub-shape. */
 export type LaneTransport = 'spawn' | 'openai-http';
 
@@ -827,6 +829,11 @@ const LEG_MARKER_RE = /<!--\s*reviewer-lane:\s*([a-z0-9_-]+)\s*-->/g;
  */
 export const LANE_SLUG_RE = /^[a-z0-9][a-z0-9_-]*$/;
 
+/** The workflow's availability call: `gsd_run review-lane availability ...` at command position. */
+const AVAILABILITY_CALL_RE = /^\s*gsd_run review-lane availability(?:\s|$)/;
+/** One `<slug>:missing` row in the printf fallback; slug is LANE_SLUG_RE's grammar capped at 32 chars. */
+const AVAILABILITY_FALLBACK_ROW_RE = /(?:'|\\n)([a-z0-9][a-z0-9_-]{0,31}):missing/g;
+
 /** Bounds of the step a bespoke leg marker could appear inside. */
 const INVOKE_STEP_RE = /<step name="invoke_reviewers">([\s\S]*?)<\/step>/;
 
@@ -977,13 +984,17 @@ export function checkReviewerLaneParity(input: ParityInput): ParityResult {
   //
   // review.md prints these rows only when an older gsd-tools lacks `review-lane availability`, so
   // they are a second hand-kept copy of the roster. Checked only when the call is present.
-  const availabilityLine = workflowText.split('\n').find((line) => line.includes('review-lane availability'));
-  if (availabilityLine !== undefined) {
+  // Anchored to the command position so a comment or prose mention cannot shadow the real call;
+  // a missing call is itself a violation (otherwise deleting it would silently skip this check).
+  const availabilityLine = splitLines(workflowText).find((line) => AVAILABILITY_CALL_RE.test(line));
+  if (availabilityLine === undefined) {
+    add(PARITY_VIOLATION.AVAILABILITY_FALLBACK_MISMATCH, 'no-call');
+  } else {
     if (!availabilityLine.includes('review-lane availability ||')) {
       add(PARITY_VIOLATION.AVAILABILITY_FALLBACK_MISMATCH, 'no-fallback');
     }
     const fallback = new Set(
-      Array.from(availabilityLine.matchAll(/(?:'|\\n)([a-z_]{1,32}):missing/g), (m) => m[1]),
+      Array.from(availabilityLine.matchAll(AVAILABILITY_FALLBACK_ROW_RE), (m) => m[1]),
     );
     for (const slug of fallback) if (!httpSlugs.has(slug)) add(PARITY_VIOLATION.AVAILABILITY_FALLBACK_MISMATCH, slug);
     for (const slug of httpSlugs) if (!fallback.has(slug)) add(PARITY_VIOLATION.AVAILABILITY_FALLBACK_MISMATCH, slug);

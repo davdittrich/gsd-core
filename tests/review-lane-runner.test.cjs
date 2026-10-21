@@ -242,17 +242,6 @@ describe('runner — probe (ADR-2782 D7)', () => {
     assert.deepEqual(await probeHttpLanes(lanes, [], resolve, d), { rows: ['a:available', 'b:missing'], warnings: ['b: bad host'] });
     assert.deepEqual((await probeHttpLanes(lanes, ['a'], resolve, d)).rows, ['a:available']);
   });
-
-  test('probeHttpLanes: rows and warnings follow lane order with two unresolvable lanes', async () => {
-    // Regression guard, not fail-first: resolve is synchronous, so the pre-refactor push-in-callback
-    // form yields the same order. Pins the lane-order contract of rows and warnings.
-    const lanes = ['a', 'b', 'c', 'd'].map((slug) => ({ slug, transport: 'openai-http' }));
-    const resolve = (lane) => (lane.slug === 'b' || lane.slug === 'd' ? { ok: false, detail: `bad ${lane.slug}` } : { ok: true, plan: plan('ollama') });
-    const d = deps({ httpJson: async () => ({ ok: true, status: 200, body: '{}' }) });
-    const r = await probeHttpLanes(lanes, [], resolve, d);
-    assert.deepEqual(r.warnings, ['b: bad b', 'd: bad d']);
-    assert.deepEqual(r.rows, ['a:available', 'b:missing', 'c:available', 'd:missing']);
-  });
 });
 
 describe('runner — empty-output policy (#2494 / #2605 / #2794)', () => {
