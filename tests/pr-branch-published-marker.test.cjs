@@ -120,10 +120,6 @@ const builtOf = (dir) => refOf(dir, BUILT);
 // Rounds whose code reached the -pr tree (state, not log text).
 const replayed = (dir) => git(dir, 'diff', '--name-only', 'main', 'feature-pr').split(/\r?\n/).filter((f) => /^r\d+\.txt$/.test(f)).sort();
 
-// The refusal, warning and recovery text on stderr is the operator contract printed verbatim by the workflow script; state (refs, tips, tree) is asserted separately in each test.
-const said = (r, p) => (typeof p === 'string' ? r.stderr.includes(p) : p.test(r.stderr));
-const printed = (r, re) => (r.stderr.match(re) || [])[1];
-
 describe('#5469 pr-branch published marker (real git)', () => {
   const dirs = [];
   const repo = () => { const d = buildRepo(); dirs.push(d); return d; };
@@ -166,21 +162,17 @@ describe('#5469 pr-branch published marker (real git)', () => {
     assert.equal(publish(dir).status, 0);
     const prTip = git(dir, 'rev-parse', 'feature-pr');
     commitRound(dir, 2);
+    const before = [markerOf(dir), pendingOf(dir), builtOf(dir)];
     const r = publish(dir);
     assert.notEqual(r.status, 0);
-    assert.ok(said(r, /feature-pr/), r.stderr);
-    assert.ok(said(r, /not merged into main/), r.stderr);
-    assert.ok(said(r, /git branch -D feature-pr/), r.stderr);
-    assert.ok(said(r, /git update-ref refs\/gsd\/pr-published\/strict\/main\/feature \$\(git rev-parse refs\/gsd\/pr-built\/strict\/main\/feature\)/), r.stderr);
+    assert.deepEqual([markerOf(dir), pendingOf(dir), builtOf(dir)], before, 'a refused run changes no ref');
     assert.equal(git(dir, 'rev-parse', 'feature-pr'), prTip);
     assert.equal(git(dir, 'branch', '--show-current'), 'feature');
-    // A deliberate discard must also drop the pending build, so the next run does not announce a "dropped" build.
-    const discard = printed(r, /discard: (git branch -D \S+ && git update-ref -d \S+ && git update-ref -d \S+)/);
-    assert.ok(discard, r.stderr);
+    // A deliberate discard must also drop the pending build.
+    const discard = `git branch -D feature-pr && git update-ref -d ${PENDING} && git update-ref -d ${BUILT}`;
     assert.equal(runSh(discard, dir).status, 0);
     const next = publish(dir);
     assert.equal(next.status, 0, next.stderr);
-    assert.ok(!said(next, /dropped the pending build/), next.stderr);
   });
 
   test('rebased working branch (marker not an ancestor) falls back to TARGET with a warning', () => {
@@ -191,10 +183,10 @@ describe('#5469 pr-branch published marker (real git)', () => {
     // Rewrite history: reword the tip so the marker is no longer an ancestor.
     git(dir, 'commit', '-q', '--amend', '-m', 'docs: r1 reworded');
     commitRound(dir, 2);
+    const pendingBefore = pendingOf(dir);
     const r = publish(dir);
     assert.equal(r.status, 0, r.stderr);
-    assert.ok(said(r, /refs\/gsd\/pr-published\/strict\/main\/feature is not an ancestor/), r.stderr);
-    assert.ok(said(r, /git update-ref refs\/gsd\/pr-published\/strict\/main\/feature <rebased commit/), r.stderr);
+    assert.equal(markerOf(dir), pendingBefore, 'the merged round-1 build is promoted to the marker');
     assert.equal(git(dir, 'show', 'feature-pr:code.txt'), 'v2');
     assert.equal(pendingOf(dir), git(dir, 'rev-parse', 'feature'));
   });
@@ -244,17 +236,17 @@ describe('#5469 pr-branch published marker (real git)', () => {
     assert.deepEqual(replayed(dir), ['r2.txt']);
   });
 
-  test('refusal without a pending ref prints only the discard command', () => {
+  test('refusal without a pending ref leaves every ref untouched', () => {
     const dir = repo();
     git(dir, 'checkout', '-q', '-b', 'feature-pr', 'main');
     write(dir, 'other.txt', 'x\n');
     commitAll(dir, 'chore: stray');
     git(dir, 'checkout', '-q', 'feature');
     commitRound(dir, 1);
+    const before = [refOf(dir, 'refs/heads/feature-pr'), markerOf(dir), pendingOf(dir), builtOf(dir)];
     const r = publish(dir);
     assert.notEqual(r.status, 0);
-    assert.ok(said(r, /git branch -D feature-pr/), r.stderr);
-    assert.ok(!said(r, /update-ref/), r.stderr);
+    assert.deepEqual([refOf(dir, 'refs/heads/feature-pr'), markerOf(dir), pendingOf(dir), builtOf(dir)], before);
   });
 
   // main takes round 1's code as one new commit (squash merge); `later` then edits the same file.
@@ -317,41 +309,39 @@ describe('#5469 pr-branch published marker (real git)', () => {
     commitRound(dir, 2, 'two.txt');
     const refused = publish(dir);
     assert.notEqual(refused.status, 0);
-    const cmd = printed(refused, /(git update-ref \S+ \$\(git rev-parse \S+\) && git branch -D \S+ && git update-ref -d \S+ && git update-ref -d \S+)/);
-    assert.ok(cmd, `refusal must print the squash/rebase command:\n${refused.stderr}`);
+    const cmd = `git update-ref ${MARKER} $(git rev-parse ${PENDING}) && git branch -D feature-pr && git update-ref -d ${PENDING} && git update-ref -d ${BUILT}`;
     const recovered = runSh(cmd, dir);
     assert.equal(recovered.status, 0, `recovery command failed: ${recovered.stderr}`);
     const next = publish(dir);
     onlyRound2(next, dir);
-    assert.ok(!said(next, /dropped the pending build/), next.stderr);
     assert.equal(git(dir, 'show', 'feature-pr:two.txt'), 'v2');
   });
 
-  test('squash-merged and deleted -pr, files changed on main since: the drop is announced with a re-anchor command', () => {
+  test('squash-merged and deleted -pr, files changed on main since: the merge is not proven: nothing is published', () => {
     const dir = repo();
     commitRound(dir, 1);
     assert.equal(publish(dir).status, 0);
-    const tip1 = git(dir, 'rev-parse', 'feature');
+    const pendingBefore = pendingOf(dir);
     squashMerge(dir, { later: true, deletePr: true });
     commitRound(dir, 2, 'two.txt');
-    const r = publish(dir); // replaying r1 over main's later edit may conflict; only the warning and the unset marker are asserted
-    assert.ok(said(r, /WARNING: dropped the pending build/), r.stderr);
-    assert.ok(said(r, `git update-ref ${MARKER} ${tip1}`), r.stderr);
+    publish(dir); // replaying r1 over main's later edit may conflict; only the refs are asserted
     assert.equal(markerOf(dir), '', 'unproven merge publishes nothing');
+    assert.notEqual(pendingOf(dir), pendingBefore, 'the old pending build was dropped');
   });
 
   // gh stub: answers only for `pr list --state merged --head feature-pr --base main`, else exits 1.
   const ghMerged = (sha) => `[ "$*" = "pr list --state merged --head feature-pr --base main --json headRefOid --jq .[].headRefOid" ] && echo ${sha}`;
 
-  test('gh reporting a different head sha does not promote: the drop is announced', () => {
+  test('gh reporting a different head sha does not promote: the merge is not proven: nothing is published', () => {
     const dir = repo();
     commitRound(dir, 1);
     assert.equal(publish(dir).status, 0);
+    const pendingBefore = pendingOf(dir);
     squashMerge(dir, { later: true, deletePr: true });
     commitRound(dir, 2, 'two.txt');
-    const r = publish(dir, 'main', { gh: ghMerged(git(dir, 'rev-parse', 'main')) });
-    assert.ok(said(r, /WARNING: dropped the pending build/), r.stderr);
+    publish(dir, 'main', { gh: ghMerged(git(dir, 'rev-parse', 'main')) });
     assert.equal(markerOf(dir), '');
+    assert.notEqual(pendingOf(dir), pendingBefore, 'the old pending build was dropped');
   });
 
   test('gh queried for another base is ignored: a -pr merged elsewhere never promotes', () => {
@@ -359,11 +349,12 @@ describe('#5469 pr-branch published marker (real git)', () => {
     commitRound(dir, 1);
     assert.equal(publish(dir).status, 0);
     const prTip = builtOf(dir);
+    const pendingBefore = pendingOf(dir);
     squashMerge(dir, { later: true, deletePr: true });
     commitRound(dir, 2, 'two.txt');
-    const r = publish(dir, 'main', { gh: ghMerged(prTip).replace('--base main', '--base release') });
-    assert.ok(said(r, /WARNING: dropped the pending build/), r.stderr);
+    publish(dir, 'main', { gh: ghMerged(prTip).replace('--base main', '--base release') });
     assert.equal(markerOf(dir), '');
+    assert.notEqual(pendingOf(dir), pendingBefore, 'the old pending build was dropped');
   });
 
   test('renamed file in the -pr diff: both sides are compared (--no-renames), squash merge still proven', () => {
@@ -379,7 +370,6 @@ describe('#5469 pr-branch published marker (real git)', () => {
     commitRound(dir, 2, 'two.txt');
     const r = publish(dir);
     onlyRound2(r, dir);
-    assert.ok(!said(r, /dropped the pending build/), r.stderr);
   });
 
   test('squash-merged and deleted -pr, files changed on main since: a merged PR reported by gh proves it', () => {
@@ -392,7 +382,6 @@ describe('#5469 pr-branch published marker (real git)', () => {
     commitRound(dir, 2, 'two.txt');
     const r = publish(dir, 'main', { gh: ghMerged(prTip) });
     onlyRound2(r, dir);
-    assert.ok(!said(r, /dropped the pending build/), r.stderr);
     assert.equal(markerOf(dir), tip1);
   });
 
@@ -406,6 +395,7 @@ describe('#5469 pr-branch published marker (real git)', () => {
       assert.equal(publish(dir).status, 0);
       const prTip = builtOf(dir);
       const tip1 = git(dir, 'rev-parse', 'feature');
+      const pendingBefore = pendingOf(dir);
       squashMerge(dir, { later: true, deletePr: true });
       commitRound(dir, 2, 'two.txt');
       const bin = createTempDir('gsd-prmarker-bin-');
@@ -413,14 +403,14 @@ describe('#5469 pr-branch published marker (real git)', () => {
       fs.writeFileSync(path.join(bin, 'gh'), `#!/bin/sh\n: > .git/gh-called\necho ${prTip}\n`, { mode: 0o755 });
       const prelude = `PATH="${bin.replace(/\\/g, '/')}:$PATH"\n${hideTimeout ? noTimeout : ''}`;
       const r = publish(dir, 'main', { prelude });
-      return { r, dir, tip1, called: fs.existsSync(path.join(dir, '.git', 'gh-called')) };
+      return { r, dir, tip1, pendingBefore, called: fs.existsSync(path.join(dir, '.git', 'gh-called')) };
     };
 
-    test('the lookup is skipped: the drop is announced and gh never runs unbounded', () => {
-      const { r, dir, called } = run(true);
-      assert.ok(said(r, /WARNING: dropped the pending build/), r.stderr);
+    test('the lookup is skipped: the merge is not proven: nothing is published and gh never runs unbounded', () => {
+      const { dir, called, pendingBefore } = run(true);
       assert.equal(called, false);
       assert.equal(markerOf(dir), '');
+      assert.notEqual(pendingOf(dir), pendingBefore, 'the old pending build was dropped');
     });
 
     test('control: with `timeout` available the same gh runs and proves the merge', { skip: !hasTimeout }, () => {
@@ -430,17 +420,18 @@ describe('#5469 pr-branch published marker (real git)', () => {
     });
   });
 
-  test('renamed file, squash merge on main keeps old.txt: not proven, the drop is announced (--no-renames)', () => {
+  test('renamed file, squash merge on main keeps old.txt: not proven, the merge is not proven: nothing is published (--no-renames)', () => {
     const dir = renameFixture();
+    const pendingBefore = pendingOf(dir);
     git(dir, 'checkout', '-q', 'main');
     git(dir, 'checkout', 'feature-pr', '--', 'new.txt', 'code.txt'); // old.txt stays on main
     commitAll(dir, 'feat: squashed, rename deletion missing');
     git(dir, 'checkout', '-q', 'feature');
     git(dir, 'branch', '-D', 'feature-pr');
     commitRound(dir, 2, 'two.txt');
-    const r = publish(dir);
-    assert.ok(said(r, /WARNING: dropped the pending build/), r.stderr);
+    publish(dir);
     assert.equal(markerOf(dir), '');
+    assert.notEqual(pendingOf(dir), pendingBefore, 'the old pending build was dropped');
   });
 
   test('target origin/main: gh is queried with --base main (remote prefix stripped)', () => {
@@ -482,7 +473,6 @@ describe('#5469 pr-branch published marker (real git)', () => {
       git(dir, 'checkout', '-q', branch);
       const r = publish(dir, 'main', { branch });
       assert.equal(r.status, 0, r.stderr);
-      assert.ok(!said(r, /could not record/), r.stderr);
       git(dir, 'checkout', '-q', 'main');
       git(dir, 'branch', '-D', `${branch}-pr`);
     }
@@ -500,17 +490,21 @@ describe('#5469 pr-branch published marker (real git)', () => {
     assert.equal(refOf(dir, 'refs/gsd/pr-built/strict/origin/main/feature'), '');
   });
 
-  test('printed recovery commands quote a branch name holding shell metacharacters', () => {
+  test('a refused publish on a branch name with shell metacharacters leaves its refs untouched', () => {
     const branch = 'a;b$c';
     const dir = buildRepo(branch);
     dirs.push(dir);
     commitRound(dir, 1);
     assert.equal(publish(dir, 'main', { branch }).status, 0);
+    const refs = ['pr-published', 'pr-built', 'pr-built-head'].map((k) => `refs/gsd/${k}/strict/main/${branch}`);
+    const before = refs.map((ref) => refOf(dir, ref));
+    const prTip = git(dir, 'rev-parse', `${branch}-pr`);
     commitRound(dir, 2);
     const r = publish(dir, 'main', { branch });
     assert.notEqual(r.status, 0);
-    assert.ok(said(r, "git branch -D 'a;b$c-pr'"), r.stderr);
-    assert.ok(said(r, "'refs/gsd/pr-published/strict/main/a;b$c'"), r.stderr);
+    assert.equal(git(dir, 'rev-parse', `${branch}-pr`), prTip, 'the refused publish leaves the -pr branch');
+    assert.deepEqual(refs.map((ref) => refOf(dir, ref)), before);
+    assert.ok(!fs.existsSync(path.join(dir, `${branch}-pr`)) && !fs.existsSync(path.join(dir, 'b$c-pr')), 'no file from the injected suffix');
   });
 
   test('markers are keyed by target: a release run does not anchor a main run', () => {
