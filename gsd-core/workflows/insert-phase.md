@@ -22,7 +22,7 @@ Example: `/gsd:phase --insert 72 Fix critical auth bug`
 
 Allocation: inserting after an integer phase creates the next decimal (72.1). Inserting after a decimal phase nests by default (`--insert 15.2 "x"` -> 15.2.1); add `--sibling` to join the parent level instead (`--insert 15.2 --sibling "x"` -> 15.3). A top-level after-phase with `--sibling` falls back to nested.
 
-Set `sibling_flag=" --sibling"` when the flag was given, else `sibling_flag=""`.
+Set `sibling_flag="--sibling"` when the flag was given, else `sibling_flag=""`.
 
 If arguments missing:
 
@@ -62,7 +62,7 @@ Exit.
 **Delegate the phase insertion to `gsd_run query phase.insert`:**
 
 ```bash
-RESULT=$(gsd_run query phase.insert "${after_phase}" "${description}"${sibling_flag})
+RESULT=$(gsd_run query phase.insert "${after_phase}" "${description}" ${sibling_flag:+"$sibling_flag"})
 ```
 
 The CLI handles:
