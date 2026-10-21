@@ -1895,6 +1895,7 @@ function cmdRoadmapAnnotateDependencies(cwd: string, phaseNum: string | null | u
   let updated = false;
   let skipped: string | undefined;
   let staleLegacy: string[] = [];
+  let droppedGenerated: string[] = [];
   withPlanningLock(cwd, () => {
     const content = fs.readFileSync(roadmapPath, 'utf-8');
     // #3413: preserve the file's own EOL style when the checklist block below
@@ -1961,7 +1962,7 @@ function cmdRoadmapAnnotateDependencies(cwd: string, phaseNum: string | null | u
 
     // #5321: a checklist row group 2 rejects (`- [  ]`, `* [ ]`), or an empty generated wave
     // header, splits the list; rewriting only the prefix would orphan the rest — skip loudly.
-    const stranded = findStrandedRow(splitLines(phaseSection.slice(plansBlockMatch.index! + plansBlockMatch[0].length)));
+    const stranded = plansBlockMatch[3] ? undefined : findStrandedRow(splitLines(phaseSection.slice(plansBlockMatch.index! + plansBlockMatch[0].length)));
     if (stranded) {
       process.stderr.write(
         `[gsd-tools] WARNING: roadmap annotate-dependencies skipped — unrecognised checklist row `
@@ -2029,8 +2030,10 @@ function cmdRoadmapAnnotateDependencies(cwd: string, phaseNum: string | null | u
     if (plansBlockMatch[3]) {
       const unknown = splitLines(plansBlockMatch[3])
         .filter(l => BULLET_RE.test(l) && !truthCounts.has(l.replace(BULLET_RE, '').trim().toLowerCase()));
-      const names = unknown.map(l => formatDiagnosticToken(l.replace(BULLET_RE, '').trim())).join('; ');
+      const texts = unknown.map(l => l.replace(BULLET_RE, '').trim());
+      const names = texts.map(formatDiagnosticToken).join('; ');
       if (unknown.length > 0 && plansBlockMatch[4]) {
+        droppedGenerated = texts;
         process.stderr.write(
           `[gsd-tools] WARNING: roadmap annotate-dependencies dropped ${unknown.length} bullet(s) under the generated `
           + `constraints heading that match no current plan truth in phase ${formatDiagnosticToken(String(phaseNum))}: ${names} `
@@ -2039,7 +2042,7 @@ function cmdRoadmapAnnotateDependencies(cwd: string, phaseNum: string | null | u
       } else if (unknown.length > 0) {
         if (crossCuttingTruths.length === 0) annotatedLines.push('');
         annotatedLines.push(...unknown);
-        staleLegacy = unknown.map(l => l.replace(BULLET_RE, '').trim());
+        staleLegacy = texts;
         process.stderr.write(
           `[gsd-tools] WARNING: roadmap annotate-dependencies kept ${unknown.length} bullet(s) under a pre-#5321 `
           + `constraints block that match no current plan truth in phase ${formatDiagnosticToken(String(phaseNum))}: `
@@ -2047,6 +2050,10 @@ function cmdRoadmapAnnotateDependencies(cwd: string, phaseNum: string | null | u
         );
       }
     }
+
+    // The old block's trailing blank line separated it from user content below: keep it when the block is dropped.
+    const oldBlock = plansBlockMatch[3] ? splitLines(plansBlockMatch[3]) : [];
+    if (oldBlock.length > 2 && !oldBlock[oldBlock.length - 2].trim() && annotatedLines[annotatedLines.length - 1] !== '') annotatedLines.push('');
 
     const newListBlock = joinLines(annotatedLines, eol) + eol;
     // #1103: when `(?:^|\r?\n)` consumed a leading terminator (mid-string
@@ -2082,6 +2089,7 @@ function cmdRoadmapAnnotateDependencies(cwd: string, phaseNum: string | null | u
     cross_cutting_constraints: crossCuttingTruths.length,
     ...(skipped && { skipped }),
     ...(staleLegacy.length > 0 && { stale_legacy_constraints: staleLegacy }),
+    ...(droppedGenerated.length > 0 && { dropped_generated_constraints: droppedGenerated }),
   }, raw, updated ? `annotated ${waves.length} wave(s), ${crossCuttingTruths.length} constraint(s)` : skipped ? `skipped (${skipped})` : 'skipped (already up to date or no plan list)');
 }
 
