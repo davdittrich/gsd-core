@@ -426,7 +426,7 @@ if [ -f "${FIX_REPORT_PATH}" ]; then
     echo "Agent may have produced malformed output. Review manually: ${FIX_REPORT_PATH}"
     # Only when git sees it: an ignored .planning/ (commit_docs off) leaves the tree clean.
     if [ -n "$(git status --porcelain -- "${FIX_REPORT_PATH}" 2>/dev/null)" ]; then
-      echo "The working tree stays dirty: /gsd-ship will refuse until ${FIX_REPORT_PATH} is fixed and committed, or deleted."
+      echo "The working tree stays dirty: /gsd:ship will refuse until ${FIX_REPORT_PATH} is fixed and committed, or deleted."
     fi
   fi
 else
