@@ -36,6 +36,7 @@ Because GSD's default is `commit_docs: true`, most existing projects already hav
 in history, which makes this the common case rather than an edge case.
 
 ```bash
+git diff --cached --quiet -- ':!.planning' || { echo "unrelated staged paths; unstage them first" >&2; exit 1; }
 git rm -r --cached .planning/
 git commit -m "chore: stop tracking planning docs"
 ```
