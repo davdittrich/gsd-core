@@ -2918,6 +2918,49 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
     assert.strictEqual(result.output.trim(), '04');
   });
 
+  test('a bullet label does not span lines: "- [ ] Phase" above a digit-leading line reserves nothing', () => {
+    setup(['# Roadmap', '', '## Milestone v1.0', '', '- [ ] Phase', '12 items', '']);
+    const result = runGsdTools('phase add "New thing" --raw', tmp);
+    assert.ok(result.success, result.error);
+    assert.strictEqual(result.output.trim(), '01');
+  });
+
+  test('a checkbox-less bracket bullet blocks reuse of its number', () => {
+    setup(['# Roadmap', '', '## Milestone v1.0', '', '- [GSD.02] 03: No checkbox', '']);
+    const result = runGsdTools('phase add "New thing" --raw', tmp);
+    assert.ok(result.success, result.error);
+    assert.strictEqual(result.output.trim(), '04');
+  });
+
+  test('a bracket directory held only by a sibling worktree blocks reuse of its number', () => {
+    setup(['# Roadmap', '', '## Milestone v1.0', '']);
+    const git = (args, cwd) => gitOrThrow(args, { cwd, timeoutMs: GIT_TIMEOUT_MS });
+    git(['init', '-b', 'main'], tmp);
+    git(['config', 'user.email', 'test@example.com'], tmp);
+    git(['config', 'user.name', 'Test'], tmp);
+    git(['add', '-A'], tmp);
+    git(['commit', '-m', 'init', '--allow-empty'], tmp);
+    const sibling = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-5528-sib-'));
+    try {
+      git(['worktree', 'add', '--detach', sibling, 'HEAD'], tmp);
+      fs.mkdirSync(path.join(sibling, '.planning', 'phases', 'GSD.02-09-elsewhere'), { recursive: true });
+      const result = runGsdTools('phase add "New thing" --raw', tmp);
+      assert.ok(result.success, result.error);
+      assert.strictEqual(result.output.trim(), '10');
+    } finally {
+      git(['worktree', 'remove', '--force', sibling], tmp);
+      cleanup(sibling);
+    }
+  });
+
+  test('add-batch counts a bracket directory with no heading', () => {
+    setup(['# Roadmap', '', '## Milestone v1.0', ''], { dirs: ['GSD.02-04-orphan'] });
+    const result = runGsdTools(['phase', 'add-batch', '--descriptions', '["A","B"]'], tmp);
+    assert.ok(result.success, result.error);
+    const nums = JSON.parse(result.output).phases.map((p) => p.phase_number);
+    assert.deepStrictEqual(nums, [5, 6]);
+  });
+
   test('add-batch allocates consecutive free numbers after the bracket phases', () => {
     const planning = setup([
       '# Roadmap', '', '## Milestone v1.0', '', '- [ ] **[GSD.02] 01: Existing**', '',

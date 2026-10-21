@@ -1249,8 +1249,13 @@ function roadmapDeclaredPhaseNums(rawContent: string, convention: string | null,
   // any other convention compiles the same `Phase N` scan it always did.
   const bracket = convention === 'bracket';
   const { regex: headerPattern, phaseNumGroup } = buildPhaseHeadingScanRegex(PHASE_HEADING_BASELINE.LABEL_ONLY, convention);
-  const label = bracket ? phaseHeadingPrefixSrcFor(PHASE_HEADING_BASELINE.LABEL_ONLY, convention, true) : 'Phase[ \\t]+';
-  const bulletPattern = new RegExp(`^[ \\t]*-[ \\t]*\\[[^\\]]{0,200}\\][ \\t]*\\*{0,2}${label}(\\d+)(?=[:.\\s*]|$)`, 'gim');
+  // A bullet is one line, so the bracket label's `\s` becomes `[ \t]`; there the checkbox is optional too
+  // (`- [GSD.02] 03: X` is a bullet whose bracket is the id, not a checkbox).
+  const label = bracket
+    ? phaseHeadingPrefixSrcFor(PHASE_HEADING_BASELINE.LABEL_ONLY, convention, true).replace(/\\s/g, '[ \\t]')
+    : 'Phase[ \\t]+';
+  const checkbox = `\\[[^\\]]{0,200}\\][ \\t]*`;
+  const bulletPattern = new RegExp(`^[ \\t]*-[ \\t]*${bracket ? `(?:${checkbox})?` : checkbox}\\*{0,2}${label}(\\d+)(?=[:.\\s*]|$)`, 'gim');
   const nums = new Set<number>();
   const scans: [RegExp, number][] = [[headerPattern, phaseNumGroup]];
   if (withBullets) scans.push([bulletPattern, bracket ? 2 : 1]);
