@@ -26,8 +26,8 @@ const { SCOPE } = planningScopeMod;
 type Scope = planningScopeMod.Scope;
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import roadmapParserModule = require('./roadmap-parser.cjs');
-const { stripShippedMilestones, extractCurrentMilestone, extractCurrentMilestoneScoped, replaceInCurrentMilestone, listMilestoneHeadings, scanMilestonePhaseIds, collectTablePhaseRows, hasPhaseListingTableHeader } = roadmapParserModule;
-import { tokenizeHeadings } from './markdown-sectionizer.cjs';
+const { stripShippedMilestones, extractCurrentMilestone, extractCurrentMilestoneScoped, replaceInCurrentMilestone, editCurrentMilestone, withPhaseSection, listMilestoneHeadings, scanMilestonePhaseIds, collectTablePhaseRows, hasPhaseListingTableHeader } = roadmapParserModule;
+import { tokenizeHeadings, updateBullet } from './markdown-sectionizer.cjs';
 import { escapeCell, findTableWithColumns, updateTableCell } from './markdown-table.cjs';
 import { clampPercent } from './phase-lifecycle.cjs';
 import { platformWriteSync } from './shell-command-projection.cjs';
@@ -1608,20 +1608,16 @@ function cmdRoadmapUpdatePlanProgress(cwd: string, phaseNum: string | null | und
       .map((summaryFile) => ({ summaryFile, planId: summaryFile.replace('-SUMMARY.md', '').replace('SUMMARY.md', '') }))
       .filter(({ summaryFile, planId }) => planId !== ''
         && coreUtils.summaryPairsWithAnyPlan(phaseInfo!.plans, summaryFile));
-    for (const { planId } of tickableSummaries) {
-      roadmapContent = roadmapContent.replace(coreUtils.planRowPattern(planId), '$1x$2');
-    }
 
-    // Compute the active (post-</details>) region offset ONCE.  Both the
+    // Compute the active milestone text ONCE (#5483: what `editCurrentMilestone`
+    // hands its writers, read without editing).  Both the
     // missing-plan DETECTION and the row INSERTION must use the same active
     // region string so that a plan row that exists only in an archived <details>
     // block is not counted as "already present" in the active milestone section.
     // (Finding 1 code-review: detection was previously running against the full
     //  roadmapContent, causing archived rows to suppress active-section inserts.)
-    const lastDetailsClose = roadmapContent.lastIndexOf('</details>');
-    const activeRegion = lastDetailsClose === -1
-      ? roadmapContent
-      : roadmapContent.slice(lastDetailsClose + '</details>'.length);
+    let activeRegion = '';
+    editCurrentMilestone(roadmapContent, cwd, (window) => { activeRegion += `${window}\n`; return window; });
 
     // Compute which plan files are MISSING a checkbox row in the ACTIVE region.
     // This handles three cases:
@@ -1677,33 +1673,46 @@ function cmdRoadmapUpdatePlanProgress(cwd: string, phaseNum: string | null | und
       const newRows = sortedMissing.map(p => `- [ ] ${p}`).join('\n');
       const inserter = (match: string) => `${match}\n${newRows}`;
 
-      // Scope insertion to the active (post-</details>) milestone region to
-      // prevent duplicate phase headings in archived sections from receiving rows.
-      // replaceInCurrentMilestone only accepts a string replacement, so we
-      // perform the scoped replace manually here (same strategy as that helper).
-      // Note: lastDetailsClose was computed above (shared with detection).
-      const scopedReplace = (src: string, pat: RegExp) => src.replace(pat, inserter);
-      let withRows: string;
-      if (lastDetailsClose === -1) {
-        // activeRegion === roadmapContent when there are no </details> blocks.
-        const regionA = scopedReplace(activeRegion, insertRowsPatternA);
-        withRows = regionA !== activeRegion ? regionA : scopedReplace(activeRegion, insertRowsPatternB);
-      } else {
-        const beforeDetails = roadmapContent.slice(0, lastDetailsClose + '</details>'.length);
-        const regionA = scopedReplace(activeRegion, insertRowsPatternA);
-        const afterWithRows = regionA !== activeRegion ? regionA : scopedReplace(activeRegion, insertRowsPatternB);
-        withRows = beforeDetails + afterWithRows;
-      }
-      if (withRows !== roadmapContent) {
-        roadmapContent = withRows;
-        // Mark any newly-inserted rows that already have summaries as complete
-        // (#4741: same superseded-filtered tick list as the loop above — a
-        // pre-existing superseded row must stay unchecked on this path too).
-        for (const { planId } of tickableSummaries) {
-          roadmapContent = roadmapContent.replace(coreUtils.planRowPattern(planId), '$1x$2');
-        }
-      }
+      // Scope insertion to the active milestone so a duplicate phase heading
+      // in a shipped section never receives rows.
+      roadmapContent = editCurrentMilestone(roadmapContent, cwd, (text) => {
+        const regionA = text.replace(insertRowsPatternA, inserter);
+        return regionA !== text ? regionA : text.replace(insertRowsPatternB, inserter);
+      });
     }
+
+    // #5483: tick a plan's row (after insertion, so inserted rows are ticked
+    // too) only in THIS phase's own scopes inside the active milestone, the way
+    // `phase complete` does: its detail section (`withPhaseSection`), then the
+    // rows under its checklist bullet (nested or flat, up to a blank line, a
+    // shallower line or the next phase bullet). When a scope was located but
+    // none holds the row, nothing is ticked, so a sibling phase's same-named
+    // row is never touched; only a phase with neither scope falls back to the
+    // first row in the milestone.
+    const anyPhaseBullet = /^[ \t]*-[ \t]*\[[ xX]\][ \t]*(?:\*\*)?[ \t]*Phase[ \t]/i;
+    const tickPlanRow = (text: string, planId: string): string => {
+      const row = coreUtils.planRowPattern(planId, { anchored: true });
+      const tick = (t: string): string => updateBullet(t, (_bulletText, rawLine) => row.test(rawLine), (rawLine) => rawLine.replace(row, '$1x$2'));
+      let located = false;
+      const inSection = withPhaseSection(text, phaseNum, (body) => { located = true; return tick(body); });
+      if (inSection !== text) return inSection;
+      const bullet = phaseChecklistBullet(true).exec(text);
+      if (bullet) {
+        const depth = bullet[1].search(/\S/);
+        const start = text.indexOf('\n', bullet.index) + 1;
+        let end = start;
+        while (start > 0 && end < text.length) {
+          const next = text.indexOf('\n', end);
+          const line = text.slice(end, next === -1 ? text.length : next);
+          if (line.trim() === '' || line.search(/\S/) < depth || anyPhaseBullet.test(line)) break;
+          end = next === -1 ? text.length : next + 1;
+        }
+        return text.slice(0, start) + tick(text.slice(start, end)) + text.slice(end);
+      }
+      return located ? text : tick(text);
+    };
+    roadmapContent = editCurrentMilestone(roadmapContent, cwd, (text) =>
+      tickableSummaries.reduce((acc, { planId }) => tickPlanRow(acc, planId), text));
 
     // #3957 (B9.4): write and report an update only when the transforms
     // above actually produced different bytes — mirroring the sibling

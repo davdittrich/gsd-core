@@ -2402,6 +2402,24 @@ function currentMilestoneRawRanges(
   return { primary: { start: sectionStart, end: sectionEnd }, details };
 }
 
+/**
+ * Run `edit` over the current milestone's raw window(s) from
+ * `currentMilestoneRawRanges`, or, when no milestone resolves, over the whole
+ * ROADMAP with shipped `<details>` blocks hidden (#5543). The one milestone
+ * scoping for per-phase writers (`phase complete`, `roadmap
+ * update-plan-progress` #5483), so neither cuts at the last `</details>`.
+ */
+function editCurrentMilestone(content: string, cwd: string | undefined, edit: (text: string) => string): string {
+  const ranges = currentMilestoneRawRanges(content, cwd);
+  if (!ranges) return editOutsideShippedBlocks(content, edit);
+  // Splice later windows first so an earlier window's offsets are not
+  // shifted by a length-changing mutation in a later window.
+  return [ranges.details, ranges.primary]
+    .filter((w): w is { start: number; end: number } => w !== null)
+    .sort((a, b) => b.start - a.start)
+    .reduce((acc, w) => acc.slice(0, w.start) + edit(acc.slice(w.start, w.end)) + acc.slice(w.end), content);
+}
+
 export = {
   stripShippedMilestones,
   extractCurrentMilestone,
@@ -2416,6 +2434,7 @@ export = {
   currentMilestoneRawRanges,
   withPhaseSection,
   editOutsideShippedBlocks,
+  editCurrentMilestone,
   computeMilestoneSectionEnd,
   locateMilestoneHeadings,
   listMilestoneHeadings,

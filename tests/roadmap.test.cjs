@@ -2677,6 +2677,198 @@ describe('regressions: insert missing plan rows (#1163) — adversarial: partial
 });
 
 
+describe('#5483: update-plan-progress ticks only the active milestone row', () => {
+  let tmpDir;
+  let roadmapPath;
+
+  beforeEach(() => {
+    tmpDir = createTempProject('gsd-5483-');
+    roadmapPath = path.join(tmpDir, '.planning', 'ROADMAP.md');
+  });
+
+  afterEach(() => {
+    cleanup(tmpDir);
+  });
+
+  const ARCHIVED = [
+    '<details>',
+    '<summary>v0.9 - shipped</summary>',
+    '',
+    '### Phase 1: test phase',
+    '',
+    'Plans:',
+    '- [ ] 01-01-PLAN.md',
+    '',
+    '</details>',
+    '',
+  ].join('\n');
+
+  function setup(roadmap, withSummary = true) {
+    fs.writeFileSync(roadmapPath, roadmap);
+    const dir = createPhaseWithPlans(tmpDir, '1', ['01-01-PLAN.md']);
+    if (withSummary) fs.writeFileSync(path.join(dir, '01-01-SUMMARY.md'), '# Summary\n');
+    const result = runGsdTools(['roadmap', 'update-plan-progress', '1'], tmpDir);
+    assert.ok(result.success, `Command failed: ${result.error}`);
+    return fs.readFileSync(roadmapPath, 'utf-8');
+  }
+
+  test('archived and active rows share a plan id: active ticked, archived byte-identical', () => {
+    const active = '## Milestone v1.0\n\n### Phase 1: test phase\n\nPlans:\n- [ ] 01-01-PLAN.md\n';
+    const written = setup(`# ROADMAP\n\n${ARCHIVED}${active}`);
+    assert.ok(written.includes(ARCHIVED), 'archived block must be byte-identical');
+    assert.ok(written.slice(written.indexOf('</details>')).includes('- [x] 01-01-PLAN.md'), 'tick must land in active region');
+  });
+
+  test('verb-inserted active row is ticked exactly once, archived row untouched', () => {
+    const active = '## Milestone v1.0\n\n### Phase 1: test phase\n\nPlans:\n';
+    const written = setup(`# ROADMAP\n\n${ARCHIVED}${active}`);
+    assert.ok(written.includes(ARCHIVED), 'archived block must be byte-identical');
+    assert.ok(written.slice(written.indexOf('</details>')).includes('- [x] 01-01-PLAN.md'), `inserted row not ticked:\n${written}`);
+    assert.strictEqual(written.split('- [x] 01-01-PLAN.md').length - 1, 1, `ticked outside the active region:\n${written}`);
+  });
+
+  test('plan id only in archived milestone: ticked nowhere, archived byte-identical', () => {
+    // Active phase has no `Plans:` anchor, so nothing can be inserted there.
+    const active = '## Milestone v1.0\n\n### Phase 1: test phase\n\nNo plan list yet.\n';
+    const written = setup(`# ROADMAP\n\n${ARCHIVED}${active}`);
+    assert.ok(written.includes(ARCHIVED), 'archived block must be byte-identical');
+    assert.ok(!written.includes('- [x] 01-01-PLAN.md'), `ticked despite living only in archived:\n${written}`);
+  });
+
+  function setupPhase(n, roadmap, plans = ['01-PLAN.md'], summaries = ['01-SUMMARY.md']) {
+    fs.writeFileSync(roadmapPath, roadmap);
+    const dir = createPhaseWithPlans(tmpDir, String(n), plans);
+    for (const f of summaries) fs.writeFileSync(path.join(dir, f), '# Summary\n');
+    const result = runGsdTools(['roadmap', 'update-plan-progress', String(n)], tmpDir);
+    assert.ok(result.success, `Command failed: ${result.error}`);
+    return fs.readFileSync(roadmapPath, 'utf-8');
+  }
+  const setupPhase2 = (roadmap) => setupPhase(2, roadmap);
+  // A Progress table is the write gate's phase representation for layouts without a phase heading.
+  const TABLE = '\n## Progress\n\n| Phase | Plans Complete | Status | Completed |\n|-------|---------------|--------|-----------|\n| 1. One | 0/1 | Planned |  |\n| 2. Two | 0/2 | Planned |  |\n';
+  const TWO = ['01-PLAN.md', '02-PLAN.md'];
+
+  test('un-prefixed plan names: updating phase 2 ticks only phase 2 row (existing-row loop)', () => {
+    const p1 = '### Phase 1: first\n\nPlans:\n- [ ] 01-PLAN.md\n\n';
+    const p2 = '### Phase 2: test phase\n\nPlans:\n- [ ] 01-PLAN.md\n';
+    const written = setupPhase2(`# ROADMAP\n\n## Milestone v1.0\n\n${p1}${p2}`);
+    assert.ok(written.includes(p1), `phase 1 row must stay unticked:\n${written}`);
+    assert.ok(written.slice(written.indexOf('### Phase 2')).includes('- [x] 01-PLAN.md'), `phase 2 row not ticked:\n${written}`);
+  });
+
+  test('post-insert tick stays inside phase 2 section', () => {
+    // `01.5-PLAN.md` is not 01's presence (dotted sub-id) so 01 is inserted, but the
+    // prefix-matching tick would hit it first in file order without section scoping.
+    const p1 = '### Phase 1: first\n\nPlans:\n- [ ] 01.5-PLAN.md\n\n';
+    const p2 = '### Phase 2: test phase\n\nPlans:\n';
+    const written = setupPhase2(`# ROADMAP\n\n## Milestone v1.0\n\n${p1}${p2}`);
+    assert.ok(written.includes(p1), `phase 1 row must stay unticked:\n${written}`);
+    assert.ok(written.slice(written.indexOf('### Phase 2')).includes('- [x] 01-PLAN.md'), `phase 2 inserted row not ticked:\n${written}`);
+  });
+
+  test('phase 2 section located without its row: sibling phase 1 same-id row stays unticked', () => {
+    const p1 = '### Phase 1: first\n\nPlans:\n- [ ] 01-PLAN.md\n\n';
+    const written = setupPhase(2, `# ROADMAP\n\n## Milestone v1.0\n\n${p1}### Phase 2: test phase\n\nNo plan list yet.\n${TABLE}`);
+    assert.ok(written.includes(p1), `phase 1 row must stay unticked:\n${written}`);
+  });
+
+  test('detail section with empty Plans: plus flat checklist rows: no duplicate row, checklist row ticked', () => {
+    const written = setupPhase(1, `# ROADMAP\n\n## Milestone v1.0\n\n- [ ] **Phase 1: One**\n- [ ] 01-01-PLAN.md\n\n### Phase 1: One\n\nPlans:\n${TABLE}`, ['01-01-PLAN.md'], ['01-01-SUMMARY.md']);
+    assert.strictEqual(written.split('01-01-PLAN.md').length - 1, 1, `duplicate row inserted:\n${written}`);
+    assert.ok(written.includes('**Phase 1: One**\n- [x] 01-01-PLAN.md'), `checklist row not ticked:\n${written}`);
+  });
+
+  test('checklist bullet without rows: sibling phase nested same-id row stays unticked', () => {
+    const written = setupPhase(2, `# ROADMAP\n\n## Milestone v1.0\n\n- [ ] **Phase 1: One**\n  - [ ] 01-PLAN.md\n- [ ] **Phase 2: Two**\n${TABLE}`);
+    assert.ok(written.includes('**Phase 1: One**\n  - [ ] 01-PLAN.md'), `phase 1 row ticked:\n${written}`);
+  });
+
+  test('a <details> block after the active milestone does not disable ticking', () => {
+    const active = '## Milestone v1.0\n\n### Phase 1: test phase\n\nPlans:\n- [ ] 01-01-PLAN.md\n\n';
+    const notes = '<details>\n<summary>Notes</summary>\n\nlater\n\n</details>\n';
+    const table = '## Progress\n\n| Phase | Plans Complete | Status | Completed |\n|-------|---------------|--------|-----------|\n| 1. test phase | 0/1 | Planned |  |\n\n';
+    // The Progress table after the notes block is the write gate's target.
+    const written = setup(`# ROADMAP\n\n${ARCHIVED}${active}${notes}\n${table}`);
+    assert.ok(written.includes(ARCHIVED), 'archived block must be byte-identical');
+    assert.ok(written.includes('### Phase 1: test phase\n\nPlans:\n- [x] 01-01-PLAN.md'), `active row not ticked:\n${written}`);
+  });
+
+  test('CRLF roadmap: only the active row is ticked', () => {
+    // Line-ending normalization is the write seam's job; compare EOL-folded text.
+    const active = '## Milestone v1.0\n\n### Phase 1: test phase\n\nPlans:\n- [ ] 01-01-PLAN.md\n';
+    const written = setup(`# ROADMAP\n\n${ARCHIVED}${active}`.replace(/\n/g, '\r\n')).replace(/\r\n/g, '\n');
+    assert.ok(written.includes(ARCHIVED), `archived block changed:\n${written}`);
+    assert.ok(written.includes('### Phase 1: test phase\n\nPlans:\n- [x] 01-01-PLAN.md\n'), `active row not ticked:\n${written}`);
+  });
+
+  test('phase 1 vs 10 vs 1.1 headings: updating phase 1 ticks only phase 1', () => {
+    const sec = (n) => `### Phase ${n}: p${n}\n\nPlans:\n- [ ] 01-PLAN.md\n\n`;
+    const written = setupPhase(1, `# ROADMAP\n\n## Milestone v1.0\n\n${sec('10')}${sec('1.1')}${sec('1')}`);
+    assert.ok(written.includes(sec('10')) && written.includes(sec('1.1')), `phase 10 or 1.1 row ticked:\n${written}`);
+    assert.ok(written.includes('### Phase 1: p1\n\nPlans:\n- [x] 01-PLAN.md'), `phase 1 row not ticked:\n${written}`);
+  });
+
+  test('property: in any section order, only the updated phase\'s un-prefixed row is ticked', () => {
+    const fc = require('fast-check');
+    const sec = (n) => `### Phase ${n}: p${n}\n\nPlans:\n- [ ] 01-PLAN.md\n\n`;
+    fc.assert(fc.property(
+      fc.shuffledSubarray(['1', '2', '10', '1.1'], { minLength: 4, maxLength: 4 }),
+      fc.constantFrom('1', '2', '10'),
+      (order, target) => {
+        const dir = createTempProject('gsd-5483-prop-');
+        try {
+          fs.writeFileSync(path.join(dir, '.planning', 'ROADMAP.md'), `# ROADMAP\n\n## Milestone v1.0\n\n${order.map(sec).join('')}`);
+          const phaseDir = createPhaseWithPlans(dir, target, ['01-PLAN.md']);
+          fs.writeFileSync(path.join(phaseDir, '01-SUMMARY.md'), '# Summary\n');
+          const result = runGsdTools(['roadmap', 'update-plan-progress', target], dir);
+          assert.ok(result.success, `Command failed: ${result.error}`);
+          const written = fs.readFileSync(path.join(dir, '.planning', 'ROADMAP.md'), 'utf-8');
+          for (const n of order) {
+            const ticked = written.includes(`### Phase ${n}: p${n}\n\nPlans:\n- [x] 01-PLAN.md`);
+            assert.strictEqual(ticked, n === target, `phase ${n} ticked=${ticked} (target ${target}):\n${written}`);
+          }
+        } finally {
+          cleanup(dir);
+        }
+      },
+    ), { numRuns: 12 });
+  });
+
+  test('nested checklist: updating phase 2 leaves phase 1 nested row unticked', () => {
+    const written = setupPhase(2, `# ROADMAP\n\n## Milestone v1.0\n\n- [ ] **Phase 1: One**\n  - [ ] 01-PLAN.md\n  - [ ] 02-PLAN.md\n- [ ] **Phase 2: Two**\n  - [ ] 01-PLAN.md\n  - [ ] 02-PLAN.md\n${TABLE}`, TWO);
+    assert.ok(written.includes('- [ ] **Phase 1: One**\n  - [ ] 01-PLAN.md\n  - [ ] 02-PLAN.md\n'), `phase 1 rows changed:\n${written}`);
+    assert.ok(written.includes('**Phase 2: Two**\n  - [x] 01-PLAN.md\n  - [ ] 02-PLAN.md'), `phase 2 row not ticked:\n${written}`);
+  });
+
+  test('milestone bullet mentioning "Phase 2" does not anchor phase 2 scope', () => {
+    const written = setupPhase(2, `# ROADMAP\n\n## Milestone v1.0\n\n- [ ] **v1.0 Milestone** - Phase 1 through Phase 2\n  - [ ] **Phase 1: One**\n    - [ ] 01-PLAN.md\n    - [ ] 02-PLAN.md\n  - [ ] **Phase 2: Two**\n    - [ ] 01-PLAN.md\n    - [ ] 02-PLAN.md\n${TABLE}`, TWO);
+    assert.ok(written.includes('**Phase 1: One**\n    - [ ] 01-PLAN.md\n'), `phase 1 row ticked:\n${written}`);
+    assert.ok(written.includes('**Phase 2: Two**\n    - [x] 01-PLAN.md'), `phase 2 row not ticked:\n${written}`);
+  });
+
+  test('bullet cross-referencing "Phase 1" listed first does not anchor phase 1 scope', () => {
+    const written = setupPhase(1, `# ROADMAP\n\n## Milestone v1.0\n\n- [ ] **Phase 2: Two** - builds on Phase 1 output\n  - [ ] 01-PLAN.md\n  - [ ] 02-PLAN.md\n- [ ] **Phase 1: One**\n  - [ ] 01-PLAN.md\n  - [ ] 02-PLAN.md\n${TABLE}`, TWO);
+    assert.ok(written.includes('builds on Phase 1 output\n  - [ ] 01-PLAN.md'), `phase 2 row ticked:\n${written}`);
+    assert.ok(written.includes('**Phase 1: One**\n  - [x] 01-PLAN.md'), `phase 1 row not ticked:\n${written}`);
+  });
+
+  test('rows under a #### sub-heading sit outside the phase section and stay unticked, as in phase complete', () => {
+    const written = setupPhase(1, `# ROADMAP\n\n## Milestone v1.0\n\n### Phase 1: One\n\n#### Plans\n- [ ] 01-01-PLAN.md\n${TABLE}`, ['01-01-PLAN.md'], ['01-01-SUMMARY.md']);
+    assert.ok(written.includes('#### Plans\n- [ ] 01-01-PLAN.md'), `row outside the phase section ticked:\n${written}`);
+  });
+
+  test('phase marked only by a bold paragraph still ticks via active-milestone fallback', () => {
+    const written = setupPhase(1, `# ROADMAP\n\n## Milestone v1.0\n\n**Phase 1: One**\n\n- [ ] 01-01-PLAN.md\n${TABLE}`, ['01-01-PLAN.md'], ['01-01-SUMMARY.md']);
+    assert.ok(written.includes('- [x] 01-01-PLAN.md'), `row not ticked:\n${written}`);
+  });
+
+  test('flat checklist with unindented plan rows ticks the rows under the phase bullet', () => {
+    const written = setupPhase(1, `# ROADMAP\n\n## Milestone v1.0\n\n- [ ] **Phase 1: One**\n- [ ] 01-01-PLAN.md\n${TABLE}`, ['01-01-PLAN.md'], ['01-01-SUMMARY.md']);
+    assert.ok(written.includes('- [x] 01-01-PLAN.md'), `row not ticked:\n${written}`);
+  });
+});
+
+
 // ────────────────────────────────────────────────────────────────────────
 // Folded from tests/bug-2661-roadmap-sync-parallel.test.cjs — consolidation epic #1969 (B2 #1971)
 // ────────────────────────────────────────────────────────────────────────
