@@ -3447,18 +3447,6 @@ describe('shipped prompts scope raw git commit with a pathspec (#5211)', () => {
     }), { numRuns: 100 });
   });
 
-  test('fast.md refuses to commit over a dirty index (hard exit before `git add -A`)', () => {
-    const lines = splitLines(fs.readFileSync(path.join(root, 'gsd-core/workflows/fast.md'), 'utf8'));
-    const guards = [];
-    lines.forEach((l, i) => { if (l.includes('git diff --cached --quiet') && l.includes('index not clean') && l.includes('exit 1')) guards.push(i); });
-    const adds = [];
-    lines.forEach((l, i) => { if (/^\s*git add -A\b/.test(l)) adds.push(i); });
-    assert.equal(guards.length, 2, 'both commit_docs branches guard the index');
-    assert.equal(adds.length, 2);
-    // staging is cwd-scoped like `git commit -- .`, so nothing outside cwd is left staged-but-uncommitted
-    adds.forEach((a) => assert.match(lines[a], /^\s*git add -A -- (\.|':!\.planning')\s*$/, 'git add -A is pathspec-scoped'));
-    guards.forEach((g, k) => assert.ok(g < adds[k] && adds[k] - g <= 1, 'guard immediately precedes staging'));
-  });
   test('fast.md commit fence (scratch repo): foreign staged file stays staged; commit_docs=false excludes .planning', () => {
     const lines = splitLines(fs.readFileSync(path.join(root, 'gsd-core/workflows/fast.md'), 'utf8'));
     const commitStep = lines.findIndex((l) => l.includes('<step name="commit">'));
@@ -3492,13 +3480,44 @@ describe('shipped prompts scope raw git commit with a pathspec (#5211)', () => {
       }
     }
   });
+  test('executor step-4 single-repo commit (scratch repo): foreign staged file stays staged', () => {
+    const lines = splitLines(fs.readFileSync(path.join(root, 'agents/gsd-executor.md'), 'utf8'));
+    const at = lines.findIndex((l) => l.includes('**Otherwise (standard single-repo):**'));
+    assert.notEqual(at, -1, 'executor step 4 single-repo branch exists');
+    const rest = lines.slice(at);
+    const blk = scanFencedBlocks(rest).find((b) => b.infoString === 'bash');
+    const fence = rest.slice(blk.openLineIdx + 1, blk.closeLineIdx).join('\n')
+      .replace('{step-2 paths}', 'src/a.ts src/b.ts');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-5489e-'));
+    try {
+      const git = (...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8', timeout: GIT_TIMEOUT_MS });
+      git('init', '-q');
+      git('config', 'user.email', 't@t'); git('config', 'user.name', 't'); git('config', 'commit.gpgsign', 'false');
+      fs.mkdirSync(path.join(dir, 'src'));
+      fs.writeFileSync(path.join(dir, 'src/a.ts'), 'a'); fs.writeFileSync(path.join(dir, 'stray'), 's');
+      git('add', '-A'); git('commit', '-q', '-m', 'seed');
+      fs.writeFileSync(path.join(dir, 'src/a.ts'), 'a2'); fs.writeFileSync(path.join(dir, 'src/b.ts'), 'b');
+      fs.writeFileSync(path.join(dir, 'stray'), 's2');
+      git('add', 'src/a.ts', 'src/b.ts', 'stray');
+      const r = spawnSync('bash', ['-c', fence], { cwd: dir, encoding: 'utf8', timeout: GIT_TIMEOUT_MS });
+      assert.equal(r.status, 0, r.stderr);
+      assert.deepStrictEqual(git('show', '--name-only', '--format=', 'HEAD').trim().split('\n').sort(), ['src/a.ts', 'src/b.ts']);
+      assert.equal(git('diff', '--cached', '--name-only').trim(), 'stray');
+    } finally {
+      cleanup(dir);
+    }
+  });
   describe('complete-milestone git_commit_milestone fence (scratch repo)', () => {
-    const all = splitLines(fs.readFileSync(path.join(root, 'gsd-core/workflows/complete-milestone.md'), 'utf8'));
-    const from = all.findIndex((l) => l.includes('<step name="git_commit_milestone">'));
-    const stepLines = all.slice(from, from + all.slice(from).findIndex((l) => l.includes('</step>')));
-    const blk = scanFencedBlocks(stepLines).find((b) => b.infoString === 'bash');
-    assert.ok(blk, 'git_commit_milestone has a bash fence');
-    const fence = stepLines.slice(blk.openLineIdx + 1, blk.closeLineIdx).join('\n');
+    // Read lazily so a missing step fails one test, not the whole file at collection.
+    const fenceOf = () => {
+      const all = splitLines(fs.readFileSync(path.join(root, 'gsd-core/workflows/complete-milestone.md'), 'utf8'));
+      const from = all.findIndex((l) => l.includes('<step name="git_commit_milestone">'));
+      assert.notEqual(from, -1, 'git_commit_milestone step exists');
+      const stepLines = all.slice(from, from + all.slice(from).findIndex((l) => l.includes('</step>')));
+      const blk = scanFencedBlocks(stepLines).find((b) => b.infoString === 'bash');
+      assert.ok(blk, 'git_commit_milestone has a bash fence');
+      return stepLines.slice(blk.openLineIdx + 1, blk.closeLineIdx).join('\n');
+    };
 
     // Seeds `rm` + a stray, stages the deletions and the stray's edit, then runs the fence from `sub`.
     function run(rm, sub = '.') {
@@ -3511,12 +3530,12 @@ describe('shipped prompts scope raw git commit with a pathspec (#5211)', () => {
         git('add', '-A'); git('commit', '-q', '-m', 'seed');
         for (const f of rm) git('rm', '-q', f);
         fs.writeFileSync(path.join(dir, 'stray'), 'y'); git('add', 'stray');
-        const r = spawnSync('bash', ['-c', fence], { cwd: path.join(dir, sub), encoding: 'utf8', timeout: GIT_TIMEOUT_MS });
+        const r = spawnSync('bash', ['-c', fenceOf()], { cwd: path.join(dir, sub), encoding: 'utf8', timeout: GIT_TIMEOUT_MS });
         const lines = (s) => s.trim().split('\n').filter(Boolean);
         return {
           status: r.status,
           commits: Number(git('rev-list', '--count', 'HEAD')),
-          head: lines(git('show', '--name-only', '--format=', 'HEAD')),
+          head: lines(git('-c', 'core.quotepath=off', 'show', '--name-only', '--format=', 'HEAD')),
           staged: lines(git('diff', '--cached', '--name-only')),
         };
       } finally {
@@ -3532,6 +3551,11 @@ describe('shipped prompts scope raw git commit with a pathspec (#5211)', () => {
     test('project nested in a repo subdir (cwd=app/): cwd-relative pathspec still commits', () => {
       const r = run(['app/.planning/REQUIREMENTS.md'], 'app');
       assert.deepStrictEqual([r.status, r.commits, r.head, r.staged], [0, 2, ['app/.planning/REQUIREMENTS.md'], ['stray']]);
+    });
+
+    test('non-ASCII directory in the path: git does not quote it, deletion still committed', () => {
+      const r = run(['é/.planning/REQUIREMENTS.md']);
+      assert.deepStrictEqual([r.status, r.commits, r.head, r.staged], [0, 2, ['é/.planning/REQUIREMENTS.md'], ['stray']]);
     });
 
     test('two staged REQUIREMENTS.md deletions: refuses, commits nothing', () => {
