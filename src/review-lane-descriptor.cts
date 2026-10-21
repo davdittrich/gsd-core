@@ -857,8 +857,10 @@ function countOccurrences(haystack: string, re: RegExp): Map<string, number> {
 
 /**
  * Bidirectional parity across three surfaces: the descriptor, the roster
- * (`KNOWN_REVIEWER_SLUGS`), and the generated capability **registry** — plus one anti-parity
- * assertion against the workflow.
+ * (`KNOWN_REVIEWER_SLUGS`), and the generated capability **registry** — plus two assertions
+ * against the workflow: the anti-parity check, and the availability-fallback check (the workflow
+ * makes the availability call, has a fallback row per lane, and the fallback slug set equals the
+ * openai-http lanes).
  *
  * **Re-pointed by Phase 5b (#2799).** Through Phase 5a this function also required a literal
  * `<!-- reviewer-lane: <slug> -->` per lane inside `invoke_reviewers` and a literal

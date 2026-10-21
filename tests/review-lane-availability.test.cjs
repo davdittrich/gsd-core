@@ -87,11 +87,12 @@ describe('review-lane availability (#5266)', () => {
     if (tmp) cleanup(tmp);
   });
 
-  const availability = async (review, extraArgs = []) => {
+  const availability = async (review, extraArgs = [], env) => {
     fs.mkdirSync(path.join(tmp, '.planning'), { recursive: true });
     fs.writeFileSync(path.join(tmp, '.planning', 'config.json'), JSON.stringify({ review }));
     const { stdout } = await run(process.execPath, [TOOLS, 'review-lane', 'availability', '--raw', ...extraArgs], {
       cwd: tmp,
+      ...(env && { env: { ...process.env, ...env } }),
       timeout: PROBE_TIMEOUT_MS,
     });
     return splitLines(stdout.trim());
@@ -147,12 +148,32 @@ describe('review-lane availability (#5266)', () => {
     assert.deepEqual(lines, ['ollama:available']);
   });
 
+  test('--selected negative inputs: empty/blank selects all, unknown selects none, metacharacters are data', async () => {
+    const hosts = { ollama_host: up.url, lm_studio_host: up.url, llama_cpp_host: up.url };
+    const all = ['ollama:available', 'lm_studio:available', 'llama_cpp:available'];
+    const cases = [
+      ['', all],
+      ['  ,  ', all],
+      ['nope', []],
+      ['ollama,ollama', ['ollama:available']],
+      ['ollama;touch pwned', []],
+    ];
+    for (const [argValue, expected] of cases) {
+      // empty stdout splits to [''], so drop blank lines to compare "no rows" as []
+      const lines = (await availability(hosts, ['--selected', argValue])).filter((l) => l !== '');
+      assert.deepEqual(lines, expected, `--selected ${JSON.stringify(argValue)}`);
+    }
+    // the child runs in tmp; also check the test process cwd per the inherited-cwd contract
+    assert.equal(fs.existsSync(path.join(tmp, 'pwned')), false, 'no file created in child cwd');
+    assert.equal(fs.existsSync(path.join(process.cwd(), 'pwned')), false, 'no file created in process cwd');
+  });
+
   // review.md's `||` fallback: only a failed/unsupported subcommand degrades to all-missing, loudly.
   const AVAIL_LINE = fs
     .readFileSync(path.join(__dirname, '..', 'gsd-core', 'workflows', 'review.md'), 'utf8')
     .split(/\r?\n/)
     .find((l) => l.startsWith('gsd_run review-lane availability'));
-  const runLine = (stub) => run('bash', ['-c', `gsd_run() { ${stub}; }\n${AVAIL_LINE}`]);
+  const runLine = (stub) => run('bash', ['-c', `gsd_run() { ${stub}; }\n${AVAIL_LINE}`], { timeout: PROBE_TIMEOUT_MS });
 
   test('review.md fallback: a failing subcommand prints a warning and every http lane as missing', { skip: process.platform === 'win32' }, async () => {
     assert.ok(AVAIL_LINE, 'availability call found in review.md');
@@ -208,15 +229,9 @@ describe('review-lane availability (#5266)', () => {
       const sections = runGsdTools(['review-lane', 'sections'], tmp, env);
       assert.match(sections.output, /^rev5266http\t/m, 'overlay lane must be roster-visible');
 
-      fs.mkdirSync(path.join(tmp, '.planning'), { recursive: true });
-      fs.writeFileSync(path.join(tmp, '.planning', 'config.json'), JSON.stringify({ review: { rev5266http_host: third.url } }));
       // Async run: runGsdTools blocks this event loop, so a listener could never record a request.
-      const { stdout } = await run(process.execPath, [TOOLS, 'review-lane', 'availability', '--raw'], {
-        cwd: tmp,
-        env: { ...process.env, ...env },
-        timeout: PROBE_TIMEOUT_MS,
-      });
-      assert.ok(!stdout.includes('rev5266http'), `third-party lane leaked into output:\n${stdout}`);
+      const lines = await availability({ rev5266http_host: third.url }, [], env);
+      assert.ok(!lines.join('\n').includes('rev5266http'), `third-party lane leaked into output:\n${lines.join('\n')}`);
       assert.deepEqual(third.requests, [], 'third-party lane host must never be requested');
     }
   });

@@ -190,7 +190,7 @@ describe('reviewer lane parity — availability fallback rows', () => {
   function withHttpSlugs(slugs, fallbackSlugs = slugs) {
     const descriptor = [...REVIEWER_LANES.filter((l) => l.transport !== 'openai-http'), ...slugs.map((x) => ({ ...fakeLane(x), transport: 'openai-http' }))];
     const rows = fallbackSlugs.map((x) => `${x}:missing\\n`).join('');
-    const workflowText = WORKFLOW_TEXT.replace(/printf '[^']*:missing[^']*'/, `printf '${rows}'`);
+    const workflowText = WORKFLOW_TEXT.replace(/printf '[^']{0,200}:missing[^']{0,200}'/, `printf '${rows}'`);
     return { descriptor, workflowText };
   }
 
