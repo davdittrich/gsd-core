@@ -60,20 +60,20 @@ shq() { case "$1" in ''|*[!A-Za-z0-9._/@%+=:,-]*) printf "'%s'" "$(printf %s "$1
 # content for every path TIP changed since it forked from $TARGET, or (once $TARGET has since
 # edited those paths) GitHub reports a PR for $PR_BRANCH merged into the target whose head was TIP.
 pr_merged() {
-  local _sha _fork _base _r _t
+  local _sha _fork _base _r _t _g
   git merge-base --is-ancestor "$1" "$TARGET" 2>/dev/null && return 0
   _sha=$(git rev-parse -q --verify "$1") || return 1
   if _fork=$(git merge-base "$_sha" "$TARGET" 2>/dev/null) && [ -n "$(git diff --name-only --no-renames "$_fork" "$_sha")" ] &&
     git diff --name-only --no-renames -z "$_fork" "$_sha" | xargs -0 git --literal-pathspecs diff --quiet "$_sha" "$TARGET" --; then
     return 0
   fi
-  # Unprovable offline stays "not merged" (fail-safe): gh missing, unauthenticated, offline or
-  # slower than 10s (when `timeout` exists). Base-filtered: markers are keyed per target, and the
+  # Unprovable offline stays "not merged" (fail-safe): gh missing, unauthenticated, offline,
+  # slower than 10s, or an executable gh with no `timeout` to bound it (stock macOS). Base-filtered: markers are keyed per target, and the
   # base is TARGET without its leading remote name (any configured remote, not only origin).
-  command -v gh >/dev/null 2>&1 || return 1
+  _g=$(command -v gh) || return 1
   _base=$TARGET
   for _r in $(git remote); do [ "${TARGET#"$_r"/}" != "$TARGET" ] && { _base=${TARGET#"$_r"/}; break; }; done
-  if [ "$(type -t gh)" = file ] && command -v timeout >/dev/null 2>&1; then _t="timeout 10"; else _t=; fi
+  case $_g in /*) command -v timeout >/dev/null 2>&1 || return 1; _t="timeout 10" ;; *) _t= ;; esac
   $_t gh pr list --state merged --head "$PR_BRANCH" --base "$_base" --json headRefOid --jq '.[].headRefOid' 2>/dev/null | grep -qx "$_sha"
 }
 

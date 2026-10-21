@@ -73,14 +73,14 @@ function commitRound(dir, n, file = 'code.txt') {
 }
 
 // Runs the shipped blocks in workflow order under pr_strict.
-function publish(dir, target = 'main', { branch = 'feature', mode = 'true', gh = 'return 1' } = {}) {
+function publish(dir, target = 'main', { branch = 'feature', mode = 'true', gh = 'return 1', prelude = '' } = {}) {
   const text = fs.readFileSync(WORKFLOW_PATH, 'utf-8');
   const b = (marker) => extractBashBlockContaining(text, marker);
   const script = [
     `CURRENT_BRANCH='${branch}'`,
     `TARGET=${target}`,
     `gsd_run() { echo ${mode}; }`,
-    `gh() { ${gh}; }`, // hermetic: no network lookup unless a test supplies one
+    prelude || `gh() { ${gh}; }`, // hermetic: no network lookup unless a test supplies one
     b('PR_BRANCH="${CURRENT_BRANCH}-pr"'),
     b('TRANSIENT_DIRS="phases'),
     b('FILTER_PATHS=$(for d'),
@@ -120,7 +120,7 @@ const builtOf = (dir) => refOf(dir, BUILT);
 // Rounds whose code reached the -pr tree (state, not log text).
 const replayed = (dir) => git(dir, 'diff', '--name-only', 'main', 'feature-pr').split(/\r?\n/).filter((f) => /^r\d+\.txt$/.test(f)).sort();
 
-// The refusal/warning/recovery text is the product the operator acts on (source-text-is-the-product).
+// The refusal, warning and recovery text on stderr is what the operator acts on, so assert it verbatim.
 const said = (r, p) => (typeof p === 'string' ? r.stderr.includes(p) : p.test(r.stderr));
 const printed = (r, re) => (r.stderr.match(re) || [])[1];
 
@@ -390,6 +390,40 @@ describe('#5469 pr-branch published marker (real git)', () => {
     onlyRound2(r, dir);
     assert.ok(!said(r, /dropped the pending build/), r.stderr);
     assert.equal(markerOf(dir), tip1);
+  });
+
+  // An executable gh (not a shell function) can only be bounded by `timeout`; stock macOS has none.
+  describe('executable gh on a host without `timeout`', () => {
+    const hasTimeout = runSh('timeout 1 true', os.tmpdir()).status === 0;
+    const noTimeout = "command() { if [ \"$1\" = -v ] && [ \"$2\" = timeout ]; then return 1; fi; builtin command \"$@\"; }";
+    const run = (hideTimeout) => {
+      const dir = repo();
+      commitRound(dir, 1);
+      assert.equal(publish(dir).status, 0);
+      const prTip = builtOf(dir);
+      const tip1 = git(dir, 'rev-parse', 'feature');
+      squashMerge(dir, { later: true, deletePr: true });
+      commitRound(dir, 2, 'two.txt');
+      const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-prmarker-bin-'));
+      dirs.push(bin);
+      fs.writeFileSync(path.join(bin, 'gh'), `#!/bin/sh\n: > .git/gh-called\necho ${prTip}\n`, { mode: 0o755 });
+      const prelude = `PATH="${bin.replace(/\\/g, '/')}:$PATH"\n${hideTimeout ? noTimeout : ''}`;
+      const r = publish(dir, 'main', { prelude });
+      return { r, dir, tip1, called: fs.existsSync(path.join(dir, '.git', 'gh-called')) };
+    };
+
+    test('the lookup is skipped: the drop is announced and gh never runs unbounded', () => {
+      const { r, dir, called } = run(true);
+      assert.ok(said(r, /WARNING: dropped the pending build/), r.stderr);
+      assert.equal(called, false);
+      assert.equal(markerOf(dir), '');
+    });
+
+    test('control: with `timeout` available the same gh runs and proves the merge', { skip: !hasTimeout }, () => {
+      const { dir, tip1, called } = run(false);
+      assert.equal(called, true);
+      assert.equal(markerOf(dir), tip1);
+    });
   });
 
   test('renamed file, squash merge on main keeps old.txt: not proven, the drop is announced (--no-renames)', () => {
