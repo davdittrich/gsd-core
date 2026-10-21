@@ -1276,13 +1276,13 @@ function cmdRoadmapUpdatePlanProgress(cwd: string, phaseNum: string | null | und
     // phase-id-owner: deliberately unmigrated (#4984 revert) — see comment above.
     const phaseHeadingAnchor = `#{2,4}\\s*Phase\\s+${phasePattern}${OPTIONAL_PHASE_TAG_SOURCE}(?=[:\\s])`;
     // #4247: target detection runs against the ORIGINAL content's active
-    // (post-</details>) region — the same milestone scoping every writer
-    // below applies — so the gate asks "does the file carry a writable phase
-    // representation" rather than "did some regex fire mid-transform".
-    const gateDetailsClose = originalContent.lastIndexOf('</details>');
-    const gateActiveRegion = gateDetailsClose === -1
-      ? originalContent
-      : originalContent.slice(gateDetailsClose + '</details>'.length);
+    // milestone windows — the same `editCurrentMilestone` collector the
+    // plan-row writers below use — so the gate asks "does the file carry a
+    // writable phase representation" rather than "did some regex fire
+    // mid-transform". (Slicing after the LAST </details> missed an active
+    // phase followed by a non-milestone <details> notes block.)
+    let gateActiveRegion = '';
+    editCurrentMilestone(originalContent, cwd, (window) => { gateActiveRegion += `${window}\n`; return window; });
     // Heading target: the exact grammar `planSectionPattern` /
     // `insertRowsPatternA|B` anchor on (an ATX phase heading for this phase).
     const headingTargetFound = new RegExp(phaseHeadingAnchor, 'i').test(gateActiveRegion);
@@ -1690,11 +1690,19 @@ function cmdRoadmapUpdatePlanProgress(cwd: string, phaseNum: string | null | und
     // row is never touched; only a phase with neither scope falls back to the
     // first row in the milestone.
     const anyPhaseBullet = /^[ \t]*-[ \t]*\[[ xX]\][ \t]*(?:\*\*)?[ \t]*Phase[ \t]/i;
+    // The edit callback runs once per milestone window, so decide in one
+    // pre-pass whether ANY window holds a section or bullet scope for the phase;
+    // the unscoped fallback applies only when none does.
+    let located = false;
+    editCurrentMilestone(roadmapContent, cwd, (window) => {
+      withPhaseSection(window, phaseNum, (body) => { located = true; return body; });
+      if (phaseChecklistBullet(true).test(window)) located = true;
+      return window;
+    });
     const tickPlanRow = (text: string, planId: string): string => {
       const row = coreUtils.planRowPattern(planId, { anchored: true });
       const tick = (t: string): string => updateBullet(t, (_bulletText, rawLine) => row.test(rawLine), (rawLine) => rawLine.replace(row, '$1x$2'));
-      let located = false;
-      const inSection = withPhaseSection(text, phaseNum, (body) => { located = true; return tick(body); });
+      const inSection = withPhaseSection(text, phaseNum, tick);
       if (inSection !== text) return inSection;
       const bullet = phaseChecklistBullet(true).exec(text);
       if (bullet) {

@@ -2703,6 +2703,8 @@ describe('#5483: update-plan-progress ticks only the active milestone row', () =
     '',
   ].join('\n');
 
+  const tickedPlanRows = (text) => [...text.matchAll(/^- \[x\] (\d+-\d+-PLAN\.md)/gm)].map((m) => m[1]);
+
   function setup(roadmap, withSummary = true) {
     fs.writeFileSync(roadmapPath, roadmap);
     const dir = createPhaseWithPlans(tmpDir, '1', ['01-01-PLAN.md']);
@@ -2715,24 +2717,28 @@ describe('#5483: update-plan-progress ticks only the active milestone row', () =
   test('archived and active rows share a plan id: active ticked, archived byte-identical', () => {
     const active = '## Milestone v1.0\n\n### Phase 1: test phase\n\nPlans:\n- [ ] 01-01-PLAN.md\n';
     const written = setup(`# ROADMAP\n\n${ARCHIVED}${active}`);
-    assert.ok(written.includes(ARCHIVED), 'archived block must be byte-identical');
-    assert.ok(written.slice(written.indexOf('</details>')).includes('- [x] 01-01-PLAN.md'), 'tick must land in active region');
+    const start = written.indexOf('<details>');
+    assert.strictEqual(written.slice(start, start + ARCHIVED.length), ARCHIVED);
+    assert.deepStrictEqual(tickedPlanRows(written.slice(0, start + ARCHIVED.length)), []);
+    assert.deepStrictEqual(tickedPlanRows(written.slice(start + ARCHIVED.length)), ['01-01-PLAN.md']);
   });
 
   test('verb-inserted active row is ticked exactly once, archived row untouched', () => {
     const active = '## Milestone v1.0\n\n### Phase 1: test phase\n\nPlans:\n';
     const written = setup(`# ROADMAP\n\n${ARCHIVED}${active}`);
-    assert.ok(written.includes(ARCHIVED), 'archived block must be byte-identical');
-    assert.ok(written.slice(written.indexOf('</details>')).includes('- [x] 01-01-PLAN.md'), `inserted row not ticked:\n${written}`);
-    assert.strictEqual(written.split('- [x] 01-01-PLAN.md').length - 1, 1, `ticked outside the active region:\n${written}`);
+    const start = written.indexOf('<details>');
+    assert.strictEqual(written.slice(start, start + ARCHIVED.length), ARCHIVED);
+    assert.deepStrictEqual(tickedPlanRows(written.slice(0, start + ARCHIVED.length)), []);
+    assert.deepStrictEqual(tickedPlanRows(written.slice(start + ARCHIVED.length)), ['01-01-PLAN.md']);
   });
 
   test('plan id only in archived milestone: ticked nowhere, archived byte-identical', () => {
     // Active phase has no `Plans:` anchor, so nothing can be inserted there.
     const active = '## Milestone v1.0\n\n### Phase 1: test phase\n\nNo plan list yet.\n';
     const written = setup(`# ROADMAP\n\n${ARCHIVED}${active}`);
-    assert.ok(written.includes(ARCHIVED), 'archived block must be byte-identical');
-    assert.ok(!written.includes('- [x] 01-01-PLAN.md'), `ticked despite living only in archived:\n${written}`);
+    const start = written.indexOf('<details>');
+    assert.strictEqual(written.slice(start, start + ARCHIVED.length), ARCHIVED);
+    assert.deepStrictEqual(tickedPlanRows(written), []);
   });
 
   function setupPhase(n, roadmap, plans = ['01-PLAN.md'], summaries = ['01-SUMMARY.md']) {
@@ -2789,8 +2795,10 @@ describe('#5483: update-plan-progress ticks only the active milestone row', () =
     const table = '## Progress\n\n| Phase | Plans Complete | Status | Completed |\n|-------|---------------|--------|-----------|\n| 1. test phase | 0/1 | Planned |  |\n\n';
     // The Progress table after the notes block is the write gate's target.
     const written = setup(`# ROADMAP\n\n${ARCHIVED}${active}${notes}\n${table}`);
-    assert.ok(written.includes(ARCHIVED), 'archived block must be byte-identical');
-    assert.ok(written.includes('### Phase 1: test phase\n\nPlans:\n- [x] 01-01-PLAN.md'), `active row not ticked:\n${written}`);
+    const start = written.indexOf('<details>');
+    assert.strictEqual(written.slice(start, start + ARCHIVED.length), ARCHIVED);
+    assert.deepStrictEqual(tickedPlanRows(written.slice(0, start + ARCHIVED.length)), []);
+    assert.deepStrictEqual(tickedPlanRows(written.slice(start + ARCHIVED.length)), ['01-01-PLAN.md']);
   });
 
   test('CRLF roadmap: only the active row is ticked', () => {
@@ -2808,29 +2816,34 @@ describe('#5483: update-plan-progress ticks only the active milestone row', () =
     assert.ok(written.includes('### Phase 1: p1\n\nPlans:\n- [x] 01-PLAN.md'), `phase 1 row not ticked:\n${written}`);
   });
 
+  // Owns temp-dir creation and cleanup so test bodies need no try/finally.
+  const withTempProject = (prefix, fn) => {
+    const dir = createTempProject(prefix);
+    try {
+      return fn(dir);
+    } finally {
+      cleanup(dir);
+    }
+  };
+
   test('property: in any section order, only the updated phase\'s un-prefixed row is ticked', () => {
     const fc = require('fast-check');
     const sec = (n) => `### Phase ${n}: p${n}\n\nPlans:\n- [ ] 01-PLAN.md\n\n`;
     fc.assert(fc.property(
       fc.shuffledSubarray(['1', '2', '10', '1.1'], { minLength: 4, maxLength: 4 }),
       fc.constantFrom('1', '2', '10'),
-      (order, target) => {
-        const dir = createTempProject('gsd-5483-prop-');
-        try {
-          fs.writeFileSync(path.join(dir, '.planning', 'ROADMAP.md'), `# ROADMAP\n\n## Milestone v1.0\n\n${order.map(sec).join('')}`);
-          const phaseDir = createPhaseWithPlans(dir, target, ['01-PLAN.md']);
-          fs.writeFileSync(path.join(phaseDir, '01-SUMMARY.md'), '# Summary\n');
-          const result = runGsdTools(['roadmap', 'update-plan-progress', target], dir);
-          assert.ok(result.success, `Command failed: ${result.error}`);
-          const written = fs.readFileSync(path.join(dir, '.planning', 'ROADMAP.md'), 'utf-8');
-          for (const n of order) {
-            const ticked = written.includes(`### Phase ${n}: p${n}\n\nPlans:\n- [x] 01-PLAN.md`);
-            assert.strictEqual(ticked, n === target, `phase ${n} ticked=${ticked} (target ${target}):\n${written}`);
-          }
-        } finally {
-          cleanup(dir);
+      (order, target) => withTempProject('gsd-5483-prop-', (dir) => {
+        fs.writeFileSync(path.join(dir, '.planning', 'ROADMAP.md'), `# ROADMAP\n\n## Milestone v1.0\n\n${order.map(sec).join('')}`);
+        const phaseDir = createPhaseWithPlans(dir, target, ['01-PLAN.md']);
+        fs.writeFileSync(path.join(phaseDir, '01-SUMMARY.md'), '# Summary\n');
+        const result = runGsdTools(['roadmap', 'update-plan-progress', target], dir);
+        assert.ok(result.success, `Command failed: ${result.error}`);
+        const written = fs.readFileSync(path.join(dir, '.planning', 'ROADMAP.md'), 'utf-8');
+        for (const n of order) {
+          const ticked = written.includes(`### Phase ${n}: p${n}\n\nPlans:\n- [x] 01-PLAN.md`);
+          assert.strictEqual(ticked, n === target, `phase ${n} ticked=${ticked} (target ${target}):\n${written}`);
         }
-      },
+      }),
     ), { numRuns: 12 });
   });
 
@@ -2865,6 +2878,23 @@ describe('#5483: update-plan-progress ticks only the active milestone row', () =
   test('flat checklist with unindented plan rows ticks the rows under the phase bullet', () => {
     const written = setupPhase(1, `# ROADMAP\n\n## Milestone v1.0\n\n- [ ] **Phase 1: One**\n- [ ] 01-01-PLAN.md\n${TABLE}`, ['01-01-PLAN.md'], ['01-01-SUMMARY.md']);
     assert.ok(written.includes('- [x] 01-01-PLAN.md'), `row not ticked:\n${written}`);
+  });
+
+  test('a non-milestone <details> notes block with no Progress table after it still ticks the active row', () => {
+    const active = '## Milestone v1.0\n\n### Phase 1: test phase\n\nPlans:\n- [ ] 01-01-PLAN.md\n\n';
+    const notes = '<details>\n<summary>Notes</summary>\n\nlater\n\n</details>\n';
+    const written = setup(`# ROADMAP\n\n${active}${notes}`);
+    assert.deepStrictEqual(tickedPlanRows(written), ['01-01-PLAN.md']);
+  });
+
+  test('primary window and (Phase Details) window: phase 2 in the details window ticks, phase 1 row stays unticked', () => {
+    fs.writeFileSync(path.join(tmpDir, '.planning', 'STATE.md'), '---\nmilestone: v1.0\n---\n');
+    const roadmap = '# ROADMAP\n\n## Milestone v1.0\n\n- [ ] **Phase 1: One**\n  - [ ] 01-PLAN.md\n\n'
+      + '## Milestone v1.0 (Phase Details)\n\n### Phase 2: Two\n\nPlans:\n- [ ] 02-01-PLAN.md\n';
+    const written = setupPhase(2, roadmap, ['02-01-PLAN.md'], ['02-01-SUMMARY.md']);
+    const ticked = [...written.matchAll(/^\s*- \[x\] (\S+-PLAN\.md)/gm)].map((m) => m[1]);
+    assert.deepStrictEqual(ticked, ['02-01-PLAN.md']);
+    assert.deepStrictEqual(tickedPlanRows(written), ['02-01-PLAN.md']);
   });
 });
 
