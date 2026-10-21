@@ -39,7 +39,9 @@
  * contract/40-design.md`): a `--watch` mode, a reader API inside gsd-core, a
  * diff/event stream, a config toggle, milestone-scoping of `phases[]`. This
  * module answers "where is this project right now" and nothing else — a
- * request for document *contents* belongs to `planning.inspect`.
+ * request for document *contents* belongs to `planning.inspect`. (Its one side
+ * effect beyond the snapshot: `excludeStateJson` keeps state.json out of git via
+ * `.git/info/exclude`, REQ-SC-04.)
  *
  * REQUIRE-CYCLE HAZARD (the single most important implementation
  * constraint). `src/state.cts` imports THIS module, and `src/smart-entry.cts`
