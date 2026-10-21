@@ -2848,6 +2848,90 @@ describe('phase add allocation vs sibling git worktrees (#3849)', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// phase add / add-batch under phase_id_convention: bracket (#5528)
+//
+// The allocation scans counted only plain `Phase N` lines, so a roadmap whose only phase is
+// `[GSD.02] 01` yielded a second phase numbered 1. Under the bracket convention every
+// representation (heading, checklist bullet, directory) of an existing phase must block reuse.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('phase add / add-batch count bracket phases under phase_id_convention bracket (#5528)', () => {
+  let tmp;
+  beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-5528-')); });
+  afterEach(() => { cleanup(tmp); });
+
+  function setup(roadmapLines, { convention = 'bracket', dirs = [] } = {}) {
+    const planning = path.join(tmp, '.planning');
+    fs.mkdirSync(path.join(planning, 'phases'), { recursive: true });
+    fs.writeFileSync(path.join(planning, 'config.json'), JSON.stringify(convention ? { phase_id_convention: convention } : {}));
+    fs.writeFileSync(path.join(planning, 'STATE.md'), '---\nmilestone: v1.0\n---\n# State\n');
+    fs.writeFileSync(path.join(planning, 'ROADMAP.md'), roadmapLines.join('\n'));
+    for (const d of dirs) fs.mkdirSync(path.join(planning, 'phases', d));
+    return planning;
+  }
+  const roadmap = (planning) => fs.readFileSync(path.join(planning, 'ROADMAP.md'), 'utf-8');
+
+  test('issue repro: bracket phase blocks reuse; Depends on names the bracket predecessor', () => {
+    const planning = setup([
+      '# Roadmap', '', '## Milestone v1.0', '', '- [ ] **[GSD.02] 01: Existing**', '',
+      '### Phase [GSD.02] 01: Existing', '', '**Goal:** x', '',
+    ]);
+    const result = runGsdTools('phase add "New thing" --raw', tmp);
+    assert.ok(result.success, result.error);
+    assert.strictEqual(result.output.trim(), '02');
+    assert.match(roadmap(planning), /### Phase 2: New thing[\s\S]*\*\*Depends on:\*\* Phase 1\b/);
+  });
+
+  test('a bracket phase found only as a canonical heading blocks reuse of its number', () => {
+    setup(['# Roadmap', '', '## Milestone v1.0', '', '### [GSD.02] 07: Heading only', '', '**Goal:** x', '']);
+    const result = runGsdTools('phase add "New thing" --raw', tmp);
+    assert.ok(result.success, result.error);
+    assert.strictEqual(result.output.trim(), '08');
+  });
+
+  test('a bracket phase found only as a checklist bullet blocks reuse of its number', () => {
+    setup(['# Roadmap', '', '## Milestone v1.0', '', '- [ ] **[GSD.02] 03: Bullet only**', '']);
+    const result = runGsdTools('phase add "New thing" --raw', tmp);
+    assert.ok(result.success, result.error);
+    assert.strictEqual(result.output.trim(), '04');
+  });
+
+  test('a bracket phase found only as an on-disk directory blocks reuse of its number', () => {
+    setup(['# Roadmap', '', '## Milestone v1.0', ''], { dirs: ['GSD.02-05-orphan'] });
+    const result = runGsdTools('phase add "New thing" --raw', tmp);
+    assert.ok(result.success, result.error);
+    assert.strictEqual(result.output.trim(), '06');
+  });
+
+  test('a bracket sentinel (icebox) milestone phase does not count', () => {
+    setup(['# Roadmap', '', '## Milestone v1.0', '', '### [GSD.999] 07: Icebox', '', '**Goal:** y', '',
+      '### [GSD.02] 01: Real', '', '**Goal:** x', '']);
+    const result = runGsdTools('phase add "New thing" --raw', tmp);
+    assert.ok(result.success, result.error);
+    assert.strictEqual(result.output.trim(), '02');
+  });
+
+  test('add-batch allocates consecutive free numbers after the bracket phases', () => {
+    const planning = setup([
+      '# Roadmap', '', '## Milestone v1.0', '', '- [ ] **[GSD.02] 01: Existing**', '',
+      '### Phase [GSD.02] 01: Existing', '', '**Goal:** x', '',
+    ]);
+    const result = runGsdTools(['phase', 'add-batch', '--descriptions', '["First New","Second New"]'], tmp);
+    assert.ok(result.success, result.error);
+    const r = roadmap(planning);
+    assert.match(r, /### Phase 2: First New[\s\S]*\*\*Depends on:\*\* Phase 1\b/);
+    assert.match(r, /### Phase 3: Second New[\s\S]*\*\*Depends on:\*\* Phase 2\b/);
+  });
+
+  test('non-bracket repo: a bracket-looking heading is still not counted (byte-identical to before)', () => {
+    setup(['# Roadmap', '', '## Milestone v1.0', '', '### Phase [GSD.02] 01: Existing', '', '**Goal:** x', ''], { convention: null });
+    const result = runGsdTools('phase add "New thing" --raw', tmp);
+    assert.ok(result.success, result.error);
+    assert.strictEqual(result.output.trim(), '01');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // phase add touches only the block it inserts (#5113)
 //
 // `platformWriteSync` re-normalizes the WHOLE Markdown document on every write. For phase.add
