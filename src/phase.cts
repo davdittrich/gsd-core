@@ -1272,10 +1272,10 @@ function roadmapDeclaredPhaseNums(rawContent: string, convention: string | null,
  * `[PROJECT-]NN-slug` reading it always had.
  */
 function dirPhaseNum(entry: string, convention: string | null): number | null {
-  const bracketDir = convention === 'bracket' ? entry.match(new RegExp(`^${BRACKET_DIR_PREFIX_SRC}(\\d+)`, 'i')) : null;
+  const bracketDir = convention === 'bracket' ? entry.match(new RegExp(`^${BRACKET_DIR_PREFIX_SRC}(\\d+)(?:\\.\\d+)?(?=-|$)`, 'i')) : null;
   const match = bracketDir ?? entry.match(/^(?:[A-Z][A-Z0-9]*-)?(\d+)-/);
   if (!match) return null;
-  const sentinel = bracketDir ? isSentinelPhaseDir(entry) : isSentinelPhaseId(parseInt(match[1], 10));
+  const sentinel = bracketDir ? isSentinelPhaseDir(entry.toUpperCase()) : isSentinelPhaseId(parseInt(match[1], 10));
   return sentinel ? null : parseInt(match[1], 10);
 }
 

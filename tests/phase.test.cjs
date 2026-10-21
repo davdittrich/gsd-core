@@ -2911,6 +2911,13 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
     assert.strictEqual(result.output.trim(), '02');
   });
 
+  test('a lowercase sentinel dir and a malformed bracket dir do not reserve numbers', () => {
+    setup(['# Roadmap', '', '## Milestone v1.0', ''], { dirs: ['gsd.999-07-icebox', 'GSD.02-12A-hotfix', 'GSD.02-03-real'] });
+    const result = runGsdTools('phase add "New thing" --raw', tmp);
+    assert.ok(result.success, result.error);
+    assert.strictEqual(result.output.trim(), '04');
+  });
+
   test('add-batch allocates consecutive free numbers after the bracket phases', () => {
     const planning = setup([
       '# Roadmap', '', '## Milestone v1.0', '', '- [ ] **[GSD.02] 01: Existing**', '',
