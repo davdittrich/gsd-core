@@ -40,7 +40,11 @@ export function modelFamily(model: unknown): string {
   return /(?:^|[^a-z0-9])(opus|sonnet|haiku|fable)(?:$|[^a-z])/.exec(s)?.[1] ?? s;
 }
 
-// The family is model-authored, so it is reduced to file-name-safe characters and capped.
+/**
+ * The family is model-authored, so it is reduced to file-name-safe characters and capped.
+ * Lossy: distinct families can share a file (e.g. `a/b` and `a_b`); the worst case is a false
+ * mismatch warning, never a bypass, because `escalationAllows` re-checks the stored model's family.
+ */
 export const escalationFile = (root: string, agentType: string, model: string): string =>
   path.join(root, '.gsd', `model-escalation-${agentType}.${modelFamily(model).replace(/[^a-z0-9._-]/g, '_').slice(0, 64)}.json`);
 
