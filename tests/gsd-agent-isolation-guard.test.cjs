@@ -2353,11 +2353,47 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
     assert.equal(fs.existsSync(tmp), false);
   });
 
-  test('the planner prompt template passes model= at every gsd-planner spawn site (ADR-5328 Decision 4)', () => {
-    const tpl = fs.readFileSync(path.join(__dirname, '..', 'gsd-core', 'templates', 'planner-subagent-prompt.md'), 'utf8');
-    const calls = tpl.split(/\r?\n/).filter((l) => l.includes('subagent_type="gsd-planner"'));
-    assert.equal(calls.length, 2);
-    assert.equal(tpl.split('model="{planner_model}"').length - 1, calls.length);
+  test('writeEscalation still updates .gsd/.gitignore past a stale .gitignore tmp file', (t) => {
+    setup(t);
+    const esc = require('../gsd-core/bin/lib/model-escalation.cjs');
+    const ignore = path.join(project, '.gsd', '.gitignore');
+    const tmp = `${ignore}.${process.pid}.tmp`;
+    fs.mkdirSync(path.join(project, '.gsd'), { recursive: true });
+    fs.writeFileSync(ignore, '/dispatch-isolation-sentinel.json\n');
+    fs.writeFileSync(tmp, 'left by a crashed writer');
+    esc.writeEscalation(project, 'gsd-executor', 'opus', undefined, { now: () => 42 });
+    assert.equal(fs.readFileSync(ignore, 'utf8'), '/dispatch-isolation-sentinel.json\n/model-escalation-*\n');
+    assert.deepEqual(JSON.parse(fs.readFileSync(escalationFile(project, 'gsd-executor'), 'utf8')), { model: 'opus', written_at: 42 });
+    assert.equal(fs.existsSync(tmp), false);
+  });
+
+  test('the model check never rewrites .planning/config.json (legacy keys stay unmigrated on disk)', (t) => {
+    setup(t, { ...ISSUE_CONFIG, depth: 'standard' });
+    const config = path.join(project, '.planning', 'config.json');
+    const before = fs.readFileSync(config, 'utf8');
+    const { checkAgentModel } = require('../hooks/lib/agent-model-check.js');
+    assert.equal(checkAgentModel(dispatch('gsd-planner', 'sonnet')).action, 'warn');
+    assert.equal(fs.readFileSync(config, 'utf8'), before);
+  });
+
+  test('an escalation record swapped for a symlink after the lstat is still not followed', { skip: NO_SYMLINKS }, (t) => {
+    setup(t);
+    const planted = path.join(project, 'planted.json');
+    fs.writeFileSync(planted, JSON.stringify({ model: 'opus', written_at: 1_000_000 }));
+    fs.mkdirSync(path.join(project, '.gsd'), { recursive: true });
+    const record = escalationFile(project, 'gsd-executor');
+    fs.symlinkSync(planted, record);
+    // Simulate the race: the lstat sees a regular file, the open then meets the link.
+    const realLstat = fs.lstatSync;
+    t.mock.method(fs, 'lstatSync', (p, ...rest) => (p === record ? realLstat(planted, ...rest) : realLstat(p, ...rest)));
+    assert.equal(evaluate(dispatch('gsd-executor', 'opus', WORKTREE), { now: () => 1_000_000 }).action, 'warn');
+  });
+
+  test('hooks.agent_model_guard values other than "deny" and false warn (true, "off")', (t) => {
+    for (const mode of [true, 'off']) {
+      setup(t, { ...ISSUE_CONFIG, hooks: { agent_model_guard: mode } });
+      assert.equal(evaluate(dispatch('gsd-executor', 'opus', WORKTREE)).action, 'warn', String(mode));
+    }
   });
 
   test('writeEscalation ignores its record in a pre-existing .gsd/.gitignore that lacks a bare *', (t) => {

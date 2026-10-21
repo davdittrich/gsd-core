@@ -63,8 +63,13 @@ export function writeEscalation(
         const cur = readSmallRegularFile(ignore, MAX_READ_BYTES) ?? '';
         if (!/^\*\r?$/m.test(cur) && !/^\/model-escalation-\*\r?$/m.test(cur)) {
           const next = `${ignore}.${process.pid}.tmp`;
-          fs.writeFileSync(next, `${cur}${cur === '' || cur.endsWith('\n') ? '' : '\n'}/model-escalation-*\n`, { flag: 'wx' });
-          retryRenameSync(next, ignore);
+          fs.rmSync(next, { force: true }); // left by a crashed writer whose pid was reused
+          try {
+            fs.writeFileSync(next, `${cur}${cur === '' || cur.endsWith('\n') ? '' : '\n'}/model-escalation-*\n`, { flag: 'wx' });
+            retryRenameSync(next, ignore);
+          } catch {
+            fs.rmSync(next, { force: true });
+          }
         }
       }
     }
@@ -84,15 +89,24 @@ export function writeEscalation(
 
 /** Parsed record, or null when absent, a symlink, non-regular, oversized or unparseable. */
 export function readEscalation(root: string, agentType: string): EscalationRecord | null {
+  // Own no-follow open, not the shared reader (it follows links; SKILL.md and others rely on that).
+  // O_NOFOLLOW closes the lstat-then-open race; win32 lacks it (and O_NONBLOCK), so there the lstat
+  // alone refuses a link, and a swap after it needs repo write access, which forges a record anyway.
+  const { O_RDONLY, O_NONBLOCK, O_NOFOLLOW } = fs.constants;
+  let fd: number | undefined;
   try {
     const file = escalationFile(root, agentType);
-    // The shared reader follows links (SKILL.md and others rely on it), so refuse one here; the fd
-    // check then rejects FIFOs and devices. Racing a swap after the lstat needs repo write access already.
     if (fs.lstatSync(file).isSymbolicLink()) return null;
-    const text = readSmallRegularFile(file, MAX_READ_BYTES);
-    return text === null ? null : JSON.parse(text) as EscalationRecord;
+    fd = fs.openSync(file, O_RDONLY | (O_NONBLOCK || 0) | (O_NOFOLLOW || 0));
+    if (!fs.fstatSync(fd).isFile()) return null; // FIFO, device
+    const buf = Buffer.alloc(MAX_READ_BYTES + 1);
+    let n = 0;
+    for (let r; n < buf.length && (r = fs.readSync(fd, buf, n, buf.length - n, n)) > 0;) n += r;
+    return n > MAX_READ_BYTES ? null : JSON.parse(buf.toString('utf8', 0, n)) as EscalationRecord;
   } catch {
     return null;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
   }
 }
 

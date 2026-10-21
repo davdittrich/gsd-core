@@ -1,10 +1,10 @@
 # ADR-5328: The Agent() Model Guard Rides the Isolation Guard, Recomputes Its Baseline, and Accepts a Bounded Escalation Record
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-18)
 - **Date:** 2026-10-17
 - **Issue:** [#5328](https://github.com/open-gsd/gsd-core/issues/5328) — `enhancement`, `approved-enhancement`
 - **Builds on:** [ADR-4630](4630-dispatch-identity-and-isolation-decision-seam.md) (one owner of the dispatch decision), [ADR-3473](3473-enforcement-by-construction.md) (one owner per invariant)
-- **Scope note:** issue triage asked for the design to be agreed on the PR before building. This ADR records the choices so that agreement can be given or withheld on them; until a maintainer accepts it, it stays `Proposed`.
+- **Scope note:** issue triage asked for the design to be agreed on the PR before building. A maintainer accepted this ADR as written on [PR #5413](https://github.com/open-gsd/gsd-core/pull/5413) (review of head `07463dffa0`, 2026-10-18).
 
 ## Context
 
