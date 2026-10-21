@@ -410,7 +410,18 @@ Create PR from completed phase work with auto-generated body.
 - Key decisions
 - Optional configured PRD-style sections from `ship.pr_body_sections`
 
-**ROADMAP record preflight** (#5221): before the gates, `/gsd-ship` reads `roadmap_record` from `roadmap analyze` and refuses with `PHASE_NOT_COMPLETE` (record incomplete: run `/gsd-verify-work {n}`, which completes the phase), `PHASE_NOT_RECORDED` (no checklist entry or table row: add one, run `/gsd-verify-work {n}`), or `ROADMAP_TABLE_UNREADABLE` (phase table does not parse, e.g. a row with the wrong cell count: fix the table, then re-run).
+**ROADMAP record preflight** (#5221): after the verification check passes and before the gates, `/gsd-ship` runs `roadmap analyze` and reads its `roadmap_record` field with `jq`. The phase ships only when every ROADMAP record of it (checklist entry, progress-table Status) reads complete. Phase numbers match with leading zeros stripped per segment (`03.02` matches `3.2`). Every refusal prints to stderr and stops the workflow with exit 1, before any PR is created:
+
+| Condition | Message (stderr) | Fix |
+|-----------|------------------|-----|
+| Record reads incomplete | `PHASE_NOT_COMPLETE: Run /gsd:verify-work {n} (completes the phase), then re-run /gsd:ship` | Run `/gsd-verify-work {n}`. For a custom-id phase, also tick its checklist entry by hand (a second line says so). |
+| Phase has no checklist entry and no progress-table row | `PHASE_NOT_RECORDED: ROADMAP.md has no checklist entry or progress-table row for phase {n}; ...` | Add an entry or row, run `/gsd-verify-work {n}`, re-run. |
+| Progress table does not parse (e.g. a row with the wrong cell count) | `ROADMAP_TABLE_UNREADABLE: the ROADMAP.md progress table does not parse ...` | Fix the table, re-run. |
+| `roadmap analyze` exits non-zero | `roadmap.analyze failed — see the error above` | Fix the reported error. |
+| Analyze output has no `roadmap_record` field or is not JSON | `roadmap.analyze output unparseable` | Update gsd-core so analyze emits `roadmap_record`. |
+| `jq` is not installed | `jq: command not found`, then `roadmap.analyze output unparseable` | Install `jq`. The check fails closed: without `jq` no phase ships. |
+
+When `.planning/ROADMAP.md` does not exist, the check is skipped.
 
 **Ship gates (capability-driven):** `/gsd-ship` runs every active `ship:pre` gate from the capability registry. Two are on by default:
 
