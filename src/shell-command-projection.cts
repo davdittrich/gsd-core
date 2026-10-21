@@ -657,16 +657,30 @@ function _spawnResult(result: { error?: NodeJS.ErrnoException | null; status?: n
   };
 }
 
+/**
+ * #5548: env vars that make git act on a repository other than the one `cwd`
+ * names (git sets them inside hooks; wrappers export them). This is
+ * `git rev-parse --local-env-vars` minus GIT_CONFIG, GIT_CONFIG_PARAMETERS and
+ * GIT_CONFIG_COUNT, which inject config (e.g. CI `safe.directory`) rather than
+ * select a repository. hooks/lib/git-probe.js carries a parity-tested copy.
+ */
+export const GIT_LOCATION_ENV_VARS: readonly string[] = [
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_OBJECT_DIRECTORY', 'GIT_DIR', 'GIT_WORK_TREE',
+  'GIT_IMPLICIT_WORK_TREE', 'GIT_GRAFT_FILE', 'GIT_INDEX_FILE', 'GIT_NO_REPLACE_OBJECTS',
+  'GIT_REPLACE_REF_BASE', 'GIT_PREFIX', 'GIT_SHALLOW_FILE', 'GIT_COMMON_DIR',
+];
+
+/** Copy of `env` without the repo-location vars; case-insensitive (Windows keeps `Git_Dir` casing). */
+export function scrubGitLocationEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(env).filter(([k]) => !GIT_LOCATION_ENV_VARS.includes(k.toUpperCase())));
+}
+
 export function execGit(args: string[], opts: { cwd?: string; env?: Record<string, string>; timeout?: number } = {}): SpawnResultOutput {
   // Non-interactive defaults: a hung credential prompt or terminal-input
   // probe must surface as a timeout, not block the tool forever. Callers
   // can override via opts.env.
-  // #5548: cwd must select the repository, so repo-location vars inherited
-  // from the parent (git sets them in hooks) are dropped; a caller that needs
-  // one passes it explicitly in opts.env.
-  const { GIT_DIR: _d, GIT_WORK_TREE: _w, GIT_INDEX_FILE: _i, ...inherited } = process.env;
   const env = {
-    ...inherited,
+    ...scrubGitLocationEnv(process.env),
     GIT_TERMINAL_PROMPT: '0',
     GCM_INTERACTIVE: 'never',
     ...(opts.env || {}),
