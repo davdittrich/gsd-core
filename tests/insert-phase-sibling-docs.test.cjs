@@ -29,7 +29,7 @@ describe('#5583 insert-phase --sibling', () => {
   test('workflow parses --sibling out of the description and forwards it', () => {
     assert.match(WORKFLOW, /--sibling/);
     assert.match(WORKFLOW, /never part of the description/);
-    assert.match(WORKFLOW, /phase\.insert "\$\{after_phase\}" "\$\{description\}"\$\{sibling_flag\}/);
+    assert.match(WORKFLOW, /phase\.insert "\$\{after_phase\}" "\$\{description\}" \$\{sibling_flag:\+"\$sibling_flag"\}/);
   });
 
   test('workflow documents nest-by-default and the top-level fallback', () => {
