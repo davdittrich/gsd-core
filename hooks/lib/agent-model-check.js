@@ -22,14 +22,14 @@ function readGuardMode(root) {
   const text = require('../../gsd-core/bin/lib/capability-ledger.cjs').readSmallRegularFile(path.join(root, '.planning', 'config.json'), esc.MAX_READ_BYTES);
   if (text === null) return { skip: true };
   const mode = (JSON.parse(text).hooks || {}).agent_model_guard;
-  const runtime = require('../../gsd-core/bin/lib/runtime-slash.cjs').resolveActiveRuntime(require('../../gsd-core/bin/lib/config-loader.cjs').loadConfig(root));
+  const runtime = require('../../gsd-core/bin/lib/runtime-slash.cjs').resolveActiveRuntime(require('../../gsd-core/bin/lib/config-loader.cjs').loadConfig(root, { persist: false }));
   const native = require('../../gsd-core/bin/lib/runtime-name-policy.cjs').hostBehaviorsFor(runtime).nativeModelAliases === true;
   return { mode, skip: mode === false || !native };
 }
 
 // The model GSD resolved for `type`, or null when none applies (inherit).
 function resolveExpected(root, type) {
-  const expected = require('../../gsd-core/bin/lib/model-resolver.cjs').resolveModelInternal(root, type);
+  const expected = require('../../gsd-core/bin/lib/model-resolver.cjs').resolveModelInternal(root, type, { persist: false });
   return !expected || expected === 'inherit' ? null : expected;
 }
 

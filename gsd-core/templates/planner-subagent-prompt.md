@@ -63,6 +63,7 @@ Before returning PLANNING COMPLETE:
 | `{phase_dir}` | Phase directory name | `05-user-profiles` |
 | `{phase}` | Phase prefix | `05` |
 | `{standard \| gap_closure}` | Mode flag | `standard` |
+| `{planner_model}` | `planner_model` from `init plan-phase` JSON | `opus` |
 
 ---
 
