@@ -401,7 +401,9 @@ describe('#5469 pr-branch published marker (real git)', () => {
       const bin = createTempDir('gsd-prmarker-bin-');
       dirs.push(bin);
       fs.writeFileSync(path.join(bin, 'gh'), `#!/bin/sh\n: > .git/gh-called\necho ${prTip}\n`, { mode: 0o755 });
-      const prelude = `PATH="${bin.replace(/\\/g, '/')}:$PATH"\n${hideTimeout ? noTimeout : ''}`;
+      // MSYS bash splits PATH on ':', so a drive-letter path (D:/x) must be written /d/x
+      const binDir = bin.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (_, d) => `/${d.toLowerCase()}`);
+      const prelude = `PATH="${binDir}:$PATH"\n${hideTimeout ? noTimeout : ''}`;
       const r = publish(dir, 'main', { prelude });
       return { r, dir, tip1, pendingBefore, called: fs.existsSync(path.join(dir, '.git', 'gh-called')) };
     };
