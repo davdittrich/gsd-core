@@ -3447,7 +3447,16 @@ describe('shipped prompts scope raw git commit with a pathspec (#5211)', () => {
     }), { numRuns: 100 });
   });
 
-  test('fast.md commit fence (scratch repo): foreign staged file stays staged; commit_docs=false excludes .planning', () => {
+  function initFixtureRepo(t, prefix) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+    t.after(() => cleanup(dir));
+    const git = (...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8', timeout: GIT_TIMEOUT_MS });
+    git('init', '-q');
+    git('config', 'user.email', 't@t'); git('config', 'user.name', 't'); git('config', 'commit.gpgsign', 'false');
+    return { dir, git };
+  }
+
+  test('fast.md commit fence (scratch repo): foreign staged file stays staged; commit_docs=false excludes .planning', (t) => {
     const lines = splitLines(fs.readFileSync(path.join(root, 'gsd-core/workflows/fast.md'), 'utf8'));
     const commitStep = lines.findIndex((l) => l.includes('<step name="commit">'));
     const blk = scanFencedBlocks(lines.slice(commitStep)).find((b) => b.infoString === 'bash');
@@ -3456,31 +3465,24 @@ describe('shipped prompts scope raw git commit with a pathspec (#5211)', () => {
     // drop the gsd_run resolver line; stub it with the config value under test
     const fence = body.slice(body.findIndex((l) => l.startsWith('COMMIT_DOCS='))).join('\n');
     for (const docs of ['true', 'false']) {
-      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-5489f-'));
-      try {
-        const git = (...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8', timeout: GIT_TIMEOUT_MS });
-        git('init', '-q');
-        git('config', 'user.email', 't@t'); git('config', 'user.name', 't'); git('config', 'commit.gpgsign', 'false');
-        fs.mkdirSync(path.join(dir, '.planning'));
-        fs.writeFileSync(path.join(dir, 'seed'), 's'); git('add', 'seed'); git('commit', '-q', '-m', 'seed');
-        fs.writeFileSync(path.join(dir, 'code'), 'c');
-        fs.writeFileSync(path.join(dir, '.planning', 'STATE.md'), 'p');
-        const run = () => spawnSync('bash', ['-c', `gsd_run() { echo ${docs}; }\n${fence}`], { cwd: dir, encoding: 'utf8', timeout: GIT_TIMEOUT_MS });
-        // dirty index: refuses, commits nothing
-        fs.writeFileSync(path.join(dir, 'stray'), 'x'); git('add', 'stray');
-        assert.equal(run().status, 1, `commit_docs=${docs}: dirty index refused`);
-        assert.equal(Number(git('rev-list', '--count', 'HEAD')), 1);
-        git('reset', '-q', 'stray');
-        const r = run();
-        assert.equal(r.status, 0, r.stderr);
-        const head = git('show', '--name-only', '--format=', 'HEAD').trim().split('\n').sort();
-        assert.deepStrictEqual(head, docs === 'false' ? ['code', 'stray'] : ['.planning/STATE.md', 'code', 'stray']);
-      } finally {
-        cleanup(dir);
-      }
+      const { dir, git } = initFixtureRepo(t, 'gsd-5489f-');
+      fs.mkdirSync(path.join(dir, '.planning'));
+      fs.writeFileSync(path.join(dir, 'seed'), 's'); git('add', 'seed'); git('commit', '-q', '-m', 'seed');
+      fs.writeFileSync(path.join(dir, 'code'), 'c');
+      fs.writeFileSync(path.join(dir, '.planning', 'STATE.md'), 'p');
+      const run = () => spawnSync('bash', ['-c', `gsd_run() { echo ${docs}; }\n${fence}`], { cwd: dir, encoding: 'utf8', timeout: GIT_TIMEOUT_MS });
+      // dirty index: refuses, commits nothing
+      fs.writeFileSync(path.join(dir, 'stray'), 'x'); git('add', 'stray');
+      assert.equal(run().status, 1, `commit_docs=${docs}: dirty index refused`);
+      assert.equal(Number(git('rev-list', '--count', 'HEAD')), 1);
+      git('reset', '-q', 'stray');
+      const r = run();
+      assert.equal(r.status, 0, r.stderr);
+      const head = git('show', '--name-only', '--format=', 'HEAD').trim().split('\n').sort();
+      assert.deepStrictEqual(head, docs === 'false' ? ['code', 'stray'] : ['.planning/STATE.md', 'code', 'stray']);
     }
   });
-  test('executor step-4 single-repo commit (scratch repo): foreign staged file stays staged', () => {
+  test('executor step-4 single-repo commit (scratch repo): foreign staged file stays staged', (t) => {
     const lines = splitLines(fs.readFileSync(path.join(root, 'agents/gsd-executor.md'), 'utf8'));
     const at = lines.findIndex((l) => l.includes('**Otherwise (standard single-repo):**'));
     assert.notEqual(at, -1, 'executor step 4 single-repo branch exists');
@@ -3488,24 +3490,17 @@ describe('shipped prompts scope raw git commit with a pathspec (#5211)', () => {
     const blk = scanFencedBlocks(rest).find((b) => b.infoString === 'bash');
     const fence = rest.slice(blk.openLineIdx + 1, blk.closeLineIdx).join('\n')
       .replace('{step-2 paths}', 'src/a.ts src/b.ts');
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-5489e-'));
-    try {
-      const git = (...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8', timeout: GIT_TIMEOUT_MS });
-      git('init', '-q');
-      git('config', 'user.email', 't@t'); git('config', 'user.name', 't'); git('config', 'commit.gpgsign', 'false');
-      fs.mkdirSync(path.join(dir, 'src'));
-      fs.writeFileSync(path.join(dir, 'src/a.ts'), 'a'); fs.writeFileSync(path.join(dir, 'stray'), 's');
-      git('add', '-A'); git('commit', '-q', '-m', 'seed');
-      fs.writeFileSync(path.join(dir, 'src/a.ts'), 'a2'); fs.writeFileSync(path.join(dir, 'src/b.ts'), 'b');
-      fs.writeFileSync(path.join(dir, 'stray'), 's2');
-      git('add', 'src/a.ts', 'src/b.ts', 'stray');
-      const r = spawnSync('bash', ['-c', fence], { cwd: dir, encoding: 'utf8', timeout: GIT_TIMEOUT_MS });
-      assert.equal(r.status, 0, r.stderr);
-      assert.deepStrictEqual(git('show', '--name-only', '--format=', 'HEAD').trim().split('\n').sort(), ['src/a.ts', 'src/b.ts']);
-      assert.equal(git('diff', '--cached', '--name-only').trim(), 'stray');
-    } finally {
-      cleanup(dir);
-    }
+    const { dir, git } = initFixtureRepo(t, 'gsd-5489e-');
+    fs.mkdirSync(path.join(dir, 'src'));
+    fs.writeFileSync(path.join(dir, 'src/a.ts'), 'a'); fs.writeFileSync(path.join(dir, 'stray'), 's');
+    git('add', '-A'); git('commit', '-q', '-m', 'seed');
+    fs.writeFileSync(path.join(dir, 'src/a.ts'), 'a2'); fs.writeFileSync(path.join(dir, 'src/b.ts'), 'b');
+    fs.writeFileSync(path.join(dir, 'stray'), 's2');
+    git('add', 'src/a.ts', 'src/b.ts', 'stray');
+    const r = spawnSync('bash', ['-c', fence], { cwd: dir, encoding: 'utf8', timeout: GIT_TIMEOUT_MS });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepStrictEqual(git('show', '--name-only', '--format=', 'HEAD').trim().split('\n').sort(), ['src/a.ts', 'src/b.ts']);
+    assert.equal(git('diff', '--cached', '--name-only').trim(), 'stray');
   });
   describe('complete-milestone git_commit_milestone fence (scratch repo)', () => {
     // Read lazily so a missing step fails one test, not the whole file at collection.
