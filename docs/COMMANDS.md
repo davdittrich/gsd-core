@@ -2340,7 +2340,7 @@ Record state transition after plan-phase completes (Planned/Ready to execute).
 | `--phase N` | Phase number that was planned |
 | `--plans N` | Number of plans generated; must be a non-negative integer (also enforced by `state begin-phase --plans`) |
 
-**Prerequisites:** Phase has been planned; `## Current Position` has a `Plan:`, `Current Plan:` or `Total Plans in Phase:` line
+**Prerequisites:** Phase has been planned; STATE.md has a `Plan:` or `Current Plan:` line under `## Current Position`, or a `Total Plans in Phase:` line anywhere
 **Produces:** Updated `STATE.md` with post-planning state. Exits non-zero and writes nothing when `--plans` is invalid, has no such line to land on, or is below the already-executed plan count.
 
 ```bash

@@ -2590,15 +2590,15 @@ function plannedPhaseCore(
   // #5320: `Plan: A of B in current phase` template shape; advance-plan parses
   // `N of M` from either spelling (#3784 hybrid for `Current Plan:`). A replan
   // keeps the recorded leading N and moves only M; anything else starts at 0.
-  // The recorded N carries over only for the SAME phase (`Phase:` leading token).
-  // An absent `Phase:` line is not the same phase: the executed counter resets to 0.
-  const samePhase = phaseIdMod.phaseKeyFromProse(stateExtractField(posBefore, 'Phase')) === phaseIdMod.phaseKeyFromToken(intent.phaseNumber);
-  const below: { n?: number } = {};
+  // The recorded N carries over only for the SAME phase (`Phase:` or `Current Phase:` leading token).
+  // An absent phase line is not the same phase: the executed counter resets to 0.
+  const samePhase = phaseIdMod.phaseKeyFromProse((stateExtractField(posBefore, 'Phase') ?? stateExtractField(posBefore, 'Current Phase'))) === phaseIdMod.phaseKeyFromToken(intent.phaseNumber);
+  const executedAbove: { n?: number } = {};
   const planValue = (name: string): string | undefined => {
     if (intent.planCount == null) return undefined;
     const raw = stateExtractField(posBefore, name) ?? '';
     const m = samePhase ? (PLAN_SHAPE_N_OF_M.exec(raw) ?? PLAN_SHAPE_N.exec(raw)) : null;
-    if (m && Number(m[1]) > intent.planCount) below.n = Number(m[1]);
+    if (m && Number(m[1]) > intent.planCount) executedAbove.n =Number(m[1]);
     // A bare `N` beside `Total Plans in Phase:` is the legacy pair; the Total line already carries M.
     // Same phase keeps N; a new phase resets it to 0 in the same bare shape.
     if (totalRecorded && PLAN_SHAPE_BARE_N.test(raw)) return samePhase ? undefined : '0';
@@ -2626,8 +2626,8 @@ function plannedPhaseCore(
     && stateExtractField(posBefore, 'Plan') === null && stateExtractField(posBefore, 'Current Plan') === null) {
     return { content, updated: [], data: { planError: 'state planned-phase: --plans has no line to land on. Add `Plan: 0 TBD in current phase` under `## Current Position` (or a `Total Plans in Phase:` line) and retry.' } };
   }
-  if (below.n !== undefined) {
-    return { content, updated: [], data: { planError: `state planned-phase: --plans ${intent.planCount} is below the executed plan count ${below.n}.` } };
+  if (executedAbove.n !== undefined) {
+    return { content, updated: [], data: { planError: `state planned-phase: --plans ${intent.planCount} is below the executed plan count ${executedAbove.n}.` } };
   }
 
   // #2400 Bug B: sync progress.total_plans to the frontmatter when a plan count

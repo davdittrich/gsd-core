@@ -6141,7 +6141,7 @@ function cmdStatePlannedPhase(cwd: string, phaseNumber: string | number | null |
       }
     }
     const result = transitionCore(content, intent, deps);
-    // #5320: nothing to record --plans on; exit before the write.
+    // #5320: --plans cannot be recorded (no line to land on, or below the executed plan count); exit before the write.
     if (result.data?.['planError']) error(result.data['planError'] as string, ioMod.ERROR_REASON.USAGE);
     precomputedUpdated = result.updated;
     return result.content;

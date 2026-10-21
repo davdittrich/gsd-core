@@ -5618,14 +5618,18 @@ describe('state planned-phase command', () => {
       ].join('\n'),
     );
   }
+  function seedTbdPlanFiles() {
+    const phaseDir = path.join(tmpDir, '.planning', 'phases', '19-tbd');
+    fs.mkdirSync(phaseDir, { recursive: true });
+    for (const n of [1, 2, 3]) fs.writeFileSync(path.join(phaseDir, `19-0${n}-PLAN.md`), '# Plan\n');
+    return phaseDir;
+  }
   const TBD_BODY = ['Phase: 19', 'Plan: 0 TBD in current phase', 'Status: Ready'];
 
   test('#5320: Plan TBD with no Total Plans line records --plans, Plan and Status lines', () => {
     writeTbdPlanFixture(TBD_BODY);
     // plan-phase writes the PLAN files before it calls this verb.
-    const phaseDir = path.join(tmpDir, '.planning', 'phases', '19-tbd');
-    fs.mkdirSync(phaseDir, { recursive: true });
-    for (const n of [1, 2, 3]) fs.writeFileSync(path.join(phaseDir, `19-0${n}-PLAN.md`), '# Plan\n');
+    seedTbdPlanFiles();
     const statePath = path.join(tmpDir, '.planning', 'STATE.md');
 
     const result = runGsdTools(['state', 'planned-phase', '--phase', '19', '--name', 'Tbd', '--plans', '3'], tmpDir);
@@ -5664,9 +5668,7 @@ describe('state planned-phase command', () => {
 
   test('#5320: legacy Current Plan-only STATE.md records --plans and stays advanceable', () => {
     writeTbdPlanFixture(['Phase: 19', 'Current Plan: 1', 'Status: Ready']);
-    const phaseDir = path.join(tmpDir, '.planning', 'phases', '19-tbd');
-    fs.mkdirSync(phaseDir, { recursive: true });
-    for (const n of [1, 2, 3]) fs.writeFileSync(path.join(phaseDir, `19-0${n}-PLAN.md`), '# Plan\n');
+    seedTbdPlanFiles();
 
     const planned = runGsdTools(['state', 'planned-phase', '--phase', '19', '--name', 'Tbd', '--plans', '3'], tmpDir);
     assert.ok(planned.success, `planned-phase failed: ${planned.error}`);
@@ -5755,9 +5757,10 @@ describe('state planned-phase command', () => {
     writeTbdPlanFixture(TBD_BODY);
     const statePath = path.join(tmpDir, '.planning', 'STATE.md');
     const before = fs.readFileSync(statePath);
-    for (const bad of ['abc', '-1']) {
+    for (const bad of ['abc', '-1', '', ' ', '--weird']) {
       const r = runGsdTools(['state', 'planned-phase', '--phase', '19', '--name', 'Tbd', '--plans', bad], tmpDir);
       assert.strictEqual(r.success, false, `--plans ${bad} must fail`);
+      assert.notStrictEqual(r.exitCode, 0, `--plans ${bad} must exit non-zero`);
     }
     assert.ok(fs.readFileSync(statePath).equals(before));
   });
@@ -5769,6 +5772,23 @@ describe('state planned-phase command', () => {
     const second = runGsdTools(args, tmpDir);
     assert.ok(second.success, `second run must exit 0: ${second.error}`);
     assert.match(JSON.parse(second.output).warning, /already up to date/);
+  });
+
+  test('#5320: a Current Phase: section keeps the executed plan on a same-phase replan', () => {
+    const lines = ['Current Phase: 19', 'Current Plan: 2', 'Total Plans in Phase: 5', 'Status: Ready'];
+    const statePath = path.join(tmpDir, '.planning', 'STATE.md');
+    writeTbdPlanFixture(lines);
+    const r = runGsdTools(['state', 'planned-phase', '--phase', '19', '--name', 'Tbd', '--plans', '6'], tmpDir);
+    assert.ok(r.success, r.error);
+    const after = fs.readFileSync(statePath, 'utf8');
+    assert.match(after, /^Current Plan: 2$/m, `STATE.md was:\n${after}`);
+    assert.match(after, /^Total Plans in Phase: 6$/m);
+
+    writeTbdPlanFixture(lines);
+    const before = fs.readFileSync(statePath);
+    const bad = runGsdTools(['state', 'planned-phase', '--phase', '19', '--name', 'Tbd', '--plans', '1'], tmpDir);
+    assert.strictEqual(bad.success, false);
+    assert.ok(fs.readFileSync(statePath).equals(before), 'STATE.md must stay byte-identical');
   });
 
   test('#5320: invalid --plans reports the validation message, not a crash', () => {
