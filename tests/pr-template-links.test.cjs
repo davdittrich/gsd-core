@@ -74,10 +74,10 @@ describe('heading anchors (#5427)', () => {
   test('properties: headingSet has one slug per heading; slug is idempotent', () => {
     fc.assert(fc.property(fc.array(fc.stringMatching(/^[a-z0-9]{1,3}$/), { maxLength: 12 }), (hs) => {
       assert.equal(headingSet(hs.map((h) => `# ${h}`)).size, hs.length);
-    }));
+    }), { seed: 5442, numRuns: 100 });
     fc.assert(fc.property(fc.string(), (h) => {
       assert.equal(slug(slug(h)), slug(h));
-    }));
+    }), { seed: 5442, numRuns: 100 });
   });
   test('keeps underscores like GitHub', () => {
     assert.ok(headingSet(['## Set `commit_docs` true']).has('set-commit_docs-true'));
