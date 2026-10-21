@@ -480,9 +480,16 @@ describe('state.json never dirties the tree (#5505)', () => {
     assert.strictEqual(git(tmpDir, 'status', '--porcelain'), '');
   });
 
-  test('pre-tracked state.json never dirties the tree, with no commit at all', (t) => {
+  test('pre-tracked state.json stays committable, and the documented untrack keeps later boundaries clean', (t) => {
     const { tmpDir, rel } = boundary(t, { preTracked: true });
-    // Only the boundary command's own STATE.md edit remains; no commit is needed for state.json.
+    // GSD never edits the index, so `commit --files` on the tracked copy still stages it.
+    const c = runGsdTools(['commit', 'docs: state', '--files', `${rel}/state.json`], tmpDir);
+    assert.ok(c.success, `commit of the tracked copy must succeed: ${c.error}`);
+    // The one-time untrack from the how-to; the exclude then hides every later publish.
+    git(tmpDir, 'rm', '-q', '--cached', `${rel}/state.json`);
+    git(tmpDir, 'commit', '-q', '-m', 'untrack');
+    const r = runGsdTools(BEGIN, tmpDir);
+    assert.ok(r.success, `boundary command must succeed: ${r.error}`);
     assert.strictEqual(git(tmpDir, 'status', '--porcelain', '--', `${rel}/state.json`), '');
   });
 

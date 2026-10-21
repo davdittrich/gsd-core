@@ -358,6 +358,32 @@ export function buildStateContract(cwd: string, deps?: StateContractDeps): State
 }
 
 /**
+ * state.json is a derived cache (#5505): ignore it via the repo-local
+ * info/exclude (never a tracked file). A copy already tracked is left alone;
+ * migrating it is the user's call. Best-effort; callers swallow throws.
+ */
+function excludeStateJson(planningDir: string, execGit: Owners['execGit']): void {
+  // gitignore cannot express a newline in a pattern, and git's line output could not be split.
+  if (/[\r\n]/.test(planningDir)) return;
+  // cwd must pick the repo: drop inherited repository-location variables (e.g. inside a git hook).
+  const env = { GIT_DIR: undefined, GIT_WORK_TREE: undefined, GIT_INDEX_FILE: undefined, GIT_COMMON_DIR: undefined };
+  // Short bound: this runs on every boundary command's hot path.
+  const revParse = execGit(['rev-parse', '--show-prefix', '--git-path', 'info/exclude'], { cwd: planningDir, env, timeout: 5_000 });
+  // stdout is trimmed, so an empty prefix (planning dir is the git root) drops its line.
+  const lines = splitLines(String(revParse.stdout));
+  const excludeRel = lines[lines.length - 1];
+  const prefix = lines.length > 1 ? lines[0] : '';
+  if (revParse.exitCode !== 0 || !excludeRel) return;
+  const exclude = path.resolve(planningDir, excludeRel);
+  // Escape gitignore metacharacters in the directory prefix.
+  const entry = `/${prefix.replace(/[\\*?[]/g, '\\$&')}state.json`;
+  const existing = fs.existsSync(exclude) ? fs.readFileSync(exclude, 'utf8') : '';
+  if (splitLines(existing).includes(entry)) return;
+  fs.mkdirSync(path.dirname(exclude), { recursive: true });
+  fs.appendFileSync(exclude, (existing && !existing.endsWith('\n') ? '\n' : '') + entry + '\n');
+}
+
+/**
  * Publish the state-contract snapshot to `<planning>/state.json`. NEVER
  * throws — for any input, ever (acceptance criterion 3: the parent boundary
  * command's exit code and stdout must be unchanged whatever happens here).
@@ -401,35 +427,8 @@ export function publishStateContract(cwd: string, deps?: StateContractDeps): { p
       return { published: false, reason: PUBLISH_REASON.WRITE_FAILED };
     }
 
-    // state.json is a derived cache (#5505): ignore it via the repo-local
-    // info/exclude (never a tracked file). Best-effort; failure stays invisible.
     try {
-      const planningDir = path.dirname(statePath);
-      // cwd must pick the repo: drop inherited repository-location variables (e.g. inside a git hook).
-      const env = { GIT_DIR: undefined, GIT_WORK_TREE: undefined, GIT_INDEX_FILE: undefined, GIT_COMMON_DIR: undefined };
-      const revParse = execGit(['rev-parse', '--show-prefix', '--git-path', 'info/exclude'], { cwd: planningDir, env });
-      // stdout is trimmed, so an empty prefix (planning dir is the git root) drops its line.
-      const lines = splitLines(String(revParse.stdout));
-      const excludeRel = lines[lines.length - 1];
-      const prefix = lines.length > 1 ? lines[0] : '';
-      if (revParse.exitCode === 0 && excludeRel) {
-        const exclude = path.resolve(planningDir, excludeRel);
-        // Escape gitignore metacharacters in the directory prefix.
-        const entry = `/${prefix.replace(/[\\*?[]/g, '\\$&')}state.json`;
-        const existing = fs.existsSync(exclude) ? fs.readFileSync(exclude, 'utf8') : '';
-        if (!splitLines(existing).includes(entry)) {
-          fs.mkdirSync(path.dirname(exclude), { recursive: true });
-          fs.appendFileSync(exclude, (existing && !existing.endsWith('\n') ? '\n' : '') + entry + '\n');
-        }
-        // A copy tracked before #5505 stays in the index; skip-worktree hides its
-        // rewrites without a commit. The exclude is shared by linked worktrees but
-        // the index bit is per worktree, so this runs every publish. `ls-files -v` takes
-        // no index lock; only a tracked, not-yet-marked copy (`H`) needs update-index.
-        const tag = execGit(['ls-files', '-v', '--', 'state.json'], { cwd: planningDir, env });
-        if (tag.exitCode === 0 && String(tag.stdout).startsWith('H')) {
-          execGit(['update-index', '--skip-worktree', '--', 'state.json'], { cwd: planningDir, env });
-        }
-      }
+      excludeStateJson(path.dirname(statePath), execGit);
     } catch {
       // REQ-SC-04: ignoring is optional; never perturb the publish result.
     }

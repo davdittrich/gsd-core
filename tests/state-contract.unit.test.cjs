@@ -1254,27 +1254,34 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
     git(wt, 'check-ignore', '-q', '.planning/state.json');
   });
 
-  test('trackedCopyIsSkipWorktreeInEveryLinkedWorktree', (t) => {
-    const tmpDir = createTempGitProject();
-    t.after(() => cleanup(tmpDir));
-    fs.mkdirSync(planningDirOf(tmpDir), { recursive: true });
-    fs.writeFileSync(path.join(planningDirOf(tmpDir), 'state.json'), '{}\n');
-    git(tmpDir, 'add', '-f', '.planning/state.json');
-    git(tmpDir, 'commit', '-q', '-m', 'track');
-    publishStateContract(tmpDir, fixedDeps());
-    const wt = path.join(tmpDir, 'linked');
-    git(tmpDir, 'worktree', 'add', '-q', '-b', 'wt', wt);
-    publishStateContract(wt, fixedDeps());
-    assert.strictEqual(git(wt, 'status', '--porcelain', '--', '.planning/state.json').trim(), '');
-  });
-
   test('globCharsInThePrefixAreEscaped', (t) => {
     const tmpDir = createTempGitProject();
     t.after(() => cleanup(tmpDir));
-    const sub = path.join(tmpDir, 'a[x]b');
+    // The entry is always `/<prefix>state.json`, so only in-pattern metacharacters
+    // can reach it; a leading `#`/`!` or trailing space cannot occur.
+    // Windows forbids backslash, `*` and `?` in file names.
+    const meta = fc.constantFrom(...(process.platform === 'win32' ? [] : ['\\', '*', '?']), '[', ']', 'a', 'b');
+    const names = fc.array(meta, { minLength: 1, maxLength: 6 }).map((cs) => `d${cs.join('')}`);
+    fc.assert(fc.property(names, (name) => {
+      const sub = path.join(tmpDir, name);
+      fs.mkdirSync(planningDirOf(sub), { recursive: true });
+      publishStateContract(sub, fixedDeps());
+      git(tmpDir, 'check-ignore', '-q', `${name}/.planning/state.json`);
+      // An escaped entry matches only its own directory, never a glob sibling.
+      assert.throws(() => git(tmpDir, 'check-ignore', '-q', 'dX/.planning/state.json'));
+    }), { seed: 5505, numRuns: 15 });
+  });
+
+  test('aNewlineInThePlanningPathWritesNoEntry', { skip: process.platform === 'win32' }, (t) => {
+    const tmpDir = createTempGitProject();
+    t.after(() => cleanup(tmpDir));
+    const exclude = excludeOf(tmpDir);
+    const before = fs.readFileSync(exclude, 'utf8');
+    const sub = path.join(tmpDir, 'a\nb');
     fs.mkdirSync(planningDirOf(sub), { recursive: true });
-    publishStateContract(sub, fixedDeps());
-    git(tmpDir, 'check-ignore', '-q', 'a[x]b/.planning/state.json');
+    assert.strictEqual(publishStateContract(sub, fixedDeps()).published, true);
+    // gitignore cannot express a newline in a pattern: skip rather than write a truncated entry.
+    assert.strictEqual(fs.readFileSync(exclude, 'utf8'), before);
   });
 
   test('ignoresInheritedGitDirEnv', (t) => {
@@ -1300,6 +1307,9 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
     fs.unlinkSync(exclude);
     fs.mkdirSync(exclude, { recursive: true });
     assert.strictEqual(publishStateContract(tmpDir, fixedDeps()).published, true);
+    // No partial write: the blocking directory is left as it was, empty.
+    assert.deepStrictEqual(fs.readdirSync(exclude), []);
+    assert.strictEqual(fs.existsSync(statePathOf(tmpDir)), true);
   });
 
   test('aNonGitProjectPublishesWithoutCreatingDotGit', (t) => {
@@ -1319,16 +1329,17 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
     git(planning, 'check-ignore', '-q', 'state.json');
   });
 
-  test('preTrackedCopyBecomesSkipWorktreeAndStaysOnDisk', (t) => {
+  test('preTrackedCopyIsLeftTrackedAndStageable', (t) => {
     const tmpDir = createTempGitProject();
     t.after(() => cleanup(tmpDir));
     fs.writeFileSync(statePathOf(tmpDir), '{}\n');
     git(tmpDir, 'add', '-f', '.planning/state.json');
     git(tmpDir, 'commit', '-q', '-m', 'track');
     publishStateContract(tmpDir, fixedDeps());
-    assert.match(git(tmpDir, 'ls-files', '-v', '--', '.planning/state.json'), /^S \.planning\/state\.json$/m);
-    assert.strictEqual(git(tmpDir, 'status', '--porcelain'), '');
-    assert.strictEqual(JSON.parse(fs.readFileSync(statePathOf(tmpDir), 'utf8')).contract, STATE_CONTRACT_VERSION);
+    // The index is never touched: migrating a tracked copy is the user's call.
+    assert.match(git(tmpDir, 'ls-files', '-v', '--', '.planning/state.json'), /^H \.planning\/state\.json$/m);
+    git(tmpDir, 'add', '--', '.planning/state.json');
+    assert.match(git(tmpDir, 'status', '--porcelain'), /^M {2}\.planning\/state\.json$/m);
   });
 });
 
