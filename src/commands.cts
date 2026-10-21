@@ -2836,6 +2836,7 @@ function cmdCommitToSubrepo(cwd: string, message: string | undefined, files: str
   }
 
   const config = loadConfig(cwd);
+  const commitTimeout = commitTimeoutMs(config.commit_timeout_ms);
   const subRepos = config['sub_repos'] as string[] | undefined;
 
   if (!subRepos || subRepos.length === 0) {
@@ -2909,7 +2910,6 @@ function cmdCommitToSubrepo(cwd: string, message: string | undefined, files: str
     const commitEnvSub: Record<string, string> = {
       GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'diff.ignoreSubmodules', GIT_CONFIG_VALUE_0: 'dirty',
     };
-    const commitTimeout = commitTimeoutMs(config.commit_timeout_ms);
     const commitResult = execGit(commitArgs, { cwd: repoCwd, timeout: commitTimeout, env: commitEnvSub });
     if (commitResult.exitCode !== 0) {
       if (isSpawnTimeout(commitResult)) {
