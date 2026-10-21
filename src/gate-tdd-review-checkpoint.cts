@@ -217,7 +217,7 @@ function writeSeal(phaseDir: string, evidence: Record<string, SealEntry>, prior:
  */
 function summaryCommitsAllUnreachable(projectDir: string, phaseDir: string, planPath: string, reachableSubjects: ReadonlySet<string>): boolean {
   const subjectOf = (id: string): string => {
-    const s = execGit(['log', '-1', '--format=%s', id], { cwd: projectDir });
+    const s = execGit(['show', '-s', '--format=%s', id], { cwd: projectDir });
     return !s.timedOut && s.exitCode === 0 ? s.stdout.trim() : '';
   };
   const rel = path.relative(phaseDir, planPath).split(path.sep).join('/');
