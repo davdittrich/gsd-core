@@ -61,7 +61,7 @@ import { platformReadSync } from './shell-command-projection.cjs';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import unusableInputMod = require('./unusable-input.cjs');
 const { UNUSABLE_REASON, warnUnusableInput } = unusableInputMod;
-import { tokenizeHeadings, stripTaggedBlocks, editOutsideTaggedBlocks, withSection, stripFencedCode, collectSection } from './markdown-sectionizer.cjs';
+import { tokenizeHeadings, stripTaggedBlocks, editOutsideTaggedBlocks, withSection, stripFencedCode, collectSection, scanFencedBlocks } from './markdown-sectionizer.cjs';
 import type { HeadingToken } from './markdown-sectionizer.cjs';
 import { findTableWithColumns, isDelimiterRow, splitTableRow } from './markdown-table.cjs';
 import type { MarkdownTable } from './markdown-table.cjs';
@@ -1482,10 +1482,13 @@ function replaceInCurrentMilestone(
  * #5553: hide every archived `<details>` block behind a placeholder; `restore`
  * puts them back byte-for-byte. Tag case, attributes and archive position
  * (before OR after the active milestone) do not matter, unlike a "region after
- * the last `</details>`" cut. With a resolvable active milestone only blocks
- * outside its raw range(s) are hidden, so a `<details open>` wrapping the
- * active milestone stays editable; without one, only attribute-less
- * `<details>` blocks are (an `open` block cannot be told from the active wrapper).
+ * the last `</details>`" cut. A block stays visible only when it overlaps the
+ * resolved active milestone range(s) AND its `<summary>` does not mark a
+ * closed milestone, so a `<details open>` wrapping the active milestone (or
+ * its own collapsed phase block, #1341) stays editable while a shipped archive
+ * that lies inside the range (newest-first, no later milestone heading) is
+ * still hidden. With no resolvable active milestone every block is hidden,
+ * as the old last-`</details>` cut did.
  */
 function maskArchivedDetails(content: string, cwd: string): { visible: string; restore: (edited: string) => string } {
   if (!/<details\b/i.test(content)) return { visible: content, restore: (edited) => edited };
@@ -1495,6 +1498,15 @@ function maskArchivedDetails(content: string, cwd: string): { visible: string; r
   let nonce = 0;
   while (content.includes(`<!-- gsd-archived-details-${nonce}-`)) nonce += 1;
   const marker = (i: number): string => `<!-- gsd-archived-details-${nonce}-${i} -->`;
+  // Same-length copy with fenced blocks and inline code spans blanked, so a
+  // `<details>` mentioned in prose or an example never opens or closes a block.
+  const lines = content.split('\n');
+  const blank = (t: string): string => t.replace(/[^\r\n]/g, ' ');
+  for (const f of scanFencedBlocks(lines)) {
+    const last = f.closeLineIdx === -1 ? lines.length - 1 : f.closeLineIdx;
+    for (let i = f.openLineIdx; i <= last; i++) lines[i] = blank(lines[i]);
+  }
+  const scan = lines.join('\n').replace(/`[^`\n]*`/g, blank);
   // Depth-aware: an outer block closes at its own `</details>`, so a nested
   // collapsed section inside an archive is masked with it.
   const tag = /<details\b[^>]*>|<\/details\s*>/gi;
@@ -1502,7 +1514,7 @@ function maskArchivedDetails(content: string, cwd: string): { visible: string; r
   let last = 0;
   let depth = 0;
   let start = 0;
-  for (let m = tag.exec(content); m; m = tag.exec(content)) {
+  for (let m = tag.exec(scan); m; m = tag.exec(scan)) {
     if (m[0][1] !== '/') {
       if (depth++ === 0) start = m.index;
       continue;
@@ -1510,9 +1522,10 @@ function maskArchivedDetails(content: string, cwd: string): { visible: string; r
     if (depth === 0 || --depth > 0) continue;
     const end = m.index + m[0].length;
     const block = content.slice(start, end);
-    const keep = ranges
-      ? active.some((r) => start < r.end && end > r.start)
-      : !/^<details\s*>/i.test(block);
+    const summary = block.match(/<summary[^>]*>([^<]*)<\/summary>/i);
+    const keep = ranges !== null
+      && active.some((r) => start < r.end && end > r.start)
+      && !(summary && isClosedMilestoneHeading(summary[1]));
     if (keep) continue;
     blocks.push(block);
     visible += content.slice(last, start) + marker(blocks.length - 1);

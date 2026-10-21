@@ -6524,4 +6524,35 @@ describe('roadmap update-plan-progress active-region scoping (#5553)', () => {
       assert.match(out, /\*\*Plans:\*\* 1\/1/, 'active Plans line updated');
     });
   }
+
+  const runActiveRegion = (roadmap) => {
+    const roadmapPath = path.join(tmpDir, '.planning', 'ROADMAP.md');
+    fs.writeFileSync(roadmapPath, roadmap);
+    const result = runGsdTools(['roadmap', 'update-plan-progress', '1'], tmpDir);
+    assert.ok(result.success, result.error);
+    return fs.readFileSync(roadmapPath, 'utf-8');
+  };
+
+  test('no resolvable milestone: <details open> archive stays untouched', () => {
+    fs.writeFileSync(path.join(tmpDir, '.planning', 'STATE.md'), '---\nstatus: executing\n---\n# State\n');
+    const out = runActiveRegion(`# Roadmap\n\n${activeRegionArchive(' open', 'details')}\n${ACTIVE_REGION_ACTIVE_BODY}`);
+    assert.ok(out.includes(ACTIVE_REGION_ARCHIVE_BODY), `archive must be byte-identical:\n${out}`);
+    assert.match(out, /- \[x\] 01-01-PLAN\.md/);
+  });
+
+  test('prose mentioning <details> without a close does not unmask later archives', () => {
+    const out = runActiveRegion(`# Roadmap\n\nShipped milestones are collapsed in \`<details>\` blocks.\n\n${activeRegionArchive('', 'details')}\n${ACTIVE_REGION_ACTIVE_BODY}`);
+    assert.ok(out.includes(ACTIVE_REGION_ARCHIVE_BODY), `archive must be byte-identical:\n${out}`);
+    assert.match(out, /- \[x\] 01-01-PLAN\.md/);
+  });
+
+  test('re-run with the active section already ticked leaves a trailing archive untouched', () => {
+    const ticked = ACTIVE_REGION_ACTIVE_BODY
+      .replace('- [ ] **Phase 1: A**', '- [x] **Phase 1: A** (completed 2026-01-01)')
+      .replace('**Plans:** 0 plans', '**Plans:** 1/1 plans complete')
+      .replace('- [ ] 01-01-PLAN.md', '- [x] 01-01-PLAN.md')
+      .replace('| 1. A | 0/1 | In Progress | |', '| 1. A | 1/1 | Complete | 2026-01-01 |');
+    const out = runActiveRegion(`# Roadmap\n\n${ticked}\n${activeRegionArchive('', 'details')}`);
+    assert.ok(out.includes(ACTIVE_REGION_ARCHIVE_BODY), `archive must be byte-identical:\n${out}`);
+  });
 });
