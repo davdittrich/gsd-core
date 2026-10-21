@@ -121,7 +121,6 @@ const builtOf = (dir) => refOf(dir, BUILT);
 const replayed = (dir) => git(dir, 'diff', '--name-only', 'main', 'feature-pr').split(/\r?\n/).filter((f) => /^r\d+\.txt$/.test(f)).sort();
 
 // The refusal, warning and recovery text on stderr is the operator contract printed verbatim by the workflow script; state (refs, tips, tree) is asserted separately in each test.
-// allow-test-rule: source-text-is-the-product (#5469)
 const said = (r, p) => (typeof p === 'string' ? r.stderr.includes(p) : p.test(r.stderr));
 const printed = (r, re) => (r.stderr.match(re) || [])[1];
 
