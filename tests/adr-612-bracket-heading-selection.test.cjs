@@ -156,6 +156,9 @@ const BASE_SITES = [
     baseline: B.LABEL_ONLY, src: 'Phase\\s+' },
   { file: 'phase.cts', site: 'phaseSectionMatch (cmdPhaseComplete area)',
     baseline: B.LABEL_ONLY, src: 'Phase\\s+' },
+  // #5528: phase add / add-batch count bracket checklist bullets under the bracket convention.
+  { file: 'phase.cts', site: 'roadmapDeclaredPhaseNums bracket bullet label',
+    baseline: B.LABEL_ONLY, src: 'Phase\\s+' },
   // #5007: roadmap-parser.cts's bulk block-strip (shared by the <details>-
   // fallback branch and preambleWithoutPhaseDetails — one composed regex, two
   // call sites collapsed to one `phaseHeadingPrefixSrcFor` call via the
@@ -737,7 +740,7 @@ describe('#612 PR-2: every selector call site declares the right baseline (live 
     // once its 11 grandfathered sites migrated onto phaseHeadingPrefixSrcFor /
     // buildPhaseHeadingScanRegex / buildPhaseHeadingRegex — 6 of those calls
     // are direct (census-visible) phaseHeadingPrefixSrcFor invocations.
-    'phase.cts': [0, 6],
+    'phase.cts': [0, 7],
   };
 
   for (const [file, [anyBracket, labelOnly]] of Object.entries(EXPECTED)) {
