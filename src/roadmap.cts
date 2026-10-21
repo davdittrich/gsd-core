@@ -2022,20 +2022,28 @@ function cmdRoadmapAnnotateDependencies(cwd: string, phaseNum: string | null | u
       annotatedLines.push(''); // #5321: delimiter so user bullets after the block survive re-runs
     }
 
-    // #5321: a block without the generated marker predates re-runs. A bullet equal to ANY current
-    // plan truth was generated from one (now rebuilt or no longer shared): drop it. Any other bullet
-    // is a user bullet or a reworded constraint; both look alike, so keep it and report it.
-    if (plansBlockMatch[3] && !plansBlockMatch[4]) {
-      const kept = splitLines(plansBlockMatch[3])
+    // #5321: bullets of the old constraints block that equal ANY current plan truth were generated
+    // from one (rebuilt above, or no longer shared): drop them. Any other bullet is a user bullet or
+    // a reworded/removed constraint; both look alike. Without the generated marker (pre-#5321) keep
+    // and report it; under the marker the block is machine-owned, so drop it but warn.
+    if (plansBlockMatch[3]) {
+      const unknown = splitLines(plansBlockMatch[3])
         .filter(l => BULLET_RE.test(l) && !truthCounts.has(l.replace(BULLET_RE, '').trim().toLowerCase()));
-      if (kept.length > 0) {
-        if (crossCuttingTruths.length === 0) annotatedLines.push('');
-        annotatedLines.push(...kept);
-        staleLegacy = kept.map(l => l.replace(BULLET_RE, '').trim());
+      const names = unknown.map(l => formatDiagnosticToken(l.replace(BULLET_RE, '').trim())).join('; ');
+      if (unknown.length > 0 && plansBlockMatch[4]) {
         process.stderr.write(
-          `[gsd-tools] WARNING: roadmap annotate-dependencies kept ${staleLegacy.length} bullet(s) under a pre-#5321 `
+          `[gsd-tools] WARNING: roadmap annotate-dependencies dropped ${unknown.length} bullet(s) under the generated `
+          + `constraints heading that match no current plan truth in phase ${formatDiagnosticToken(String(phaseNum))}: ${names} `
+          + `— put your own bullets after a blank line.\n`,
+        );
+      } else if (unknown.length > 0) {
+        if (crossCuttingTruths.length === 0) annotatedLines.push('');
+        annotatedLines.push(...unknown);
+        staleLegacy = unknown.map(l => l.replace(BULLET_RE, '').trim());
+        process.stderr.write(
+          `[gsd-tools] WARNING: roadmap annotate-dependencies kept ${unknown.length} bullet(s) under a pre-#5321 `
           + `constraints block that match no current plan truth in phase ${formatDiagnosticToken(String(phaseNum))}: `
-          + `${staleLegacy.map(formatDiagnosticToken).join('; ')} — delete any that are stale.\n`,
+          + `${names} — delete any that are stale.\n`,
         );
       }
     }
@@ -2074,7 +2082,7 @@ function cmdRoadmapAnnotateDependencies(cwd: string, phaseNum: string | null | u
     cross_cutting_constraints: crossCuttingTruths.length,
     ...(skipped && { skipped }),
     ...(staleLegacy.length > 0 && { stale_legacy_constraints: staleLegacy }),
-  }, raw, updated ? `annotated ${waves.length} wave(s), ${crossCuttingTruths.length} constraint(s)` : 'skipped (already up to date or no plan list)');
+  }, raw, updated ? `annotated ${waves.length} wave(s), ${crossCuttingTruths.length} constraint(s)` : skipped ? `skipped (${skipped})` : 'skipped (already up to date or no plan list)');
 }
 
 
