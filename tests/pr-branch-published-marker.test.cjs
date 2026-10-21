@@ -15,7 +15,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { cleanup } = require('./helpers.cjs');
+const { cleanup, createTempDir } = require('./helpers.cjs');
 const { runHook } = require('./helpers/process-seam.cjs');
 const { gitOrThrow, GIT_FIXTURE_TIMEOUT_MS } = require('./helpers/git-fixture.cjs');
 const { createFixture } = require('./fixtures/index.cjs');
@@ -96,7 +96,7 @@ function publish(dir, target = 'main', { branch = 'feature', mode = 'true', gh =
 
 // Script goes through a temp file, not argv (Windows MSYS2 mis-parses long quote-heavy argv).
 function runSh(script, cwd) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-prmarker-script-'));
+  const tmp = createTempDir('gsd-prmarker-script-');
   try {
     const file = path.join(tmp, 'recipe.sh');
     fs.writeFileSync(file, script);
@@ -120,13 +120,27 @@ const builtOf = (dir) => refOf(dir, BUILT);
 // Rounds whose code reached the -pr tree (state, not log text).
 const replayed = (dir) => git(dir, 'diff', '--name-only', 'main', 'feature-pr').split(/\r?\n/).filter((f) => /^r\d+\.txt$/.test(f)).sort();
 
-// The refusal, warning and recovery text on stderr is what the operator acts on, so assert it verbatim.
+// The refusal, warning and recovery text on stderr is the operator contract printed verbatim by the workflow script; state (refs, tips, tree) is asserted separately in each test.
+// allow-test-rule: source-text-is-the-product (#5469)
 const said = (r, p) => (typeof p === 'string' ? r.stderr.includes(p) : p.test(r.stderr));
 const printed = (r, re) => (r.stderr.match(re) || [])[1];
 
 describe('#5469 pr-branch published marker (real git)', () => {
   const dirs = [];
   const repo = () => { const d = buildRepo(); dirs.push(d); return d; };
+  const renameFixture = () => {
+    const dir = repo();
+    write(dir, 'old.txt', 'a\nb\nc\nd\ne\nf\n');
+    commitAll(dir, 'chore: add old');
+    git(dir, 'checkout', '-q', 'main');
+    git(dir, 'merge', '-q', '--ff-only', 'feature');
+    git(dir, 'checkout', '-q', 'feature');
+    git(dir, 'mv', 'old.txt', 'new.txt');
+    write(dir, 'code.txt', 'v1\n');
+    commitAll(dir, 'feat: r1 rename');
+    assert.equal(publish(dir).status, 0);
+    return dir;
+  };
   afterEach(() => { while (dirs.length) cleanup(dirs.pop()); });
 
   test('round 3 replays only the round-3 commits; marker follows the tip; merged leftover -pr is replaced', () => {
@@ -354,16 +368,7 @@ describe('#5469 pr-branch published marker (real git)', () => {
   });
 
   test('renamed file in the -pr diff: both sides are compared (--no-renames), squash merge still proven', () => {
-    const dir = repo();
-    write(dir, 'old.txt', 'a\nb\nc\nd\ne\nf\n');
-    commitAll(dir, 'chore: add old');
-    git(dir, 'checkout', '-q', 'main');
-    git(dir, 'merge', '-q', '--ff-only', 'feature');
-    git(dir, 'checkout', '-q', 'feature');
-    git(dir, 'mv', 'old.txt', 'new.txt');
-    write(dir, 'code.txt', 'v1\n');
-    commitAll(dir, 'feat: r1 rename');
-    assert.equal(publish(dir).status, 0);
+    const dir = renameFixture();
     git(dir, 'checkout', '-q', 'main');
     git(dir, 'rm', '-q', 'old.txt');
     git(dir, 'checkout', 'feature-pr', '--', 'new.txt', 'code.txt');
@@ -404,7 +409,7 @@ describe('#5469 pr-branch published marker (real git)', () => {
       const tip1 = git(dir, 'rev-parse', 'feature');
       squashMerge(dir, { later: true, deletePr: true });
       commitRound(dir, 2, 'two.txt');
-      const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-prmarker-bin-'));
+      const bin = createTempDir('gsd-prmarker-bin-');
       dirs.push(bin);
       fs.writeFileSync(path.join(bin, 'gh'), `#!/bin/sh\n: > .git/gh-called\necho ${prTip}\n`, { mode: 0o755 });
       const prelude = `PATH="${bin.replace(/\\/g, '/')}:$PATH"\n${hideTimeout ? noTimeout : ''}`;
@@ -427,16 +432,7 @@ describe('#5469 pr-branch published marker (real git)', () => {
   });
 
   test('renamed file, squash merge on main keeps old.txt: not proven, the drop is announced (--no-renames)', () => {
-    const dir = repo();
-    write(dir, 'old.txt', 'a\nb\nc\nd\ne\nf\n');
-    commitAll(dir, 'chore: add old');
-    git(dir, 'checkout', '-q', 'main');
-    git(dir, 'merge', '-q', '--ff-only', 'feature');
-    git(dir, 'checkout', '-q', 'feature');
-    git(dir, 'mv', 'old.txt', 'new.txt');
-    write(dir, 'code.txt', 'v1\n');
-    commitAll(dir, 'feat: r1 rename');
-    assert.equal(publish(dir).status, 0);
+    const dir = renameFixture();
     git(dir, 'checkout', '-q', 'main');
     git(dir, 'checkout', 'feature-pr', '--', 'new.txt', 'code.txt'); // old.txt stays on main
     commitAll(dir, 'feat: squashed, rename deletion missing');

@@ -419,7 +419,7 @@ Mixed planning commits: {N} ({included — structural + transient/other, plannin
 # Create PR branch from target. A leftover branch is reset only when already merged.
 if [ -n "$PR_BRANCH_TIP" ]; then
   if [ -n "$PR_BRANCH_MERGED" ]; then
-    git checkout -q -B "$PR_BRANCH" "$TARGET"
+    git checkout -q -B "$PR_BRANCH" "$TARGET" || { echo "could not create $PR_BRANCH from $TARGET" >&2; exit 1; }
   else
     echo "$PR_BRANCH exists and is not merged into $TARGET. Choose one, then re-run:" >&2
     if git rev-parse -q --verify "$PENDING_REF" >/dev/null; then
@@ -431,7 +431,7 @@ if [ -n "$PR_BRANCH_TIP" ]; then
     exit 1
   fi
 else
-  git checkout -b "$PR_BRANCH" "$TARGET"
+  git checkout -b "$PR_BRANCH" "$TARGET" || { echo "could not create $PR_BRANCH from $TARGET" >&2; exit 1; }
 fi
 ```
 
