@@ -1479,6 +1479,43 @@ function replaceInCurrentMilestone(
 }
 
 /**
+ * #5553: hide every archived `<details>` block behind a placeholder; `restore`
+ * puts them back byte-for-byte. Tag case, attributes and archive position
+ * (before OR after the active milestone) do not matter, unlike a "region after
+ * the last `</details>`" cut. With a resolvable active milestone only blocks
+ * outside its raw range(s) are hidden, so a `<details open>` wrapping the
+ * active milestone stays editable; without one, only attribute-less
+ * `<details>` blocks are (an `open` block cannot be told from the active wrapper).
+ */
+function maskArchivedDetails(content: string, cwd: string): { visible: string; restore: (edited: string) => string } {
+  const ranges = currentMilestoneRawRanges(content, cwd);
+  const active = ranges ? [ranges.primary, ...(ranges.details ? [ranges.details] : [])] : [];
+  const blocks: string[] = [];
+  let nonce = 0;
+  while (content.includes(`<!-- gsd-archived-details-${nonce}-`)) nonce += 1;
+  const marker = (i: number): string => `<!-- gsd-archived-details-${nonce}-${i} -->`;
+  const visible = content.replace(/<details\b[^>]*>[\s\S]*?<\/details\s*>/gi, (block, offset: number) => {
+    const end = offset + block.length;
+    const keep = ranges
+      ? active.some((r) => offset < r.end && end > r.start)
+      : !/^<details\s*>/i.test(block);
+    if (keep) return block;
+    blocks.push(block);
+    return marker(blocks.length - 1);
+  });
+  const restore = (edited: string): string => {
+    let restored = edited;
+    for (let i = 0; i < blocks.length; i++) {
+      const at = restored.indexOf(marker(i));
+      if (at === -1) return content; // edit dropped a placeholder: refuse rather than lose an archive
+      restored = restored.slice(0, at) + blocks[i] + restored.slice(at + marker(i).length);
+    }
+    return restored;
+  };
+  return { visible, restore };
+}
+
+/**
  * Resolve a single phase's detail-section heading (`### Phase N: …`, any level
  * 1–6, via the #2121 phase-id source) and run `edit` against ONLY that
  * section's body. Delegates to `withSection` (markdown-sectionizer.cjs), so a
@@ -2409,6 +2446,7 @@ export = {
   isMilestoneShippedInRoadmap,
   isMilestoneBoundedInRoadmap,
   replaceInCurrentMilestone,
+  maskArchivedDetails,
   getRoadmapPhaseInternal,
   getMilestoneInfo,
   classifyMilestoneScalar,
