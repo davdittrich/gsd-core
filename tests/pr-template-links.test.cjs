@@ -25,6 +25,8 @@ const hrefsOf = (f) => {
   return LINKS.flatMap((re) => [...text.matchAll(re)].map((m) => m[1]));
 };
 
+// Not reusing markdown-sectionizer tokenizeHeadings (ATX only, no setext) or gen-adr-index extractLinks
+// (inline links only, no href=/reference defs): both would drop cases this guard must cover.
 // Mirrors github-slugger: repeats take the first free `-N` suffix (collision loop).
 const headingSet = (lines) => {
   const headings = new Set();
@@ -93,7 +95,8 @@ describe('PR template links (#5427)', () => {
     test(`${f}: blob/next links point at existing repo paths`, () => {
       const missing = hrefsOf(f)
         .filter((h) => h.startsWith(`${REPO}blob/next/`))
-        .filter((h) => !fs.existsSync(path.join(ROOT, h.slice(`${REPO}blob/next/`.length).split('#')[0])));
+        .map((h) => h.slice(`${REPO}blob/next/`.length).split(/[?#]/)[0]) // drop ?plain=1 / #anchor
+        .filter((rel) => rel.split('/').includes('..') || !fs.existsSync(path.join(ROOT, rel)));
       assert.deepEqual(missing, []);
     });
     test(`${f}: CONTRIBUTING.md anchors resolve to a heading`, () => {
