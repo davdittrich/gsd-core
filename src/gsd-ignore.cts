@@ -11,12 +11,14 @@ import { retryRenameSync } from './shell-command-projection.cjs';
 export interface IgnoreSeed {
   /** True when the existing ignore text already covers the caller's files. */
   covers: (current: string) => boolean;
-  /** Rules appended when it does not. */
-  append: string;
+  /** The text appended to `current` when it does not. */
+  append: (current: string) => string;
+  /** Temp file the rewrite goes through; a leftover at this path is removed first. */
+  tmp: string;
 }
 
 /** Best-effort except a symlinked ignore file, which is reported so the caller can refuse. */
-export function seedGsdIgnore(dir: string, { covers, append }: IgnoreSeed): 'ok' | 'symlink' {
+export function seedGsdIgnore(dir: string, { covers, append, tmp: tmpPath }: IgnoreSeed): 'ok' | 'symlink' {
   const ignore = path.join(dir, '.gitignore');
   try {
     fs.writeFileSync(ignore, '*\n', { flag: 'wx' });
@@ -36,9 +38,9 @@ export function seedGsdIgnore(dir: string, { covers, append }: IgnoreSeed): 'ok'
     fs.closeSync(fd);
     fd = undefined;
     if (!covers(current)) {
-      tmp = `${ignore}.${process.pid}.tmp`;
+      tmp = tmpPath;
       fs.rmSync(tmp, { force: true }); // left by a crashed writer whose pid was reused
-      fs.writeFileSync(tmp, `${current}${current === '' || current.endsWith('\n') ? '' : '\n'}${append}`, { flag: 'wx' });
+      fs.writeFileSync(tmp, current + append(current), { flag: 'wx' });
       if (fs.lstatSync(ignore).isSymbolicLink()) return 'symlink';
       retryRenameSync(tmp, ignore);
       tmp = undefined;

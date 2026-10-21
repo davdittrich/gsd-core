@@ -45,7 +45,7 @@ export function modelFamily(model: unknown): string {
 export const escalationFile = (root: string, agentType: string, model: string): string =>
   path.join(root, '.gsd', `model-escalation-${agentType}.${modelFamily(model).replace(/[^a-z0-9._-]/g, '_').slice(0, 64)}.json`);
 
-/** Best-effort: a write failure only costs a guard warning. */
+/** Best-effort: after a failed write the guard sees no record, so it warns, or blocks under `deny`. */
 export function writeEscalation(
   root: string, agentType: string, model: string, session?: string, clock: Pick<Clock, 'now'> = realClock,
 ): void {
@@ -58,7 +58,8 @@ export function writeEscalation(
     if (fs.lstatSync(dir).isSymbolicLink()) return;
     seedGsdIgnore(dir, {
       covers: (cur) => /^\*\r?$/m.test(cur) || /^\/model-escalation-\*\r?$/m.test(cur),
-      append: '/model-escalation-*\n',
+      append: (cur) => `${cur === '' || cur.endsWith('\n') ? '' : '\n'}/model-escalation-*\n`,
+      tmp: `${path.join(dir, '.gitignore')}.${process.pid}.tmp`,
     });
     const rec: EscalationRecord = { model, written_at: clock.now(), ...(session ? { session } : {}) };
     // tmp + rename on every platform: the hook never reads a half-written record, and rename

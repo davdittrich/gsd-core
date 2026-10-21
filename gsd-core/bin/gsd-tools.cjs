@@ -2840,8 +2840,9 @@ function dispatchOverlayCapabilityCommand({ command, args, cwd, raw, error, load
       // ordinary ignore-file IO failure must not prevent recording isolation.
       const seeded = require('./lib/gsd-ignore.cjs').seedGsdIgnore(sentinelDir, {
         covers: (current) => current.includes('# gsd-core dispatch sentinel') || /^\*\r?$/m.test(current),
-        append: '# gsd-core dispatch sentinel\n/dispatch-isolation-sentinel.json\n' +
-          '/dispatch-isolation-sentinel.json.tmp-*\n/.gitignore\n',
+        append: (current) => `${current.endsWith('\n') ? '' : '\n'}# gsd-core dispatch sentinel\n` +
+          '/dispatch-isolation-sentinel.json\n/dispatch-isolation-sentinel.json.tmp-*\n/.gitignore\n',
+        tmp: `${nodePath.join(sentinelDir, '.gitignore')}.tmp-${process.pid}-${require('crypto').randomBytes(6).toString('hex')}`,
       });
       if (seeded === 'symlink') throw new Error('sentinel ignore file is a symlink');
       // Atomic write: unique temp file + rename, so a concurrent reader (a
