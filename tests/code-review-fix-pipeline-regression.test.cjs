@@ -17,6 +17,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { runNode, runGit, runHook } = require('./helpers/process-seam.cjs');
+const { gitOrThrow } = require('./helpers/git-fixture.cjs');
 const { splitLines } = require('../gsd-core/bin/lib/text-lines.cjs');
 const { PROBE_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
 // Same gate the shipped fences carry everywhere in this suite: bash is not assumed on win32.
@@ -282,6 +283,28 @@ describe('#3190 — code-review-fix --auto REVIEW.md commit + FIX_REPORT_PATH en
     assert.strictEqual(unknown.review, true, 'an unparseable status must retain, never remove');
   });
 
+  // One real-git fixture for T6c/T6d/T6e: a seeded repo holding REVIEW(-FIX).md plus two iter2 backups,
+  // committed (a degraded run already committed them) or left untracked (this run just wrote them).
+  const seedBackupRepo = (t, prefix, status, committedBackups) => {
+    const dir = createTempDir(prefix);
+    t.after(() => cleanup(dir));
+    const git = (...a) => gitOrThrow(a, { cwd: dir, timeoutMs: PROBE_TIMEOUT_MS });
+    git('init', '-q');
+    git('config', 'user.email', 't@t');
+    git('config', 'user.name', 't');
+    git('config', 'commit.gpgsign', 'false');
+    fs.writeFileSync(path.join(dir, '01-REVIEW.md'), ['---', 'status: ' + status, '---'].join('\n'));
+    fs.writeFileSync(path.join(dir, '01-REVIEW-FIX.md'), 'fix');
+    const writeBackups = () => {
+      for (const f of ['01-REVIEW.iter2.md', '01-REVIEW-FIX.iter2.md']) fs.writeFileSync(path.join(dir, f), 'scratch');
+    };
+    if (committedBackups) writeBackups();
+    git('add', '.');
+    git('commit', '-q', '-m', 'seed');
+    if (!committedBackups) writeBackups();
+    return dir;
+  };
+
   test('T6c — #5506: retained backups are COMMITTED when COMMIT_DOCS=true, left alone when false', { skip: !HAS_BASH }, (t) => {
     // A non-clean --auto run retains <NN>-REVIEW(-FIX).iterN.md. Untracked, they leave a dirty tree
     // that blocks the next checkout/worktree op. Execute the shipped fence against a real git repo
@@ -293,18 +316,7 @@ describe('#3190 — code-review-fix --auto REVIEW.md commit + FIX_REPORT_PATH en
     const git = (dir, ...a) => runGit(a, { cwd: dir, timeoutMs: PROBE_TIMEOUT_MS });
 
     const drive = (commitDocs, status = 'issues_found', mode = 'commit') => {
-      const dir = createTempDir('gsd-5506-cleanup-');
-      t.after(() => cleanup(dir));
-      git(dir, 'init', '-q');
-      git(dir, 'config', 'user.email', 't@t');
-      git(dir, 'config', 'user.name', 't');
-      git(dir, 'config', 'commit.gpgsign', 'false');
-      fs.writeFileSync(path.join(dir, '01-REVIEW.md'), ['---', 'status: ' + status, '---'].join('\n'));
-      fs.writeFileSync(path.join(dir, '01-REVIEW-FIX.md'), 'fix');
-      git(dir, 'add', '.');
-      git(dir, 'commit', '-q', '-m', 'seed');
-      fs.writeFileSync(path.join(dir, '01-REVIEW.iter2.md'), 'scratch');
-      fs.writeFileSync(path.join(dir, '01-REVIEW-FIX.iter2.md'), 'scratch');
+      const dir = seedBackupRepo(t, 'gsd-5506-cleanup-', status, false);
       const script = [
         'set -euo pipefail',
         'cd "' + dir + '"',
@@ -378,19 +390,8 @@ describe('#3190 — code-review-fix --auto REVIEW.md commit + FIX_REPORT_PATH en
 
   test('T6d — #5506: a converged run commits the deletion of backups an earlier degraded run committed', { skip: !HAS_BASH }, (t) => {
     const fence = stepFence(fs.readFileSync(WORKFLOW_PATH, 'utf8'), 'cleanup_iteration_backups');
-    const dir = createTempDir('gsd-5506-converged-');
-    t.after(() => cleanup(dir));
-    const git = (...a) => runGit(a, { cwd: dir, timeoutMs: PROBE_TIMEOUT_MS });
-    git('init', '-q');
-    git('config', 'user.email', 't@t');
-    git('config', 'user.name', 't');
-    git('config', 'commit.gpgsign', 'false');
-    fs.writeFileSync(path.join(dir, '01-REVIEW.md'), ['---', 'status: clean', '---'].join('\n'));
-    fs.writeFileSync(path.join(dir, '01-REVIEW-FIX.md'), 'fix');
-    fs.writeFileSync(path.join(dir, '01-REVIEW.iter2.md'), 'scratch');
-    fs.writeFileSync(path.join(dir, '01-REVIEW-FIX.iter2.md'), 'scratch');
-    git('add', '.');
-    git('commit', '-q', '-m', 'seed');
+    const dir = seedBackupRepo(t, 'gsd-5506-converged-', 'clean', true);
+    const git = (...a) => gitOrThrow(a, { cwd: dir, timeoutMs: PROBE_TIMEOUT_MS });
     const script = (body) => [
       'set -euo pipefail',
       'cd "' + dir + '"',
@@ -410,8 +411,29 @@ describe('#3190 — code-review-fix --auto REVIEW.md commit + FIX_REPORT_PATH en
     for (const f of ['01-REVIEW.iter2.md', '01-REVIEW-FIX.iter2.md']) fs.writeFileSync(path.join(dir, f), 'scratch');
     const res = runHook('-c', [script(REAL_COMMIT_BODY)], { interpreter: 'bash', timeoutMs: PROBE_TIMEOUT_MS });
     assert.strictEqual(res.exitCode, 0, 'the cleanup step must never abort: ' + res.stderr);
-    assert.strictEqual(git('status', '--porcelain').stdout.trim(), '', 'the tree must be clean');
-    assert.deepStrictEqual(splitLines(git('ls-tree', '-r', '--name-only', 'HEAD').stdout).filter(Boolean).sort(),
+    assert.strictEqual(git('status', '--porcelain').trim(), '', 'the tree must be clean');
+    assert.deepStrictEqual(splitLines(git('ls-tree', '-r', '--name-only', 'HEAD')).filter(Boolean).sort(),
       ['01-REVIEW-FIX.md', '01-REVIEW.md'], 'the backups are gone from HEAD');
+  });
+
+  test('T6e — #5506: a converged run with COMMIT_DOCS=false leaves committed backups in place and warns', { skip: !HAS_BASH }, (t) => {
+    const fence = stepFence(fs.readFileSync(WORKFLOW_PATH, 'utf8'), 'cleanup_iteration_backups');
+    const dir = seedBackupRepo(t, 'gsd-5506-nodocs-', 'clean', true);
+    const script = [
+      'set -euo pipefail',
+      'cd "' + dir + '"',
+      'gsd_run() { echo "$*" >> gsd-calls.log; return 1; }',
+      'AUTO_MODE=true',
+      'COMMIT_DOCS=false',
+      'PADDED_PHASE=01',
+      'REVIEW_PATH="' + path.join(dir, '01-REVIEW.md') + '"',
+      'FIX_REPORT_PATH="' + path.join(dir, '01-REVIEW-FIX.md') + '"',
+      fence,
+    ].join('\n');
+    const res = runHook('-c', [script], { interpreter: 'bash', timeoutMs: PROBE_TIMEOUT_MS });
+    assert.strictEqual(res.exitCode, 0, 'the cleanup step must never abort: ' + res.stderr);
+    assert.strictEqual(gitOrThrow(['status', '--porcelain'], { cwd: dir, timeoutMs: PROBE_TIMEOUT_MS }).trim(), '', 'no uncommitted deletions');
+    assert.ok(fs.existsSync(path.join(dir, '01-REVIEW.iter2.md')), 'tracked backups are not removed without a commit');
+    assert.match(res.stdout, /Warning: commit_docs is off; tracked iteration backups left in place/);
   });
 });
