@@ -84,6 +84,18 @@ function stepRegion(src, name) {
   return src.slice(open, close + '</step>'.length);
 }
 
+// Mirrors `query commit MSG [--files F...] [--files-removed F...] --raw` (src/commands.cts cmdCommit):
+// --files paths missing on disk are SKIPPED (#2014), only --files-removed stages a deletion, and an
+// empty index prints "nothing". A stub that `git add`s everything would mask a deletion routed
+// through --files.
+const REAL_COMMIT_BODY = ' local msg="$3"; shift 3; local m="" a=() r=();'
+  + ' while [ $# -gt 0 ]; do case "$1" in --files) m=a;; --files-removed) m=r;; --raw) m="";;'
+  + ' *) if [ "$m" = a ] && [ -e "$1" ]; then a+=("$1"); elif [ "$m" = r ] && [ ! -e "$1" ]; then r+=("$1"); fi;; esac; shift; done;'
+  + ' if [ ${#a[@]} -gt 0 ]; then git add -- "${a[@]}"; fi;'
+  + ' if [ ${#r[@]} -gt 0 ]; then git rm -q --cached --ignore-unmatch -- "${r[@]}"; fi;'
+  + ' if git diff --cached --quiet; then echo nothing; return 0; fi;'
+  + ' git commit -q -m "$msg" && git rev-parse --short HEAD; }';
+
 describe('#3190 — code-review-fix --auto REVIEW.md commit + FIX_REPORT_PATH env wiring', () => {
   // -------------------------------------------------------------------------
   // Criterion 3 — behavioral: the validator body correctly detects a valid
@@ -301,8 +313,7 @@ describe('#3190 — code-review-fix --auto REVIEW.md commit + FIX_REPORT_PATH en
             : mode === 'nothing' ? ' echo nothing; return 0; }'
             : mode === 'committed' ? ' echo committed; return 0; }'
             : mode === 'fail' ? ' return 1; }'
-            : ' local msg="$3"; shift 4; local f=("$@"); unset "f[${#f[@]}-1]";'
-              + ' git add -- "${f[@]}" && git commit -q -m "$msg" && git rev-parse --short HEAD; }'),
+            : REAL_COMMIT_BODY),
         'AUTO_MODE=true',
         'COMMIT_DOCS=' + commitDocs,
         'PADDED_PHASE=01',
@@ -380,11 +391,10 @@ describe('#3190 — code-review-fix --auto REVIEW.md commit + FIX_REPORT_PATH en
     fs.writeFileSync(path.join(dir, '01-REVIEW-FIX.iter2.md'), 'scratch');
     git('add', '.');
     git('commit', '-q', '-m', 'seed');
-    const script = [
+    const script = (body) => [
       'set -euo pipefail',
       'cd "' + dir + '"',
-      'gsd_run() { [ "$1 $2" = "query commit" ] || return 1; local msg="$3"; shift 4; local f=("$@"); unset "f[${#f[@]}-1]";'
-        + ' git add -- "${f[@]}" && git commit -q -m "$msg" && git rev-parse --short HEAD; }',
+      'gsd_run() { [ "$1 $2" = "query commit" ] || return 1;' + body,
       'AUTO_MODE=true',
       'COMMIT_DOCS=true',
       'PADDED_PHASE=01',
@@ -392,7 +402,13 @@ describe('#3190 — code-review-fix --auto REVIEW.md commit + FIX_REPORT_PATH en
       'FIX_REPORT_PATH="' + path.join(dir, '01-REVIEW-FIX.md') + '"',
       fence,
     ].join('\n');
-    const res = runHook('-c', [script], { interpreter: 'bash', timeoutMs: PROBE_TIMEOUT_MS });
+    // A "nothing" result means the deletion was not staged: the converged arm must warn.
+    const warned = runHook('-c', [script(' echo nothing; return 0; }')], { interpreter: 'bash', timeoutMs: PROBE_TIMEOUT_MS });
+    assert.match(warned.stdout, /Warning: iteration backup deletions not committed \(nothing\)/);
+    git('add', '-A');
+    git('reset', '-q', '--hard');
+    for (const f of ['01-REVIEW.iter2.md', '01-REVIEW-FIX.iter2.md']) fs.writeFileSync(path.join(dir, f), 'scratch');
+    const res = runHook('-c', [script(REAL_COMMIT_BODY)], { interpreter: 'bash', timeoutMs: PROBE_TIMEOUT_MS });
     assert.strictEqual(res.exitCode, 0, 'the cleanup step must never abort: ' + res.stderr);
     assert.strictEqual(git('status', '--porcelain').stdout.trim(), '', 'the tree must be clean');
     assert.deepStrictEqual(splitLines(git('ls-tree', '-r', '--name-only', 'HEAD').stdout).filter(Boolean).sort(),

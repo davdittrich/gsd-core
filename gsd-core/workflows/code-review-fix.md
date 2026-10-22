@@ -525,9 +525,11 @@ if [ "$AUTO_MODE" = "true" ]; then
     if [ "${#TRACKED_BACKUPS[@]}" -gt 0 ]; then
       BACKUP_COMMIT=$(gsd_run query commit \
         "docs(${PADDED_PHASE}): remove converged code review iteration backups" \
-        --files "${TRACKED_BACKUPS[@]}" --raw) || BACKUP_COMMIT=failed
+        --files-removed "${TRACKED_BACKUPS[@]}" --raw) || BACKUP_COMMIT=failed
+      # --files skips paths missing on disk (#2014); only --files-removed stages a deletion.
+      # "nothing" here means the tracked backups' deletion was not staged: warn, do not pass silently.
       case "$BACKUP_COMMIT" in
-        nothing|committed) ;;
+        committed) ;;
         ''|*[!0-9a-f]*)
           echo "Warning: iteration backup deletions not committed" \
             "(${BACKUP_COMMIT:-no output}): ${TRACKED_BACKUPS[*]}" ;;
