@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { runGit, runHook } = require('./helpers/process-seam.cjs');
-const { gitOrThrow } = require('./helpers/git-fixture.cjs');
+const { gitOrThrow: rawGitOrThrow } = require('./helpers/git-fixture.cjs');
 const { createTempDir, cleanup, runGsdTools, delay } = require('./helpers.cjs');
 const { STAGED_HOOK_SCRIPT_TIMEOUT_MS, HOOK_FANOUT_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
 const fc = require('./helpers/fast-check-setup.cjs');
@@ -14,6 +14,8 @@ const fc = require('./helpers/fast-check-setup.cjs');
 const ROOT = path.join(__dirname, '..');
 const lib = (name) => require(path.join(ROOT, 'gsd-core', 'bin', 'lib', `${name}.cjs`));
 const proj = lib('shell-command-projection');
+// Fixture git must obey cwd even when the suite itself runs inside a git hook (inherited GIT_DIR).
+const gitOrThrow = (args, o = {}) => rawGitOrThrow(args, { ...o, env: proj.scrubGitLocationEnv(process.env) });
 const probe = require(path.join(ROOT, 'hooks', 'lib', 'git-probe.js'));
 const hookPath = (name) => path.join(ROOT, 'hooks', name);
 
@@ -145,7 +147,7 @@ describe('git location env scrub (#5548)', () => {
       const b = otherRepo();
       const sib = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-5548-sib-'));
       gitOrThrow(['worktree', 'add', '--detach', sib, 'HEAD'], { cwd: a });
-      cleanups.push(() => { runGit(['worktree', 'remove', '--force', sib], { cwd: a }); cleanup(sib); });
+      cleanups.push(() => { runGit(['worktree', 'remove', '--force', sib], { cwd: a, env: proj.scrubGitLocationEnv(process.env) }); cleanup(sib); });
       fs.mkdirSync(path.join(sib, '.planning', 'phases', '441-held'), { recursive: true });
       const r = runGsdTools(['phase', 'add', 'anything'], a, leak(b));
       assert.ok(r.success, r.error);
@@ -168,7 +170,7 @@ describe('git location env scrub (#5548)', () => {
       const m = repo('main'); const c = repo('gamma');
       const w = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-5548-wt-'));
       gitOrThrow(['worktree', 'add', '-b', 'agent-x', w], { cwd: m });
-      cleanups.push(() => { runGit(['worktree', 'remove', '--force', w], { cwd: m }); cleanup(w); });
+      cleanups.push(() => { runGit(['worktree', 'remove', '--force', w], { cwd: m, env: proj.scrubGitLocationEnv(process.env) }); cleanup(w); });
       const b = otherRepo();
       const r = runHook(hookPath('gsd-worktree-path-guard.js'), [], {
         input: JSON.stringify({ tool_name: 'Write', tool_input: { file_path: path.join(c, 'f.txt') }, cwd: w }),
@@ -190,10 +192,10 @@ describe('git location env scrub (#5548)', () => {
     });
 
     test('workflows/pr-branch.md sub-repo dirty scan', () => {
-      // Run the workflow's real bash block (ROOT=… through DIRTY_REPOS=…), not a copy.
+      // Run the workflow's real bash block (unset … through DIRTY_REPOS=…), not a copy.
       const md = fs.readFileSync(path.join(ROOT, 'gsd-core', 'workflows', 'pr-branch.md'), 'utf8').split('\r').join('');
       const endMark = 'DIRTY_REPOS=$(cat "$DIRTY_FILE")';
-      const start = md.indexOf('ROOT=$(git rev-parse --show-toplevel)');
+      const start = md.indexOf('unset GIT_ALTERNATE_OBJECT_DIRECTORIES');
       const end = md.indexOf(endMark, start);
       assert.ok(start >= 0 && end > start, 'sub-repo dirty-scan block not found');
       const block = md.slice(start, end + endMark.length);
@@ -207,10 +209,12 @@ describe('git location env scrub (#5548)', () => {
       gitOrThrow(['add', '-A'], { cwd: sub });
       gitOrThrow(['commit', '-m', 'init'], { cwd: sub });
       const b = otherRepo();
-      const r = runHook('-c', [`SUB_REPOS_JSON='["sub"]'\n${block}\nprintf '[%s]' "$DIRTY_REPOS"`], {
-        interpreter: 'bash', cwd: a, env: { ...process.env, ...leak(b) }, timeoutMs: HOOK_FANOUT_TIMEOUT_MS,
+      const r = runHook('-c', [`SUB_REPOS_JSON='["sub"]'\n${block}\nprintf '[%s]%s' "$DIRTY_REPOS" "$ROOT"`], {
+        interpreter: 'bash', cwd: a, env: { ...process.env, ...leak(b), GIT_WORK_TREE: b }, timeoutMs: HOOK_FANOUT_TIMEOUT_MS,
       });
-      assert.equal(r.stdout.trim().split('\n').pop(), '[]', 'sub is clean; a leaked GIT_DIR must not make it look dirty');
+      const last = r.stdout.trim().split('\n').pop();
+      assert.ok(last.startsWith('[]'), 'sub is clean; a leaked GIT_DIR must not make it look dirty');
+      assert.equal(fs.realpathSync.native(last.slice(2)), fs.realpathSync.native(a), 'ROOT must be the cwd repo, not the leaked GIT_DIR repo');
     });
 
     test('pr-branch.md inline scrub lists every location var', () => {
