@@ -1459,13 +1459,14 @@ function extractCurrentMilestone(content: string, cwd?: string, ws?: string | nu
  * written as a plain heading section, behind a placeholder; `restore` puts them
  * back byte-for-byte. Tag case, attributes and archive position
  * (before OR after the active milestone) do not matter, unlike a "region after
- * the last `</details>`" cut. A block stays visible only when it overlaps the
- * resolved active milestone range(s) AND its `<summary>` does not mark a
- * closed milestone, so a `<details open>` wrapping the active milestone (or
- * its own collapsed phase block, #1341) stays editable while a shipped archive
- * that lies inside the range (newest-first, no later milestone heading) is
- * still hidden. With no resolvable active milestone every block is hidden,
- * as the old last-`</details>` cut did.
+ * the last `</details>`" cut. A block stays visible only when it wraps the
+ * start of a resolved active milestone range (`<details open>` around the
+ * active milestone); every other block is hidden, whatever its `<summary>`
+ * (none, non-closed, closed), including a collapsed block inside the active
+ * range. That is deliberate for THIS write path only; the read-side
+ * `stripClosedMilestoneDetails` window (#3982/#1341) is unchanged. With no
+ * resolvable active milestone every block is hidden, as the old
+ * last-`</details>` cut did.
  */
 function maskArchivedDetails(content: string, cwd: string): { visible: string; restore: (edited: string) => string | null } {
   if (!/<details\b/i.test(content) && !MILESTONE_CLOSED_MARKER_PATTERN.test(content)) {
@@ -1483,7 +1484,12 @@ function maskArchivedDetails(content: string, cwd: string): { visible: string; r
   const lines = content.split('\n');
   const blank = (t: string): string => t.replace(/[^\r\n]/g, ' ');
   for (const f of scanFencedBlocks(lines)) {
-    const last = f.closeLineIdx === -1 ? lines.length - 1 : f.closeLineIdx;
+    // Review #5616: an unclosed fence is bounded at the next heading, not EOF, so later archives stay visible.
+    let last = f.closeLineIdx;
+    if (last === -1) {
+      last = lines.length - 1;
+      for (let i = f.openLineIdx + 1; i < lines.length; i++) if (/^#{1,6} /.test(lines[i])) { last = i - 1; break; }
+    }
     for (let i = f.openLineIdx; i <= last; i++) lines[i] = blank(lines[i]);
   }
   const scan = lines.join('\n').replace(/<!--[\s\S]*?(?:-->|$)/g, blank).replace(/`[^`\n]*`/g, blank);
@@ -1508,8 +1514,8 @@ function maskArchivedDetails(content: string, cwd: string): { visible: string; r
     }
     if (depth === 0 || --depth > 0) continue;
     const end = at + m[1].length;
-    const summary = content.slice(start, end).match(/<summary[^>]*>([^<]*)<\/summary>/i);
-    if (overlapsActive(start, end) && !(summary && isClosedMilestoneHeading(summary[1]))) continue;
+    // Only a block wrapping an active heading stays editable; any other block is archive, with or without a closed <summary>.
+    if (active.some((r) => start <= r.start && r.start < end)) continue;
     spans.push({ start, end });
   }
   // A closed milestone written as a plain heading section (no `<details>`) is

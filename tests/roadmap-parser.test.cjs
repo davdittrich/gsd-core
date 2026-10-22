@@ -797,6 +797,31 @@ describe('roadmap-parser: maskArchivedDetails', () => {
     assert.match(visible, /\r\n## Progress\r\n/);
   });
 
+  // Review round 3, Major 2: any <details> block inside the active range that is
+  // not a wrapper around the active heading is archive, whatever its <summary>.
+  for (const [name, head] of Object.entries({
+    'no <summary>': '<details>\n',
+    'non-closed <summary>': '<details>\n<summary>Deferred scope</summary>\n',
+  })) {
+    test(`${name} inside the active range is masked`, () => {
+      const { visible, restore } = maskArchivedDetails(`${ACTIVE}\n${head}old\n</details>\n`, tmpDir);
+      assert.ok(!visible.includes('old'), 'block hidden');
+      assert.ok(visible.includes('new'), 'active text visible');
+      assert.strictEqual(restore(visible), `${ACTIVE}\n${head}old\n</details>\n`);
+    });
+  }
+
+  test('a <details> wrapping the active heading stays visible', () => {
+    const { visible } = maskArchivedDetails(`<details open>\n<summary>v2.0 Active</summary>\n\n${ACTIVE}\n</details>\n`, tmpDir);
+    assert.ok(visible.includes('new'));
+  });
+
+  test('an unclosed fence is bounded at the next heading, so a later archive is still masked', () => {
+    const { visible } = maskArchivedDetails(`# Roadmap\n\n\`\`\`\nstray\n\n## Notes\n\n${ARCHIVE}\n\n${ACTIVE}`, tmpDir);
+    assert.ok(!visible.includes('old'), 'archive after the unclosed fence hidden');
+    assert.ok(visible.includes('new'));
+  });
+
   test('a hostile run of `<details ` stays linear (ReDoS guard)', () => {
     const content = `${'<details '.repeat(45000)}\n${ACTIVE}`;
     const t0 = Date.now();
