@@ -1434,13 +1434,15 @@ function phaseVarBinding(lines, idx, name) {
 // (as it does `{phase_dir}`); a missed carry degrades to `--phase ""`, which
 // warns and omits context (ADR-4030). Every other site binds in its own fence;
 // the variables that binding reads are pinned in SRC_CROSS_FENCE.
-const INIT_BIND = 'PHASE_NUMBER=$(printf \'%s\' "$INIT" | jq -r \'.phase_number // empty\')';
-const VERIFY_BIND = 'PHASE_NUMBER=${PHASE_NUMBER:-$(printf \'%s\' "${EXECUTE_INIT:-$INIT}" | jq -r \'.phase_number // empty\')}';
+// No jq: a host without it would leave PHASE_NUMBER empty. `--pick` is gsd-tools' own field extractor.
+const phaseBind = (arg) => `PHASE_NUMBER=$(gsd_run query init.phase-op \${GSD_WS:+--ws=\${GSD_WS##* }} "${arg}" --pick phase_number)`;
+const INIT_BIND = phaseBind('${PHASE_ARG}');
+const VERIFY_BIND = `PHASE_NUMBER=\${PHASE_NUMBER:-$(${phaseBind('${PHASE_ARG}').slice('PHASE_NUMBER=$('.length, -1)})}`;
 const CROSS_FENCE = {
-  'gsd-core/workflows/discuss-phase.md :: discuss:pre': INIT_BIND,
-  'gsd-core/workflows/discuss-phase.md :: discuss:post': INIT_BIND,
-  'gsd-core/workflows/plan-phase.md :: plan:pre': INIT_BIND,
-  'gsd-core/workflows/plan-phase.md :: plan:post': INIT_BIND,
+  'gsd-core/workflows/discuss-phase.md :: discuss:pre': phaseBind('${PHASE}'),
+  'gsd-core/workflows/discuss-phase.md :: discuss:post': phaseBind('${PHASE}'),
+  'gsd-core/workflows/plan-phase.md :: plan:pre': phaseBind('$PHASE'),
+  'gsd-core/workflows/plan-phase.md :: plan:post': phaseBind('$PHASE'),
   'gsd-core/workflows/execute-phase.md :: execute:wave:pre': INIT_BIND,
   'gsd-core/workflows/execute-phase.md :: execute:wave:post': INIT_BIND,
   'gsd-core/workflows/execute-phase/steps/verify-phase-goal.md :: verify:post': VERIFY_BIND,
@@ -1472,15 +1474,16 @@ function assignedLaterInFence(lines, idx, name) {
 // Like CROSS_FENCE, for the variable the phase binding READS: the same sites
 // that bind PHASE_NUMBER in their own fence still rely on the host carrying
 // $INIT/$PHASE_STATE from an earlier one. Keyed `file :: point` -> exact line.
-const INIT_PHASE_OP = 'INIT=$(gsd_run query init.phase-op ${GSD_WS:+--ws=${GSD_WS##* }} "${PHASE_ARG}")';
+const WS_BIND = `GSD_WS=$(echo " $GSD_ARGS" | sed -nE 's/.* --ws +([A-Za-z0-9][A-Za-z0-9._-]*).*/--ws \\1/p' | head -n 1)`;
 const EXEC_INIT_BIND = 'INIT=$(gsd_run query init.execute-phase ${GSD_WS:+--ws=${GSD_WS##* }} "${PHASE_ARG}" $WAVE_PARAM)';
+const PHASE_ARG_OP = 'PHASE_ARG=$(echo "$GSD_ARGS" | sed -E \'s/--ws[[:space:]]+[A-Za-z0-9._-]+//g\' | xargs)';
 const SRC_CROSS_FENCE = {
-  'gsd-core/workflows/execute-phase.md :: execute:post': EXEC_INIT_BIND,
-  'gsd-core/workflows/execute-phase.md :: execute:wave:pre': EXEC_INIT_BIND,
-  'gsd-core/workflows/execute-phase.md :: execute:wave:post': EXEC_INIT_BIND,
-  'gsd-core/workflows/secure-phase.md :: verify:post': INIT_PHASE_OP,
-  'gsd-core/workflows/validate-phase.md :: verify:post': INIT_PHASE_OP,
-  'gsd-core/workflows/code-review-fix.md :: execute:post': INIT_PHASE_OP,
+  'gsd-core/workflows/execute-phase.md :: execute:post': [WS_BIND, EXEC_INIT_BIND],
+  'gsd-core/workflows/execute-phase.md :: execute:wave:pre': [WS_BIND, EXEC_INIT_BIND],
+  'gsd-core/workflows/execute-phase.md :: execute:wave:post': [WS_BIND, EXEC_INIT_BIND],
+  'gsd-core/workflows/secure-phase.md :: verify:post': [WS_BIND, PHASE_ARG_OP],
+  'gsd-core/workflows/validate-phase.md :: verify:post': [WS_BIND, PHASE_ARG_OP],
+  'gsd-core/workflows/code-review-fix.md :: execute:post': [WS_BIND, 'PHASE_ARG="${1}"'],
 };
 
 // Turn the tail of a render-hooks call line into argv, substituting a real
@@ -2018,7 +2021,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
         const bind = phaseVarBinding(lines, idx, name);
         if (bind.line === -1 || bind.sameFence) return false;
         assert.ok(table !== undefined, `${file}:${at + 1} ${point}: ${name} is bound in another fence (line ${bind.line + 1}); list the site in ${tableName}`);
-        assert.strictEqual(lines[bind.line].trim(), table, `${file}:${at + 1} ${point}: the ${name} binding this site relies on changed`);
+        assert.ok([].concat(table).includes(lines[bind.line].trim()), `${file}:${at + 1} ${point}: the ${name} binding this site relies on changed (now: ${lines[bind.line].trim()})`);
         return true;
       };
       lines.forEach((line, idx) => {
@@ -2069,7 +2072,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
   function handlerArgv(dispatchMd, envelope, hook, phaseNumber) {
     const lines = splitLines(dispatchMd).map((l) => l.trim());
     const branch = envelope.context ? '# context present'
-      : phaseNumber !== undefined ? '# context absent, host binds PHASE_NUMBER'
+      : phaseNumber !== undefined && !(envelope.warnings || []).length ? '# context absent, host binds PHASE_NUMBER'
         : '# context absent, no PHASE_NUMBER';
     const at = lines.indexOf(branch);
     assert.notStrictEqual(at, -1, `dispatch contract lost its "${branch}" branch`);
@@ -2137,6 +2140,15 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
       const hook = bareEnv.activeHooks.find((h) => h.capId === 'phase-probe');
       assert.deepStrictEqual(handlerArgv(dispatchMd, bareEnv, hook, '07'), ['phase', 'probe', '--phase', '07', '--raw']);
       assert.deepStrictEqual(handlerArgv(dispatchMd, bareEnv, hook, undefined), ['phase', 'probe', '--raw']);
+    // --phase was passed but rejected (warning): the host's PHASE_NUMBER must not
+    // stand in for it, or the rejected token's phase reaches the handler anyway.
+    const rejectedEnv = JSON.parse(runNode(
+      [GSD_TOOLS, 'loop', 'render-hooks', 'plan:pre', '--raw', '--phase', '99', '--cwd', fx.project],
+      { cwd: ROOT, timeoutMs: PROBE_TIMEOUT_MS, env },
+    ).stdout.trim());
+    assert.ok(rejectedEnv.warnings && rejectedEnv.warnings.length, 'an unmatched --phase warns');
+    assert.match(dispatchMd, /`warnings`\s+is empty, `--phase` was never passed[\s\S]*a rejected\s+token never reaches the handler/, 'contract must restrict the PHASE_NUMBER fallback to an omitted --phase');
+    assert.deepStrictEqual(handlerArgv(dispatchMd, rejectedEnv, hook, '07'), ['phase', 'probe', '--raw']);
     }
   });
 

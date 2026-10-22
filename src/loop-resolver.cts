@@ -515,85 +515,33 @@ interface ResolvedActiveHooks {
 }
 
 /**
- * The full config/registry/capability-state resolution `cmdLoopRenderHooks` performs, minus its
- * CLI-only output formatting — extracted so an in-process caller (e.g. `review-lane dispatch-step`
- * self-verifying a `supportsReviewerLanes` trait) can reach the SAME resolution `gsd_run loop
- * render-hooks <point> --raw` would give it, without spawning a subprocess and re-parsing its
- * stdout (which was subject to `io.cjs`'s `@file:` overflow protocol on the rendered-string
- * envelope — a bug class this in-process call cannot hit, since it never touches that envelope
- * or its rendering at all).
+ * #4030: optional --phase <token> → derived context: { phase, phaseDir }.
+ * Resolved via guardedFindPhase (same #2237 foreign-prefix guard as `init.*`),
+ * so a phase-scoped handler gets the task-local phase instead of inferring it
+ * from STATE.current_phase. Unresolvable or ambiguous input degrades to "no
+ * context" plus a warning — never a hard error, never silent.
  *
- * Throws on an invalid `point` (mirrors `resolveLoopHooks`); callers convert to their own error
- * channel. Emits the same loud stderr load-failure warnings `cmdLoopRenderHooks` always has,
- * regardless of caller — a skipped gate must never be silently invisible.
+ * `--phase-dir` is only a CHECK against what the token resolved to, never an
+ * independent path: the emitted phaseDir is always the locator's own value, so
+ * there is no caller path to confine, and `--phase 05 --phase-dir <another
+ * in-project phase>` is rejected as incoherent.
+ * resolveActiveHooksForPoint is exported, so an in-process caller can pass '' without
+ * going through the CLI's `readOptionalFlag`: it reaches guardedFindPhase
+ * (null for '') and gets the usual "did not match" warning. Only a phase never
+ * passed (`typeof !== 'string'`) stays silent.
  */
-function resolveActiveHooksForPoint(
+function resolvePhaseContext(
   cwd: string,
-  point: string,
-  options: Record<string, unknown> = {},
-): ResolvedActiveHooks {
-  const runtimeConfigDir = typeof options['configDir'] === 'string'
-    ? options['configDir']
-    : undefined;
-  // #2003: thread an explicit --runtime override into the capability-state
-  // resolver so the config-dir resolution bypasses the persisted-runtime
-  // fallback (GSD_RUNTIME → config.runtime). Without this, a repo with persisted
-  // runtime:"codex" resolves the config dir to ~/.codex and execute:post /
-  // verify:post hooks silently no-op when the operator drives from Claude Code.
-  const runtimeOverride = typeof options['runtime'] === 'string' ? options['runtime'] : undefined;
-  // Load the config snapshot ONCE and share it with both the capability-state
-  // resolver (via configOverride) and loop-hook resolution, so federated keys
-  // present in loadConfig resolve identically for `active` and for hook when/
-  // configValues — eliminating the previous double loadConfig() call. Note: keys
-  // absent from loadConfig still fall through to raw .planning/config.json reads
-  // (precedence levels 2-3) in each pass; that residual re-read window is
-  // pre-existing (unchanged by this consolidation), not introduced here.
-  let config: Record<string, unknown>;
-  try {
-    config = loadConfig(cwd);
-  } catch {
-    config = {};
-  }
-  const state = resolveCapabilityRuntimeState(cwd, runtimeConfigDir, config, runtimeOverride) as {
-    warnings?: string[];
-    capabilities: Array<{ id: string; enabled?: boolean; active: boolean }>;
-  };
-  // Load overlay-aware registry (ADR-1244 D2 wiring) so installed third-party
-  // capabilities are visible to loop rendering exactly like first-party ones.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { loadRegistry } = require('./capability-loader.cjs') as { loadRegistry: (opts?: Record<string, unknown>) => Record<string, unknown> };
-  // #1459 IC-04: thread the consent home (process.env.GSD_HOME) EXPLICITLY so a consented project cap's
-  // loop surfaces (steps/gates/contributions) render here at the SAME home that gated its activation.
-  const registry = loadRegistry({ includeInstalled: true, cwd, gsdHome: process.env['GSD_HOME'] });
-  const capabilityStatesById = new Map<string, { enabled?: boolean; active: boolean }>();
-  for (const cap of state.capabilities || []) {
-    capabilityStatesById.set(cap.id, cap);
-  }
-
-  const resolved: ResolveLoopHooksResult = resolveLoopHooks({ point, registry, config, cwd, capabilityStatesById });
-
-  // ── #4030: optional --phase <token> → derived context: { phase, phaseDir } ─────
-  // Resolved via guardedFindPhase (same #2237 foreign-prefix guard as `init.*`),
-  // so a phase-scoped handler gets the task-local phase instead of inferring it
-  // from STATE.current_phase. Unresolvable or ambiguous input degrades to "no
-  // context" plus a warning — never a hard error, never silent.
-  //
-  // `--phase-dir` is only a CHECK against what the token resolved to, never an
-  // independent path: the emitted phaseDir is always the locator's own value, so
-  // there is no caller path to confine, and `--phase 05 --phase-dir <another
-  // in-project phase>` is rejected as incoherent.
-  // This function is exported, so an in-process caller can pass '' without
-  // going through the CLI's `readOptionalFlag`: it reaches guardedFindPhase
-  // (null for '') and gets the usual "did not match" warning. Only a phase never
-  // passed (`typeof !== 'string'`) stays silent.
-  const phaseArg = typeof options['phase'] === 'string' ? options['phase'] : undefined;
-  const phaseDirArg = typeof options['phaseDir'] === 'string' ? options['phaseDir'] : undefined;
+  phaseArg: string | undefined,
+  phaseDirArg: string | undefined,
+  projectCode: unknown,
+): { context: PhaseContext | undefined; warnings: string[] } {
   let phaseContext: PhaseContext | undefined;
   const phaseWarnings: string[] = [];
   if (phaseArg !== undefined) {
     // guardedFindPhase is typed Record<string, unknown> | null; narrow once to
     // the fields read below.
-    const phaseResult = guardedFindPhase(cwd, phaseArg, config['project_code']) as {
+    const phaseResult = guardedFindPhase(cwd, phaseArg, projectCode) as {
       found: boolean;
       directory: string;
       phase_number: string;
@@ -666,6 +614,73 @@ function resolveActiveHooksForPoint(
     // caller path this design avoids (#4354).
     phaseWarnings.push('--phase-dir requires --phase; it is verified against the token\'s resolution, never used alone. Context omitted.');
   }
+  return { context: phaseContext, warnings: phaseWarnings };
+}
+
+/**
+ * The full config/registry/capability-state resolution `cmdLoopRenderHooks` performs, minus its
+ * CLI-only output formatting — extracted so an in-process caller (e.g. `review-lane dispatch-step`
+ * self-verifying a `supportsReviewerLanes` trait) can reach the SAME resolution `gsd_run loop
+ * render-hooks <point> --raw` would give it, without spawning a subprocess and re-parsing its
+ * stdout (which was subject to `io.cjs`'s `@file:` overflow protocol on the rendered-string
+ * envelope — a bug class this in-process call cannot hit, since it never touches that envelope
+ * or its rendering at all).
+ *
+ * Throws on an invalid `point` (mirrors `resolveLoopHooks`); callers convert to their own error
+ * channel. Emits the same loud stderr load-failure warnings `cmdLoopRenderHooks` always has,
+ * regardless of caller — a skipped gate must never be silently invisible.
+ */
+function resolveActiveHooksForPoint(
+  cwd: string,
+  point: string,
+  options: Record<string, unknown> = {},
+): ResolvedActiveHooks {
+  const runtimeConfigDir = typeof options['configDir'] === 'string'
+    ? options['configDir']
+    : undefined;
+  // #2003: thread an explicit --runtime override into the capability-state
+  // resolver so the config-dir resolution bypasses the persisted-runtime
+  // fallback (GSD_RUNTIME → config.runtime). Without this, a repo with persisted
+  // runtime:"codex" resolves the config dir to ~/.codex and execute:post /
+  // verify:post hooks silently no-op when the operator drives from Claude Code.
+  const runtimeOverride = typeof options['runtime'] === 'string' ? options['runtime'] : undefined;
+  // Load the config snapshot ONCE and share it with both the capability-state
+  // resolver (via configOverride) and loop-hook resolution, so federated keys
+  // present in loadConfig resolve identically for `active` and for hook when/
+  // configValues — eliminating the previous double loadConfig() call. Note: keys
+  // absent from loadConfig still fall through to raw .planning/config.json reads
+  // (precedence levels 2-3) in each pass; that residual re-read window is
+  // pre-existing (unchanged by this consolidation), not introduced here.
+  let config: Record<string, unknown>;
+  try {
+    config = loadConfig(cwd);
+  } catch {
+    config = {};
+  }
+  const state = resolveCapabilityRuntimeState(cwd, runtimeConfigDir, config, runtimeOverride) as {
+    warnings?: string[];
+    capabilities: Array<{ id: string; enabled?: boolean; active: boolean }>;
+  };
+  // Load overlay-aware registry (ADR-1244 D2 wiring) so installed third-party
+  // capabilities are visible to loop rendering exactly like first-party ones.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { loadRegistry } = require('./capability-loader.cjs') as { loadRegistry: (opts?: Record<string, unknown>) => Record<string, unknown> };
+  // #1459 IC-04: thread the consent home (process.env.GSD_HOME) EXPLICITLY so a consented project cap's
+  // loop surfaces (steps/gates/contributions) render here at the SAME home that gated its activation.
+  const registry = loadRegistry({ includeInstalled: true, cwd, gsdHome: process.env['GSD_HOME'] });
+  const capabilityStatesById = new Map<string, { enabled?: boolean; active: boolean }>();
+  for (const cap of state.capabilities || []) {
+    capabilityStatesById.set(cap.id, cap);
+  }
+
+  const resolved: ResolveLoopHooksResult = resolveLoopHooks({ point, registry, config, cwd, capabilityStatesById });
+
+  const { context: phaseContext, warnings: phaseWarnings } = resolvePhaseContext(
+    cwd,
+    typeof options['phase'] === 'string' ? options['phase'] : undefined,
+    typeof options['phaseDir'] === 'string' ? options['phaseDir'] : undefined,
+    config['project_code'],
+  );
 
   // ── ADR-1244 D2: load-failed capability gates FAIL OPEN with a loud warning ────
   // Decision (#2009): a capability that failed to LOAD must not block the loop.

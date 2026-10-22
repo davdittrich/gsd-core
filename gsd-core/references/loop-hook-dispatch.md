@@ -33,7 +33,7 @@ executes. Absent `context` means `--phase` was omitted, or it was dropped: it ma
 directory or several, matched only an archived milestone's phase, resolved to a directory
 outside the project's `.planning/phases` tree, or disagreed with `--phase-dir`; `--phase-dir`
 without `--phase` is dropped too. Every case except an omitted `--phase` appends a warning to
-`warnings` — dispatch exactly as if no phase were relevant.
+`warnings` — dispatch exactly as if no phase applied, passing no phase argument.
 
 ## Dispatch rules by `kind`
 
@@ -70,9 +70,11 @@ Dispatch the referenced unit. Exactly one of `ref.skill`, `ref.agent`, or `ref.c
   `` ` ``, `$(`, or a newline would terminate the assignment and run as its own statement
   before any shell-side check could execute. A value that fails is a malformed manifest:
   record a warning, skip that hook, continue to the next entry. Only a value that has passed
-  is run. When `context` is present, append `context.phase`; when absent, append the host
-  workflow's `${PHASE_NUMBER}` if it binds one, otherwise pass no phase argument — never
-  substitute an empty string for a missing token:
+  is run. When `context` is present, append `context.phase`. When it is absent and `warnings`
+  is empty, `--phase` was never passed: append the host workflow's `${PHASE_NUMBER}` if it
+  binds one. When `warnings` is non-empty the token was rejected: pass no phase argument, so
+  a rejected token never reaches the handler. Never substitute an empty string for a missing
+  token:
 
   ```bash
   # placeholders are filled in by you from the envelope, not by the shell

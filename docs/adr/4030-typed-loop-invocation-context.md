@@ -16,9 +16,9 @@ bare-tolerant grammar every phase-scoped workflow already holds
 (`phase_number` from its own `init.*` query — e.g. `"05"`), not the bracket
 display form. Workstream scoping needs no new plumbing: `gsd-tools.cjs`
 already resolves `--ws`/`GSD_WORKSTREAM` generically for every command before
-dispatch (`resolveActiveWorkstream` / `applyResolvedWorkstreamEnv`). No `render-hooks`
-call site passes `${GSD_WS}` — none did before this change and none gains it
-here, so workstream behaviour is exactly what it was.
+dispatch (`resolveActiveWorkstream` / `applyResolvedWorkstreamEnv`). Each phase-scoped
+`render-hooks` call site now forwards `${GSD_WS:+--ws=${GSD_WS##* }}`, so phase
+resolution and hook activation use the invoking workstream.
 
 The resolver never treats a caller-supplied directory as a source of truth. It
 resolves `phaseDir` itself by calling `guardedFindPhase(cwd, phase,
@@ -163,7 +163,7 @@ Maintainer rulings recorded in review `60fee2ba299b` (2026-10-18):
 ## Scope notes
 
 - Points that are not phase-scoped pass no `--phase`: `ship:pre`/`ship:post` run per release; `quick.md` (`plan:pre`, `execute:post`) and `quick-batch/steps/planner-wave.md` (`plan:pre`) are task-scoped with no phase; `audit-milestone.md` (`verify:post`) is milestone-scoped. `code-review.md`'s `REVIEWER_POINT` call reads only `contribution` fragments for the reviewer, which never consume `context`, and the reviewer-lane `dispatch-step` verb resolves its own hook only to read `supportsReviewerLanes`; neither needs a phase.
-- Each fenced bash block may run as its own shell (it does in Claude Code). A call site whose phase variable is bound in an earlier fence relies on the dispatching agent carrying the resolved token, as it carries `{phase_dir}`; the test suite lists those sites and the binding each relies on. It classifies a site only by where its phase variable is bound, not by what that binding reads: same-fence sites (`secure-phase`, `validate-phase`, `code-review-fix`, `execute-phase` `execute:post`, `autonomous` `execute:post`, the UI contract) still rely on the host carrying `$INIT`/`$PHASE_STATE` (a JSON blob, not a token) from an earlier fence. A missed carry or an empty phase becomes `--phase ""`, which warns on stderr and omits `context` (ruling (a)); `loop-hook-dispatch.md` then falls back to the host's `PHASE_NUMBER`, or no phase argument. Only the `ref.command` branch of `loop-hook-dispatch.md` is behaviourally exercised (the `[projection]` test builds its handler argv); the `ref.skill` and `ref.agent` branches stay prose, and the tests only pin that their phase instructions survive the Claude and Codex projections. Call sites add no `[ -n "$PHASE_NUMBER" ]` guard: the warning is the signal, and skipping the call would drop the hooks.
+- Each fenced bash block may run as its own shell (it does in Claude Code). A call site whose phase variable is bound in an earlier fence relies on the dispatching agent carrying the resolved token, as it carries `{phase_dir}`; the test suite lists those sites and the binding each relies on. It classifies a site only by where its phase variable is bound, not by what that binding reads: same-fence sites (`secure-phase`, `validate-phase`, `code-review-fix`, `execute-phase` `execute:post`, `autonomous` `execute:post`, the UI contract) still rely on the host carrying the variables their phase binding reads (`PHASE_ARG`, `GSD_WS`, `$PHASE_STATE`, or the `INIT` query) from an earlier fence. The `init.*` bindings read the phase with `--pick phase_number`, never `jq`. A missed carry or an empty phase becomes `--phase ""`, which warns on stderr and omits `context` (ruling (a)); `loop-hook-dispatch.md` then passes no phase argument (the host's `PHASE_NUMBER` fills in only when `--phase` was never passed, never for a rejected token). Only the `ref.command` branch of `loop-hook-dispatch.md` is behaviourally exercised (the `[projection]` test builds its handler argv); the `ref.skill` and `ref.agent` branches stay prose, and the tests only pin that their phase instructions survive the Claude and Codex projections. Call sites add no `[ -n "$PHASE_NUMBER" ]` guard: the warning is the signal, and skipping the call would drop the hooks.
 
 ## Revisit if
 
