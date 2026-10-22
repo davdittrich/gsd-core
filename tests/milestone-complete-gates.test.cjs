@@ -45,6 +45,8 @@ describe('milestone complete re-checks blocking ship:pre predicate gates per mil
   const archived = () => fs.existsSync(path.join(tmpDir, '.planning', 'milestones'));
   const parseErr = (r) => JSON.parse(r.error.trim().split('\n').pop());
   const phaseDir = (name) => path.join(tmpDir, '.planning', 'phases', name);
+  const snapshot = () => fs.readdirSync(tmpDir, { recursive: true }).sort()
+    .map((p) => [p, fs.statSync(path.join(tmpDir, p)).isFile() ? fs.readFileSync(path.join(tmpDir, p), 'utf-8') : null]);
 
   beforeEach(() => {
     tmpDir = createTempProject();
@@ -58,7 +60,7 @@ describe('milestone complete re-checks blocking ship:pre predicate gates per mil
 
   test('T-C8 blocking predicate exit 3 refuses with typed reason and mutates nothing', () => {
     writeGateCap(home, { command: 'test "${PHASE_NUMBER}" != 01 || { echo 2 open items >&2; exit 3; }' });
-    const before = fs.readFileSync(path.join(tmpDir, '.planning', 'ROADMAP.md'));
+    const before = snapshot();
     const r = complete();
     assert.equal(r.success, false);
     const err = parseErr(r);
@@ -66,8 +68,7 @@ describe('milestone complete re-checks blocking ship:pre predicate gates per mil
     assert.deepEqual(err.blocked, [{ cap_id: 'open-work', phase: '01', gate_message: 'command exited 3: 2 open items' }]);
     assert.match(err.message, /"open-work" \(phase "01"\): "command exited 3: 2 open items"/);
     assert.match(err.message, /Nothing has been changed\. Resolve or waive in that capability; --force does not bypass it\.$/);
-    assert.deepEqual(fs.readFileSync(path.join(tmpDir, '.planning', 'ROADMAP.md')), before);
-    assert.equal(archived(), false);
+    assert.deepEqual(snapshot(), before, 'a refused close must leave the project tree byte-identical');
   });
 
   for (const [title, cap] of [['passing', { command: 'exit 0' }], ['non-blocking failing', { command: 'exit 1', blocking: false }]]) {
@@ -84,7 +85,7 @@ describe('milestone complete re-checks blocking ship:pre predicate gates per mil
     assert.equal(halted.success, false);
     const err = parseErr(halted);
     assert.equal(err.reason, ERROR_REASON.MILESTONE_GATE_BLOCKED);
-    assert.match(err.blocked[0].gate_message, /^gate predicate could not be evaluated: /);
+    assert.equal(err.blocked[0].gate_message, 'gate predicate could not be evaluated: command-exit-zero predicate requires a non-empty string "command"');
     assert.equal(archived(), false);
 
     writeGateCap(home, { predicate: { kind: 'command-exit-zero' }, onError: 'skip' });
@@ -199,6 +200,7 @@ describe('milestone complete re-checks blocking ship:pre predicate gates per mil
       '# Roadmap\n\n## v1.0 MVP\n\nNotes.\n\n## v2.0 Next\n\n### Phase 1: Foundation\n**Goal:** Setup\n\n### Phase 2: Build\n**Goal:** Build\n');
     fs.mkdirSync(phaseDir('05-later'), { recursive: true });
     writeGateCap(home, { command: 'test "${PHASE_NUMBER}" != 05' });
+    assert.match(complete().error, /the ROADMAP window for .*v1\.0.* is truncated/, 'fixture must be TRUNCATED');
     const r = complete('--force');
     assert.equal(r.success, false, r.output);
     assert.deepEqual(parseErr(r).blocked.map((b) => b.phase), ['05']);

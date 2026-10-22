@@ -589,9 +589,9 @@ function findBlockingShipGates(cwd: string, phasesDir: string, phaseDirs: string
       try {
         verdict = evaluatePredicate(predicate, { cwd, phaseDir: path.join(phasesDir, dir), phaseNumber: phase }, deps);
       } catch (e) {
-        const detail = formatDiagnosticToken((e as Error).message);
+        const detail = (e as Error).message;
         if (hook.onError !== 'halt') {
-          process.stderr.write(`warning: ship:pre gate of ${formatDiagnosticToken(hook.capId)} skipped for phase ${formatDiagnosticToken(phase)}: ${detail}\n`);
+          process.stderr.write(`warning: ship:pre gate of ${formatDiagnosticToken(hook.capId)} skipped for phase ${formatDiagnosticToken(phase)}: ${formatDiagnosticToken(detail)}\n`);
           continue;
         }
         verdict = { block: true, message: `gate predicate could not be evaluated: ${detail}` };
