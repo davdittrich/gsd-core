@@ -493,6 +493,26 @@ describe('state.json never dirties the tree (#5505)', () => {
     assert.strictEqual(git(tmpDir, 'status', '--porcelain', '--', `${rel}/state.json`), '');
   });
 
+  test('Case B: health W031 names a tracked state.json a boundary left modified; its advised untrack is idempotent and keeps later boundaries clean', (t) => {
+    const { tmpDir, rel } = boundary(t, { wsName: 'ws1', preTracked: true });
+    const p = `${rel}/state.json`;
+    assert.match(git(tmpDir, 'status', '--porcelain', '--', p), /M .*state\.json/, 'the boundary left the tracked copy modified');
+    const w031 = () => JSON.parse(runGsdTools(['validate', 'health'], tmpDir).output).warnings.find((w) => w.code === 'W031');
+    const warning = w031();
+    assert.ok(warning, 'validate health must report W031');
+    const cmd = /`(git rm [^`]+)`/.exec(warning.fix)[1];
+    assert.strictEqual(cmd, `git rm --cached --ignore-unmatch -- ${p}`);
+    // Run the advised command twice: the migration is idempotent (the rerun exits 0), and the file stays on disk.
+    git(tmpDir, ...cmd.split(' ').slice(1));
+    git(tmpDir, ...cmd.split(' ').slice(1));
+    assert.ok(fs.existsSync(path.join(tmpDir, p)), 'untracking keeps the file on disk');
+    git(tmpDir, 'commit', '-q', '-m', 'untrack');
+    const r = runGsdTools([...BEGIN, '--ws', 'ws1'], tmpDir);
+    assert.ok(r.success, `boundary command must succeed: ${r.error}`);
+    assert.strictEqual(git(tmpDir, 'status', '--porcelain', '--', p), '');
+    assert.strictEqual(w031(), undefined, 'W031 clears once untracked');
+  });
+
   test('commit --files on an untracked, ignored state.json skips it and still commits the rest', (t) => {
     const { tmpDir, rel } = boundary(t);
     fs.appendFileSync(path.join(tmpDir, rel, 'STATE.md'), '\nedited\n');
