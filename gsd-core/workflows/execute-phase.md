@@ -205,7 +205,7 @@ PHASE_NUMBER=$(printf '%s' "$INIT" | jq -r '.phase_number // empty')
 MVP_FLAG_ARG=""
 if [[ "$GSD_ARGS" =~ (^|[[:space:]])--mvp([[:space:]]|$) ]]; then MVP_FLAG_ARG="--cli-flag"; fi
 MVP_MODE=$(gsd_run query phase.mvp-mode "${PHASE_NUMBER}" $MVP_FLAG_ARG --pick active)
-EXECUTE_POST_HOOKS_JSON=$(gsd_run loop render-hooks execute:post --raw --phase "${PHASE_NUMBER}")
+EXECUTE_POST_HOOKS_JSON=$(gsd_run loop render-hooks execute:post --raw --phase "${PHASE_NUMBER}" ${GSD_WS:+--ws=${GSD_WS##* }})
 TDD_MODE=$(gsd_run loop render-hooks execute:post --active-cap tdd)
 ```
 
@@ -615,7 +615,7 @@ increases monotonically across waves. `{status}` is `complete` (success),
 2.75. **Execute:wave:pre capability dispatch:**
 
    ```bash
-   WAVE_PRE_HOOKS_JSON=$(gsd_run loop render-hooks execute:wave:pre --raw --phase "${PHASE_NUMBER}")
+   WAVE_PRE_HOOKS_JSON=$(gsd_run loop render-hooks execute:wave:pre --raw --phase "${PHASE_NUMBER}" ${GSD_WS:+--ws=${GSD_WS##* }})
    ```
 
    **Contribution dispatch:** inject every `kind == "contribution"` fragment per @gsd-core/references/loop-hook-dispatch.md (skip when none); one naming an alternate wave dispatch replaces step 3's inline loop.
@@ -978,7 +978,7 @@ increases monotonically across waves. `{status}` is `complete` (success),
    After worktree merge, post-merge tests, and tracking updates, dispatch capability hooks registered at `execute:wave:post`. The primary hook is the `ui.safety-gate` gate from the UI capability — it verifies that any frontend files changed in this wave conform to the UI-SPEC contract.
 
    ```bash
-   WAVE_POST_HOOKS_JSON=$(gsd_run loop render-hooks execute:wave:post --raw --phase "${PHASE_NUMBER}")
+   WAVE_POST_HOOKS_JSON=$(gsd_run loop render-hooks execute:wave:post --raw --phase "${PHASE_NUMBER}" ${GSD_WS:+--ws=${GSD_WS##* }})
    ```
 
    Read the `activeHooks` array from `WAVE_POST_HOOKS_JSON` in-context (do NOT pipe through a shell parser).

@@ -300,7 +300,7 @@ Read `@~/.claude/gsd-core/references/scout-codebase.md` — it contains the phas
 
 <step name="dispatch_discuss_pre_hooks">
 ```bash
-DISCUSS_PRE_HOOKS_JSON=$(gsd_run loop render-hooks discuss:pre --raw --phase "${PHASE_NUMBER}")
+DISCUSS_PRE_HOOKS_JSON=$(gsd_run loop render-hooks discuss:pre --raw --phase "${PHASE_NUMBER}" ${GSD_WS:+--ws=${GSD_WS##* }})
 ```
 Apply each entry in `activeHooks` per @~/.claude/gsd-core/references/loop-hook-dispatch.md. Empty list → continue to `analyze_phase`.
 </step>
@@ -419,7 +419,7 @@ Write the file.
 
 <step name="dispatch_discuss_post_hooks">
 ```bash
-DISCUSS_POST_HOOKS_JSON=$(gsd_run loop render-hooks discuss:post --raw --phase "${PHASE_NUMBER}")
+DISCUSS_POST_HOOKS_JSON=$(gsd_run loop render-hooks discuss:post --raw --phase "${PHASE_NUMBER}" ${GSD_WS:+--ws=${GSD_WS##* }})
 ```
 Apply each entry in `activeHooks` per @~/.claude/gsd-core/references/loop-hook-dispatch.md. Empty list → continue to `confirm_creation`.
 </step>

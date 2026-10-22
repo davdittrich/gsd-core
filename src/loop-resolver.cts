@@ -36,7 +36,7 @@ const { output: coreOutput, error: coreError } = ioMod;
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import verificationMod = require('./verification.cjs');
 const { resolvePhaseArtifactFile } = verificationMod;
-import { requireSafePath, tryWithinRoot, PathAcceptance } from './security.cjs';
+import { requireSafePath, sanitizeForDisplay, tryWithinRoot, PathAcceptance } from './security.cjs';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- phase-locator.cjs is an export= CommonJS module
 import phaseLocator = require('./phase-locator.cjs');
@@ -648,10 +648,11 @@ function resolveActiveHooksForPoint(
       const sameDir = (): boolean => {
         try {
           const given = path.resolve(cwd, phaseDirArg as string);
-          const a = fs.statSync(given);
-          const b = fs.statSync(resolvedDir);
+          // bigint: an NTFS 64-bit FileId loses precision as a double.
+          const a = fs.statSync(given, { bigint: true });
+          const b = fs.statSync(resolvedDir, { bigint: true });
           if (a.dev !== b.dev || a.ino !== b.ino) return false;
-          return a.ino !== 0 || fs.realpathSync.native(given) === fs.realpathSync.native(resolvedDir);
+          return a.ino !== 0n || fs.realpathSync.native(given) === fs.realpathSync.native(resolvedDir);
         } catch { return false; }
       };
       if (escapes) {
@@ -676,7 +677,7 @@ function resolveActiveHooksForPoint(
       contextReason = PHASE_CONTEXT_REASON.AMBIGUOUS;
       phaseWarnings.push(
         `--phase ${JSON.stringify(phaseArg)} is ambiguous: ${phaseResult.ambiguous_matches.length} ` +
-        `directories match (${phaseResult.ambiguous_matches.map((m) => JSON.stringify(m)).join(', ')}); context omitted.`,
+        `directories match (${phaseResult.ambiguous_matches.map((m) => JSON.stringify(sanitizeForDisplay(m).slice(0, 80))).join(', ')}); context omitted.`,
       );
     } else {
       contextReason = PHASE_CONTEXT_REASON.UNRESOLVED;

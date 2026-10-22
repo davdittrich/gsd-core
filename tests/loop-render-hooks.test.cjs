@@ -1461,8 +1461,10 @@ const SRC_CROSS_FENCE = {
 
 // Turn the tail of a render-hooks call line into argv, substituting a real
 // token for the phase variable and the fingerprint path.
+const WS_EXPANSION = '${GSD_WS:+--ws=${GSD_WS##* }}';
 function callArgv(rest) {
   return (rest
+    .replace(WS_EXPANSION, '') // unset GSD_WS expands to nothing
     .replace(/--after-fingerprint\s+"[^"]*"/, '--after-fingerprint .planning/phases/05-widgets')
     .replace(/"\$\{?\w+\}?"/g, '"05"')
     .match(/"[^"]*"|\S+/g) || []).map((a) => a.replace(/"/g, ''));
@@ -1528,6 +1530,16 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     assert.strictEqual(typeof envelope.rendered, 'string');
     assert.deepStrictEqual(envelope.context, { phase: '05', phaseDir: '.planning/phases/05-widgets' });
     assert.strictEqual(envelope.warnings, undefined);
+  });
+
+  test('[workstream] --ws scopes --phase to the workstream phases dir when both trees hold the number', (t) => {
+    const dir = makePhaseProject('05-root');
+    t.after(() => cleanup(dir));
+    fs.mkdirSync(path.join(dir, '.planning', 'workstreams', 'alpha', 'phases', '05-alpha'), { recursive: true });
+    const envelope = JSON.parse(renderWithPhase(dir, 'plan:pre', ['--phase', '05', '--ws=alpha', '--raw']).stdout.trim());
+    assert.deepStrictEqual(envelope.context, { phase: '05', phaseDir: '.planning/workstreams/alpha/phases/05-alpha' });
+    const root = JSON.parse(renderWithPhase(dir, 'plan:pre', ['--phase', '05', '--raw']).stdout.trim());
+    assert.strictEqual(root.context.phaseDir, '.planning/phases/05-root');
   });
 
   test('[bva] --phase omitted preserves the exact legacy envelope shape — no context key at all', (t) => {
@@ -1984,6 +1996,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
         seen++;
         const v = m[1].match(/--phase\s+"\$\{?(\w+)\}?"/);
         assert.ok(v, `${file}:${idx + 1} ${point}: --phase must take a quoted variable`);
+        assert.ok(m[1].includes(WS_EXPANSION), `${file}:${idx + 1} ${point}: --phase call lost the ${WS_EXPANSION} expansion (wrong-workstream phase)`);
         const b = phaseVarBinding(lines, idx, v[1]);
         assert.notStrictEqual(b.line, -1,
           `${file}:${idx + 1} ${point}: ${v[1]} is never assigned in a bash block before this call`);
@@ -2166,7 +2179,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     const realStat = fs.statSync;
     fs.statSync = (p, ...rest) => {
       const st = realStat(p, ...rest);
-      return st && st.isDirectory() ? Object.assign(Object.create(Object.getPrototypeOf(st)), st, { ino: 0 }) : st;
+      return st && st.isDirectory() ? Object.assign(Object.create(Object.getPrototypeOf(st)), st, { ino: rest[0] && rest[0].bigint ? 0n : 0 }) : st;
     };
     t.after(() => { fs.statSync = realStat; });
     const result = resolveActiveHooksForPoint(dir, 'plan:pre', { phase: '05', phaseDir: '.planning/phases/07-other' });
@@ -2327,6 +2340,12 @@ describe('cmdLoopRenderHooks --phase confinement and --phase-dir identity (#4030
     const w = (run(dir, ['--phase', '08']).warnings || []).join('\n');
     assert.ok(!w.includes('\u001b') && !w.includes('\nspoof'), 'raw control bytes must not reach the warning');
     assert.match(w, /\\u001b|\\n/);
+  });
+
+  test('[hostile] a very long ambiguous directory name is capped in the warning', (t) => {
+    const dir = mk(t, '08-' + 'a'.repeat(200), '08-b');
+    const w = (run(dir, ['--phase', '08']).warnings || []).join('\n');
+    assert.ok(!w.includes('a'.repeat(100)), 'the on-disk name must be truncated');
   });
 
   // 0/1/2 directory matches x --phase-dir (match | mismatch)

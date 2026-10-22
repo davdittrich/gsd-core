@@ -74,7 +74,7 @@ kind, not gates alone. Each hook is data-driven — resolved from the capability
 registry, not hardcoded here.
 
 ```bash
-VERIFY_PRE_HOOKS_JSON=$(gsd_run loop render-hooks verify:pre --raw --phase "${PHASE_NUMBER}")
+VERIFY_PRE_HOOKS_JSON=$(gsd_run loop render-hooks verify:pre --raw --phase "${PHASE_NUMBER}" ${GSD_WS:+--ws=${GSD_WS##* }})
 PHASE_DIR=$(printf '%s' "$INIT" | jq -r '.phase_dir // empty')
 ```
 
@@ -603,7 +603,7 @@ Present summary:
 nonzero but every one is a verified gap resolution, #4983)
 
 ```bash
-VERIFY_POST_HOOKS_JSON=$(gsd_run loop render-hooks verify:post --after-fingerprint "$PHASE_DIR" --raw --phase "${PHASE_NUMBER}")
+VERIFY_POST_HOOKS_JSON=$(gsd_run loop render-hooks verify:post --after-fingerprint "$PHASE_DIR" --raw --phase "${PHASE_NUMBER}" ${GSD_WS:+--ws=${GSD_WS##* }})
 SECURITY_FILE=$(ls "${PHASE_DIR}"/*-SECURITY.md 2>/dev/null | head -1)
 ```
 
