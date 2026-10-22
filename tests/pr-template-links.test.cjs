@@ -44,21 +44,21 @@ describe('heading anchors (#5427)', () => {
 
 describe('link classification (#5427)', () => {
   test('relative hrefs, ?template= included, are bad; absolute URLs are not', () => {
-    assert.deepEqual(['?template=fix.md', 'docs/x.md', '#a'].filter(isBad), ['?template=fix.md', 'docs/x.md', '#a']);
+    assert.deepEqual(['?template=fix.md', 'guide/x.md', '#a'].filter(isBad), ['?template=fix.md', 'guide/x.md', '#a']);
     assert.deepEqual(['https://docs.github.com/x', `${REPO}blob/next/a.md`].filter(isBad), []);
   });
 });
 
 describe('angle-enclosed destinations (#5427)', () => {
-  const ABS = `${REPO}blob/next/docs/my%20guide.md`;
+  const ABS = `${REPO}blob/next/guide/my%20guide.md`;
   test('inline: relative with spaces is extracted and rejected', () => {
-    const hs = hrefsIn('[guide](<docs/my guide.md>)');
-    assert.deepEqual(hs, ['docs/my guide.md']);
+    const hs = hrefsIn('[guide](<guide/my guide.md>)');
+    assert.deepEqual(hs, ['guide/my guide.md']);
     assert.deepEqual(hs.filter(isBad), hs);
   });
   test('reference definition: relative with spaces is extracted and rejected', () => {
-    const hs = hrefsIn('[guide]: <docs/my guide.md>');
-    assert.deepEqual(hs, ['docs/my guide.md']);
+    const hs = hrefsIn('[guide]: <guide/my guide.md>');
+    assert.deepEqual(hs, ['guide/my guide.md']);
     assert.deepEqual(hs.filter(isBad), hs);
   });
   test('absolute encoded form is accepted in both', () => {
