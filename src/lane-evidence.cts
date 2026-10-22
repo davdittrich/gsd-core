@@ -3,8 +3,9 @@
  *
  * `code-review` persists its external-reviewer evidence beside REVIEW.md as
  * `<review>-lane-evidence.md` (line 1: the 6-char suffix of the lane scratch dir
- * `$TMPDIR/gsd-review-lanes-<suffix>`). Every exit of `code-review` / `code-review-fix`
- * that ends the run removes both. That was six byte-identical inline bash fences; this
+ * `$TMPDIR/gsd-review-lanes-<suffix>`). `code-review` removes both at `check_empty_scope` and in
+ * `commit_review` (unless `--auto` keeps them); `code-review-fix` at every exit after `REVIEW_PATH` is computed.
+ * The loop's read in code-review-fix.md repeats SUFFIX_RE's guard in bash: keep them in step. That was six byte-identical inline bash fences; this
  * verb replaces them (`gsd_run lane-evidence-clear "$REVIEW_PATH"`) so the guard lives once.
  *
  * Line 1 is data read back from disk, never a path: only a 6-char alphanumeric value names

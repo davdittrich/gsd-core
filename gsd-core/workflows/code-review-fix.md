@@ -322,6 +322,7 @@ if [ "$AUTO_MODE" = "true" ]; then
     # untrusted); a file older than 6h is a crashed earlier run's leftover, not this run's evidence.
     EXTERNAL_EVIDENCE_BLOCK=""
     LANE_EVIDENCE="${REVIEW_PATH%.md}-lane-evidence.md"
+    # Same guard as SUFFIX_RE in src/lane-evidence.cts (the clear verb): change both together.
     S=$(head -n 1 "$LANE_EVIDENCE" 2>/dev/null)
     case "$S" in *[!A-Za-z0-9]*|'') ;; ??????)
       D="${TMPDIR:-/tmp}/gsd-review-lanes-$S"
@@ -547,7 +548,7 @@ fi
 ```
 
 **#5019 lane-evidence removal** — the lane evidence is spent once the loop ends, converged or not, so
-every exit of this workflow runs this fence (AUTO_MODE or not; with no file it is a no-op). Line 1 of
+every exit of this workflow after `REVIEW_PATH` is computed runs this fence (AUTO_MODE or not; with no file it is a no-op). Line 1 of
 the file is read as data: only a 6-char alphanumeric `mktemp` suffix is accepted, never a path.
 
 ```bash

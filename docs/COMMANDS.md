@@ -2367,8 +2367,10 @@ node gsd-tools.cjs state complete-phase --phase 3
 ### `lane-evidence-clear`
 
 Remove the external-reviewer lane evidence that `/gsd-code-review` persists beside `REVIEW.md`
-(`<review>-lane-evidence.md`) together with the scratch lane directory it names. Every exit of
-`code-review` and `code-review-fix` that ends the run calls it once, so the guard exists in one place (#5019).
+(`<review>-lane-evidence.md`) together with the scratch lane directory it names. `code-review` calls it at
+`check_empty_scope` (clearing a previous run's stale evidence) and from `commit_review` unless an `--auto` run
+keeps the evidence for the fixer loop; `code-review-fix` calls it at every exit after `REVIEW_PATH` is computed
+(its phase-validation exits precede that, and a nonexistent phase has no evidence to remove). The guard exists in one place (#5019).
 
 **Prerequisites:** none — it reads no project state and needs no resolvable project root
 **Produces:** nothing on stdout; exit 0 whether or not there was anything to remove
