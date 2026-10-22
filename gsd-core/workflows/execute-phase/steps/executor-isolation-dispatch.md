@@ -294,11 +294,17 @@ printf '%s' "$EXECUTOR_PROMPT" | grep -q '\${TDD_APPLICABLE' && {
 }
 ```
 
-The prompt is a quoted heredoc, so apostrophes and any other quote characters are safe in the template and in every spliced embed; do not escape them. `read -d ''` exits non-zero at end of input by design (hence `|| true`); the empty-prompt check on the next line is the gate.
+The prompt is a quoted heredoc, so apostrophes and any other quote characters are safe in the template and in every spliced embed; do not escape them. `read -d ''` exits non-zero at end of input by design (hence `|| true`); the empty-prompt check on the next line is the gate. If the terminator is not matched exactly (indented, CRLF, or repeated inside an embed), the heredoc runs to the end of the block and swallows the checks above, so the guard that opens the next block — outside the heredoc — halts on any prompt that does not end at `</success_criteria>`.
 
 Then create the worktree and resolve the spawn:
 
 ```bash
+# Unterminated-heredoc guard (#5531): the template ends at </success_criteria>.
+case "$EXECUTOR_PROMPT" in
+  *'</success_criteria>'|*'</success_criteria>'$'\n') ;;
+  *) echo "FATAL: executor prompt for plan {plan_number} was not terminated at GSD_EXECUTOR_PROMPT_EOF (indented, CRLF, or an embed contained the terminator line) — the verification above did not run. Halting." >&2; exit 1 ;;
+esac
+
 # 1. Create the worktree. Bounded, manifest-recorded, fail-closed, and
 #    root-confined by the verb itself — never hand-roll `git worktree add`.
 AGENT_ID="agent-p{plan_number}-$(date -u +%s)"
