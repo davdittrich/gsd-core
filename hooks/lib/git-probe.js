@@ -101,9 +101,9 @@ const GIT_LOCATION_ENV_VARS = [
   'GIT_REPLACE_REF_BASE', 'GIT_PREFIX', 'GIT_SHALLOW_FILE', 'GIT_COMMON_DIR',
 ];
 
-/** process.env minus the repo-location vars (case-insensitive, for Windows). */
-function gitEnv() {
-  return Object.fromEntries(Object.entries(process.env).filter(([k]) => !GIT_LOCATION_ENV_VARS.includes(k.toUpperCase())));
+/** `env` (default process.env) minus the repo-location vars (case-insensitive, for Windows). */
+function gitEnv(env = process.env) {
+  return Object.fromEntries(Object.entries(env).filter(([k]) => !GIT_LOCATION_ENV_VARS.includes(k.toUpperCase())));
 }
 
 module.exports = {
