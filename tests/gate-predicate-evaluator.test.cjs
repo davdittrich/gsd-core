@@ -222,6 +222,42 @@ describe('evaluatePredicate — message trimming', () => {
     );
     assert.equal(res.message.length, COMMAND_MAX_OUTPUT_CHARS);
   });
+
+  // #5593: ADR-2008 says the message keeps the TAIL of the output (errors land last).
+  const run = (shellResult) => evaluatePredicate(
+    { kind: 'command-exit-zero', command: 'x' },
+    baseCtx,
+    { runBoundedShell: fakeShell(shellResult).run },
+  );
+
+  test('non-zero exit keeps the stderr tail and the exit prefix within the cap', () => {
+    const res = run({ exitCode: 3, stderr: 'E'.repeat(COMMAND_MAX_OUTPUT_CHARS + 50) + 'MARKER' });
+    assert.ok(res.message.startsWith('command exited 3: '));
+    assert.ok(res.message.endsWith('MARKER'));
+    assert.equal(res.message.length, COMMAND_MAX_OUTPUT_CHARS);
+  });
+
+  test('non-zero exit keeps the stdout tail when stderr is empty', () => {
+    const res = run({ exitCode: 2, stderr: '', stdout: 'O'.repeat(COMMAND_MAX_OUTPUT_CHARS + 50) + 'MARKER' });
+    assert.ok(res.message.startsWith('command exited 2: '));
+    assert.ok(res.message.endsWith('MARKER'));
+    assert.equal(res.message.length, COMMAND_MAX_OUTPUT_CHARS);
+  });
+
+  test('timeout keeps the stderr tail and the timeout prefix within the cap', () => {
+    const res = run({ timedOut: true, exitCode: null, stderr: 'E'.repeat(COMMAND_MAX_OUTPUT_CHARS + 50) + 'MARKER' });
+    assert.ok(res.message.startsWith('command timed out after '));
+    assert.ok(res.message.endsWith('MARKER'));
+    assert.equal(res.message.length, COMMAND_MAX_OUTPUT_CHARS);
+  });
+
+  test('short output is kept whole after the prefix', () => {
+    assert.equal(run({ exitCode: 1, stderr: 'boom' }).message, 'command exited 1: boom');
+  });
+
+  test('empty output yields no colon', () => {
+    assert.equal(run({ exitCode: 1, stderr: '', stdout: '' }).message, 'command exited 1');
+  });
 });
 
 // ─── malformed predicate / fail-closed ────────────────────────────────────────
