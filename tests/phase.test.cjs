@@ -2860,13 +2860,13 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
   beforeEach(() => { tmp = createTempProject('gsd-5528-'); });
   afterEach(() => { cleanup(tmp); });
 
-  function setup(roadmapLines, { convention = 'bracket', dirs = [] } = {}) {
+  function setup(roadmapLines, { convention = 'bracket', dirs = [], milestone = 'v2.0' } = {}) {
     cleanup(tmp); // a fresh project per call: earlier `phase add` runs left phase directories behind
     tmp = createTempProject('gsd-5528-');
     const planning = path.join(tmp, '.planning');
     fs.mkdirSync(path.join(planning, 'phases'), { recursive: true });
     fs.writeFileSync(path.join(planning, 'config.json'), JSON.stringify(convention ? { phase_id_convention: convention } : {}));
-    fs.writeFileSync(path.join(planning, 'STATE.md'), '---\nmilestone: v2.0\n---\n# State\n');
+    fs.writeFileSync(path.join(planning, 'STATE.md'), `---\n${milestone ? `milestone: ${milestone}\n` : ''}---\n# State\n`);
     fs.writeFileSync(path.join(planning, 'ROADMAP.md'), roadmapLines.join('\n'));
     for (const d of dirs) fs.mkdirSync(path.join(planning, 'phases', d));
     return planning;
@@ -2877,6 +2877,20 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
     assert.ok(fs.existsSync(path.join(tmp, '.planning', 'phases', `${nn}-${slug}`)), `phases/${nn}-${slug} created`);
     const text = fs.readFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), 'utf-8');
     assert.ok(text.includes(`### Phase ${num}: ${title}`), `ROADMAP.md gains "### Phase ${num}: ${title}"`);
+  }
+  // A git repo at tmp plus one detached sibling worktree of it (removed with the test).
+  function addSiblingWorktree(t, prefix) {
+    const git = (args, cwd) => gitOrThrow(args, { cwd, timeoutMs: GIT_TIMEOUT_MS });
+    git(['init', '-b', 'main'], tmp);
+    git(['config', 'user.email', 'test@example.com'], tmp);
+    git(['config', 'user.name', 'Test'], tmp);
+    git(['add', '-A'], tmp);
+    git(['commit', '-m', 'init', '--allow-empty'], tmp);
+    const sibling = createTempProject(prefix);
+    cleanup(sibling); // `git worktree add` needs a path that does not exist yet
+    t.after(() => cleanup(sibling)); // the worktree's git metadata lives in tmp, which afterEach removes
+    git(['worktree', 'add', '--detach', sibling, 'HEAD'], tmp);
+    return sibling;
   }
   const roadmap = (planning) => fs.readFileSync(path.join(planning, 'ROADMAP.md'), 'utf-8');
 
@@ -2951,16 +2965,7 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
 
   test('a bracket directory held only by a sibling worktree blocks reuse of its number', (t) => {
     setup(['# Roadmap', '', '## Milestone v2.0', '']);
-    const git = (args, cwd) => gitOrThrow(args, { cwd, timeoutMs: GIT_TIMEOUT_MS });
-    git(['init', '-b', 'main'], tmp);
-    git(['config', 'user.email', 'test@example.com'], tmp);
-    git(['config', 'user.name', 'Test'], tmp);
-    git(['add', '-A'], tmp);
-    git(['commit', '-m', 'init', '--allow-empty'], tmp);
-    const sibling = createTempProject('gsd-5528-sib-');
-    cleanup(sibling); // `git worktree add` needs a path that does not exist yet
-    t.after(() => cleanup(sibling)); // the worktree's git metadata lives in tmp, which afterEach removes
-    git(['worktree', 'add', '--detach', sibling, 'HEAD'], tmp);
+    const sibling = addSiblingWorktree(t, 'gsd-5528-sib-');
     fs.mkdirSync(path.join(sibling, '.planning', 'phases', 'GSD.02-09-elsewhere'), { recursive: true });
     const result = runGsdTools('phase add "New thing" --raw', tmp);
     assert.ok(result.success, result.error);
@@ -3002,16 +3007,7 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
 
   test('a bracket heading held only by a sibling worktree ROADMAP blocks reuse of its number', (t) => {
     setup(['# Roadmap', '', '## Milestone v2.0', '']);
-    const git = (args, cwd) => gitOrThrow(args, { cwd, timeoutMs: GIT_TIMEOUT_MS });
-    git(['init', '-b', 'main'], tmp);
-    git(['config', 'user.email', 'test@example.com'], tmp);
-    git(['config', 'user.name', 'Test'], tmp);
-    git(['add', '-A'], tmp);
-    git(['commit', '-m', 'init', '--allow-empty'], tmp);
-    const sibling = createTempProject('gsd-5528-sibrm-');
-    cleanup(sibling); // `git worktree add` needs a path that does not exist yet
-    t.after(() => cleanup(sibling));
-    git(['worktree', 'add', '--detach', sibling, 'HEAD'], tmp);
+    const sibling = addSiblingWorktree(t, 'gsd-5528-sibrm-');
     fs.writeFileSync(
       path.join(sibling, '.planning', 'ROADMAP.md'),
       ['# Roadmap', '', '## Milestone v2.0', '', '### [GSD.02] 09: Elsewhere', '', '**Goal:** x', ''].join('\n')
@@ -3055,16 +3051,7 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
 
   test('a sibling worktree phase from another milestone is not counted', (t) => {
     setup(['# Roadmap', '', '## Milestone v2.0', '']);
-    const git = (args, cwd) => gitOrThrow(args, { cwd, timeoutMs: GIT_TIMEOUT_MS });
-    git(['init', '-b', 'main'], tmp);
-    git(['config', 'user.email', 'test@example.com'], tmp);
-    git(['config', 'user.name', 'Test'], tmp);
-    git(['add', '-A'], tmp);
-    git(['commit', '-m', 'init', '--allow-empty'], tmp);
-    const sibling = createTempProject('gsd-5528-sibms-');
-    cleanup(sibling); // `git worktree add` needs a path that does not exist yet
-    t.after(() => cleanup(sibling));
-    git(['worktree', 'add', '--detach', sibling, 'HEAD'], tmp);
+    const sibling = addSiblingWorktree(t, 'gsd-5528-sibms-');
     fs.mkdirSync(path.join(sibling, '.planning', 'phases', 'GSD.01-40-old'), { recursive: true });
     fs.writeFileSync(path.join(sibling, '.planning', 'ROADMAP.md'), ['# Roadmap', '', '### [GSD.01] 41: Old', ''].join('\n'));
     assert.strictEqual(runGsdTools('phase add "New thing" --raw', tmp).output.trim(), '01');
@@ -3080,6 +3067,25 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
   test('a prose heading "## Phase [GSD.02] 12 notes" (no colon) is not a phase', () => {
     setup(['# Roadmap', '', '## Milestone v2.0', '', '### [GSD.02] 01: Real', '', '## Phase [GSD.02] 12 notes', '']);
     assert.strictEqual(runGsdTools('phase add "New thing" --raw', tmp).output.trim(), '02');
+  });
+
+  test('a version in roadmap prose is not mistaken for the milestone (its directories still count)', () => {
+    setup(['# Roadmap', '', 'Requires Node v18.0 or newer.', '', '### [GSD.02] 01: A', '', '### [GSD.02] 02: B', '', '### [GSD.02] 03: C', '', '### [GSD.02] 04: D', ''],
+      { milestone: null, dirs: ['GSD.02-05-wip'] });
+    assert.strictEqual(runGsdTools('phase add "New thing" --raw', tmp).output.trim(), '06');
+    assertWritten(6);
+  });
+
+  test('with no milestone resolved, every milestone counts (an over-count, never a reuse)', () => {
+    setup(['# Roadmap', '', '### [GSD.02] 01: A', ''], { milestone: null, dirs: ['GSD.01-12-old'] });
+    assert.strictEqual(runGsdTools('phase add "New thing" --raw', tmp).output.trim(), '13');
+  });
+
+  test('Depends on skips a plain heading in a shipped milestone block', () => {
+    setup(['# Roadmap', '', '## Milestone v1.0 (shipped)', '', '### Phase 4: Old', '', '## Milestone v2.0', '', '### [GSD.02] 01: Current', ''], { dirs: ['GSD.02-05-held'] });
+    assert.strictEqual(runGsdTools('phase add "New thing" --raw', tmp).output.trim(), '06');
+    const text = fs.readFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), 'utf-8');
+    assert.match(text, /### Phase 6: New thing[\s\S]*?\*\*Depends on:\*\* Phase 1\b/);
   });
 
   test('checkbox length boundary: 200 characters still counts, 201 does not (limit/limit+1)', () => {
@@ -3098,7 +3104,7 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
           ...nums.map((n) => (asBullets ? `- [ ] **[GSD.02] ${nn(n)}: P${n}**` : `### [GSD.02] ${nn(n)}: P${n}`)), '']);
         return runGsdTools('phase add "New thing" --raw', tmp).output.trim() === nn(Math.max(...nums) + 1);
       }),
-      { numRuns: 6 },
+      { numRuns: 6, seed: 5528 },
     );
   });
 

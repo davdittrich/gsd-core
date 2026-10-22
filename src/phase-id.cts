@@ -441,13 +441,11 @@ const BRACKET_DIR_PHASE_RE = new RegExp(`^${BRACKET_PROJECT_CODE_SRC}\\.(${BRACK
 
 /**
  * Read a bracket phase directory name. `null`: not a bracket phase directory. Otherwise its milestone
- * and integer phase (and whether that milestone is a sentinel), for a caller that scopes numbering to one milestone (#5528).
+ * and integer phase, for a caller that scopes numbering to one milestone (#5528).
  */
-function parseBracketPhaseDir(dirName: string): { milestone: number; phase: number; sentinel: boolean } | null {
+function parseBracketPhaseDir(dirName: string): { milestone: number; phase: number } | null {
   const m = dirName.match(BRACKET_DIR_PHASE_RE);
-  if (!m) return null;
-  const milestone = parseInt(m[1], 10);
-  return { milestone, phase: parseInt(m[2], 10), sentinel: SENTINEL_RANGES.includes(milestone) };
+  return m ? { milestone: parseInt(m[1], 10), phase: parseInt(m[2], 10) } : null;
 }
 
 function stripProjectCodePrefix(value: unknown, caseInsensitive = true): string {
