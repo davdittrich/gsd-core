@@ -11,9 +11,9 @@ const { test, describe, before, after, beforeEach, afterEach } = require('node:t
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { spawnSync } = require('node:child_process');
 const { TOOLS_PATH, runGsdTools, createTempDir, createTempProject, cleanup, delay, withIsolatedProcessState, homeSandboxEnv, mockPartialWriteThenThrow, suppressFdAsync } = require('./helpers.cjs');
 const fc = require('./helpers/fast-check-setup.cjs');
+const { runNode } = require('./helpers/process-seam.cjs');
 const configLib = require('../gsd-core/bin/lib/config.cjs');
 const { ExitError } = require('../gsd-core/bin/lib/cli-exit.cjs');
 
@@ -2641,8 +2641,8 @@ describe('#5231: git.commit_timeout_ms config key', () => {
     const cfgPath = path.join(tmpDir, '.planning', 'config.json');
     fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
     fs.writeFileSync(cfgPath, JSON.stringify({ git: { commit_timeout_ms: 0 } }));
-    const r = spawnSync(process.execPath, [TOOLS_PATH, 'config-get', 'git.commit_timeout_ms'], { cwd: tmpDir, env: homeSandboxEnv(tmpDir), encoding: 'utf8' });
-    assert.strictEqual(r.status, 0, r.stderr);
+    const r = runNode([TOOLS_PATH, 'config-get', 'git.commit_timeout_ms'], { cwd: tmpDir, env: homeSandboxEnv(tmpDir) });
+    assert.strictEqual(r.exitCode, 0, r.stderr);
     assert.strictEqual(r.stdout.trim(), '0');
     assert.match(r.stderr, /git\.commit_timeout_ms.*0.*30000/);
   });
@@ -2653,8 +2653,8 @@ describe('#5231: git.commit_timeout_ms config key', () => {
       t.after(() => cleanup(tmpDir));
       fs.writeFileSync(path.join(tmpDir, '.planning', 'config.json'), JSON.stringify({ git: { commit_timeout_ms: rootVal } }));
       fs.mkdirSync(path.join(tmpDir, '.planning', 'workstreams', 'ws'), { recursive: true });
-      const r = spawnSync(process.execPath, [TOOLS_PATH, 'config-get', 'git.commit_timeout_ms'], { cwd: tmpDir, env: { ...homeSandboxEnv(tmpDir), GSD_WORKSTREAM: 'ws' }, encoding: 'utf8' });
-      assert.strictEqual(r.status, 0, r.stderr);
+      const r = runNode([TOOLS_PATH, 'config-get', 'git.commit_timeout_ms'], { cwd: tmpDir, env: { ...homeSandboxEnv(tmpDir), GSD_WORKSTREAM: 'ws' } });
+      assert.strictEqual(r.exitCode, 0, r.stderr);
       assert.strictEqual(r.stdout.trim(), String(rootVal));
       if (warns) assert.match(r.stderr, /git\.commit_timeout_ms.*0.*30000/);
       else assert.doesNotMatch(r.stderr, /commit_timeout_ms/);
