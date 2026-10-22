@@ -1455,30 +1455,6 @@ function extractCurrentMilestone(content: string, cwd?: string, ws?: string | nu
 }
 
 /**
- * Replace a pattern only in the current milestone section of ROADMAP.md.
- */
-type RoadmapReplacer = (match: string, ...captures: string[]) => string;
-
-function replaceInCurrentMilestone(
-  content: string,
-  pattern: RegExp,
-  replacement: string | RoadmapReplacer,
-): string {
-  const apply = (src: string): string =>
-    typeof replacement === 'function'
-      ? src.replace(pattern, replacement)
-      : src.replace(pattern, replacement);
-  const lastDetailsClose = content.lastIndexOf('</details>');
-  if (lastDetailsClose === -1) {
-    return apply(content);
-  }
-  const offset = lastDetailsClose + '</details>'.length;
-  const before = content.slice(0, offset);
-  const after = content.slice(offset);
-  return before + apply(after);
-}
-
-/**
  * #5553: hide every archived `<details>` block, and every closed milestone
  * written as a plain heading section, behind a placeholder; `restore` puts them
  * back byte-for-byte. Tag case, attributes and archive position
@@ -1491,7 +1467,7 @@ function replaceInCurrentMilestone(
  * still hidden. With no resolvable active milestone every block is hidden,
  * as the old last-`</details>` cut did.
  */
-function maskArchivedDetails(content: string, cwd: string): { visible: string; restore: (edited: string) => string } {
+function maskArchivedDetails(content: string, cwd: string): { visible: string; restore: (edited: string) => string | null } {
   if (!/<details\b/i.test(content) && !MILESTONE_CLOSED_MARKER_PATTERN.test(content)) {
     return { visible: content, restore: (edited) => edited };
   }
@@ -1501,30 +1477,37 @@ function maskArchivedDetails(content: string, cwd: string): { visible: string; r
   let nonce = 0;
   while (content.includes(`<!-- gsd-archived-details-${nonce}-`)) nonce += 1;
   const marker = (i: number): string => `<!-- gsd-archived-details-${nonce}-${i} -->`;
-  // Same-length copy with fenced blocks and inline code spans blanked, so a
-  // `<details>` mentioned in prose or an example never opens or closes a block.
+  // Same-length copy with fenced blocks, HTML comments and inline code spans
+  // blanked, so a `<details>` mentioned in prose or an example never opens or
+  // closes a block.
   const lines = content.split('\n');
   const blank = (t: string): string => t.replace(/[^\r\n]/g, ' ');
   for (const f of scanFencedBlocks(lines)) {
     const last = f.closeLineIdx === -1 ? lines.length - 1 : f.closeLineIdx;
     for (let i = f.openLineIdx; i <= last; i++) lines[i] = blank(lines[i]);
   }
-  const scan = lines.join('\n').replace(/`[^`\n]*`/g, blank);
+  const scan = lines.join('\n').replace(/<!--[\s\S]*?(?:-->|$)/g, blank).replace(/`[^`\n]*`/g, blank);
   // Depth-aware: an outer block closes at its own `</details>`, so a nested
   // collapsed section inside an archive is masked with it.
   const spans: Array<{ start: number; end: number }> = [];
   const overlapsActive = (start: number, end: number): boolean =>
     ranges !== null && active.some((r) => start < r.end && end > r.start);
-  const tag = /<details\b[^>]*>|<\/details\s*>/gi;
+  // Block-level tags only: at line start (<=3 spaces, CommonMark) with a bounded
+  // attribute run, so inline/indented mentions never count and a hostile run of
+  // `<details ` cannot go quadratic. shortcut: one tag per line start, so a
+  // second `</details>` on the same line is not seen; upgrade if archives are
+  // ever emitted that way.
+  const tag = /^[ \t]{0,3}(<details\b[^>\n]{0,200}>|<\/details[ \t]*>)/gim;
   let depth = 0;
   let start = 0;
   for (let m = tag.exec(scan); m; m = tag.exec(scan)) {
-    if (m[0][1] !== '/') {
-      if (depth++ === 0) start = m.index;
+    const at = m.index + m[0].length - m[1].length;
+    if (m[1][1] !== '/') {
+      if (depth++ === 0) start = at;
       continue;
     }
     if (depth === 0 || --depth > 0) continue;
-    const end = m.index + m[0].length;
+    const end = at + m[1].length;
     const summary = content.slice(start, end).match(/<summary[^>]*>([^<]*)<\/summary>/i);
     if (overlapsActive(start, end) && !(summary && isClosedMilestoneHeading(summary[1]))) continue;
     spans.push({ start, end });
@@ -1538,7 +1521,8 @@ function maskArchivedDetails(content: string, cwd: string): { visible: string; r
     if (h.level > 3 || /^Phase\s+\S/i.test(h.text)) continue;
     if (!isClosedMilestoneHeading(h.text) || extractMilestoneHeadingName(h.text) === null) continue;
     const next = headingTokens.slice(i + 1).find((t) => t.level <= h.level && !/^Phase\s+\S/i.test(t.text));
-    const end = next ? next.offset : content.length;
+    // End before the newline that precedes `next`, so that heading stays at line start.
+    const end = next ? next.offset - (content[next.offset - 2] === '\r' ? 2 : 1) : content.length;
     if (!overlapsActive(h.offset, end)) spans.push({ start: h.offset, end });
   }
   spans.sort((x, y) => x.start - y.start || y.end - x.end);
@@ -1555,11 +1539,11 @@ function maskArchivedDetails(content: string, cwd: string): { visible: string; r
     last = span.end;
   }
   visible += content.slice(last);
-  const restore = (edited: string): string => {
+  const restore = (edited: string): string | null => {
     let restored = edited;
     for (let i = 0; i < blocks.length; i++) {
       const at = restored.indexOf(marker(i));
-      if (at === -1) return content; // edit dropped a placeholder: refuse rather than lose an archive
+      if (at === -1) return null; // edit dropped a placeholder: caller must refuse rather than lose an archive
       restored = restored.slice(0, at) + blocks[i] + restored.slice(at + marker(i).length);
     }
     return restored;
@@ -2497,7 +2481,6 @@ export = {
   extractCurrentMilestoneScoped,
   isMilestoneShippedInRoadmap,
   isMilestoneBoundedInRoadmap,
-  replaceInCurrentMilestone,
   maskArchivedDetails,
   getRoadmapPhaseInternal,
   getMilestoneInfo,

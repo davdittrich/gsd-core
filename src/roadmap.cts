@@ -1245,6 +1245,7 @@ function cmdRoadmapUpdatePlanProgress(cwd: string, phaseNum: string | null | und
   // refusal below declines with the analyzer's own `missing_phase_details`
   // vocabulary and leaves ROADMAP.md byte-identical.
   let missingPhaseDetails = false;
+  let archiveRestoreFailed = false;
   const warnings: string[] = [];
   withPlanningLock(cwd, () => {
     // #3957 (B9.4): captured BEFORE any transform runs, so the write/report
@@ -1699,7 +1700,9 @@ function cmdRoadmapUpdatePlanProgress(cwd: string, phaseNum: string | null | und
     // `missing_phase_details` decline instead of a false green.
     const phaseRepresentationFound = tableRowFound || headingTargetFound || checklistTargetFound;
     const finalContent = archived.restore(roadmapContent);
-    if (phaseRepresentationFound && finalContent !== rawContent) {
+    if (finalContent === null) {
+      archiveRestoreFailed = true;
+    } else if (phaseRepresentationFound && finalContent !== rawContent) {
       platformWriteSync(roadmapPath, finalContent);
       updated = true;
     }
@@ -1718,6 +1721,16 @@ function cmdRoadmapUpdatePlanProgress(cwd: string, phaseNum: string | null | und
   };
   if (updated) {
     output(warnings.length > 0 ? { updated: true, ...computed, warnings } : { updated: true, ...computed }, raw, `${summaryCount}/${planCount} ${status}`);
+  } else if (archiveRestoreFailed) {
+    // An edit dropped an archive placeholder (#5553): writing would lose that
+    // archive, so refuse loudly instead of reporting "no changes were needed".
+    declineNoOp(
+      raw,
+      'updated',
+      'archive_placeholder_lost',
+      'roadmap update-plan-progress skipped — an edit would have dropped an archived ROADMAP block. ROADMAP.md was left unchanged.',
+      computed,
+    );
   } else if (missingPhaseDetails) {
     // #4247: honest refusal — the reason names the real condition (the
     // analyzer's `missing_phase_details` vocabulary), never "already
