@@ -323,15 +323,16 @@ if [ "$AUTO_MODE" = "true" ]; then
     EXTERNAL_EVIDENCE_BLOCK=""
     LANE_EVIDENCE="${REVIEW_PATH%.md}-lane-evidence.md"
     # Same guard as SUFFIX_RE in src/lane-evidence.cts (the clear verb): change both together.
-    S=$(head -n 1 "$LANE_EVIDENCE" 2>/dev/null)
+    # The file is repo-resident: a symlink would be read through to its target, so only a regular file is read.
+    S=""; [ -f "$LANE_EVIDENCE" ] && [ ! -L "$LANE_EVIDENCE" ] && S=$(head -n 1 "$LANE_EVIDENCE" 2>/dev/null)
     case "$S" in *[!A-Za-z0-9]*|'') ;; ??????)
       D="${TMPDIR:-/tmp}/gsd-review-lanes-$S"
       if [ -d "$D" ] && [ ! -L "$D" ] && [ -n "$(find "$LANE_EVIDENCE" -mmin -360 2>/dev/null)" ]; then
         EXTERNAL_EVIDENCE_BLOCK="$(tail -n +2 "$LANE_EVIDENCE")"$'\n\n'
       fi;;
     esac
-    if [ -f "$LANE_EVIDENCE" ] && [ -z "$EXTERNAL_EVIDENCE_BLOCK" ]; then
-      echo "Warning: lane evidence $LANE_EVIDENCE rejected (older than 6h, line 1 not a 6-char alphanumeric suffix, lane dir missing or a symlink); re-reviewing without it." >&2
+    if { [ -f "$LANE_EVIDENCE" ] || [ -L "$LANE_EVIDENCE" ]; } && [ -z "$EXTERNAL_EVIDENCE_BLOCK" ]; then
+      echo "Warning: lane evidence $LANE_EVIDENCE rejected (older than 6h, a symlink, line 1 not a 6-char alphanumeric suffix, lane dir missing or a symlink); re-reviewing without it." >&2
     fi
     Agent(subagent_type="gsd-code-reviewer", model="{REVIEWER_MODEL}", prompt="
 ${EXTERNAL_EVIDENCE_BLOCK}<config>
