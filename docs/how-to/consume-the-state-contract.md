@@ -205,7 +205,7 @@ so an untracked copy never shows in `git status`. An exclude cannot hide a file
 that is already tracked, and GSD never changes your index: if you committed it
 before, untrack it once with
 `git rm --cached .planning/state.json` (or `.planning/workstreams/<name>/state.json`)
-and commit that removal; the file stays on disk.
+and commit that removal; the file stays on disk. With `planning.commit_docs` false (or `.planning/` already ignored) GSD does not touch `.git/info/exclude`.
 If you keep `.planning/` out of your repo entirely, see
 [Keep planning docs out of a shared repo](keep-planning-docs-private.md).
 

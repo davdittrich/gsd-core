@@ -493,6 +493,17 @@ describe('state.json never dirties the tree (#5505)', () => {
     assert.strictEqual(git(tmpDir, 'status', '--porcelain', '--', `${rel}/state.json`), '');
   });
 
+  test('commit --files on an untracked, ignored state.json skips it and still commits the rest', (t) => {
+    const { tmpDir, rel } = boundary(t);
+    fs.appendFileSync(path.join(tmpDir, rel, 'STATE.md'), '\nedited\n');
+    const c = runGsdTools(['commit', 'docs: mixed', '--files', `${rel}/state.json`, `${rel}/STATE.md`], tmpDir);
+    assert.ok(c.success, `commit must not abort on the ignored path: ${c.error}`);
+    const out = JSON.parse(c.output);
+    assert.strictEqual(out.committed, true);
+    assert.deepStrictEqual(out.skipped_files, [`${rel}/state.json`]);
+    assert.strictEqual(git(tmpDir, 'status', '--porcelain'), '');
+  });
+
   test('workstream state.json is ignored', (t) => {
     const { tmpDir, rel } = boundary(t, { wsName: 'ws1' });
     git(tmpDir, 'check-ignore', '-q', `${rel}/state.json`);

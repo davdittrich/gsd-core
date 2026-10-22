@@ -1338,6 +1338,16 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
     git(planning, 'check-ignore', '-q', 'state.json');
   });
 
+  test('commitDocsFalseLeavesTheEnclosingRepoAlone', (t) => {
+    const tmpDir = createTempGitProject();
+    t.after(() => cleanup(tmpDir));
+    fs.writeFileSync(path.join(planningDirOf(tmpDir), 'config.json'), JSON.stringify({ planning: { commit_docs: false } }));
+    const exclude = excludeOf(tmpDir);
+    const before = fs.readFileSync(exclude, 'utf8');
+    assert.strictEqual(publishStateContract(tmpDir, fixedDeps()).published, true);
+    assert.strictEqual(fs.readFileSync(exclude, 'utf8'), before);
+  });
+
   test('preTrackedCopyIsLeftTrackedAndStageable', (t) => {
     const tmpDir = createTempGitProject();
     t.after(() => cleanup(tmpDir));

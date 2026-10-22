@@ -429,7 +429,11 @@ export function publishStateContract(cwd: string, deps?: StateContractDeps): { p
     }
 
     try {
-      excludeStateJson(path.dirname(statePath), execGit);
+      // commit_docs false (explicit, or .planning already ignored) means the user keeps
+      // planning out of git: leave the enclosing repo's exclude alone.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { loadConfig } = require('./config-loader.cjs') as typeof import('./config-loader.cjs');
+      if (loadConfig(cwd).commit_docs !== false) excludeStateJson(path.dirname(statePath), execGit);
     } catch {
       // REQ-SC-04: ignoring is optional; never perturb the publish result.
     }
