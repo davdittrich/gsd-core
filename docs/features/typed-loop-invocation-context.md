@@ -45,7 +45,7 @@ Phase 5.
 resolution. Any spelling of the same directory matches — relative, absolute or
 `./`-prefixed — since sibling commands take absolute paths too; anything naming
 a *different* directory omits `context` with a warning quoting both, and
-`--phase-dir` on its own is refused. The emitted `phaseDir` is always the
+`--phase-dir` without `--phase` omits `context` with a warning. The emitted `phaseDir` is always the
 locator's, never the supplied string. This catches the mismatch a containment
 check cannot: `--phase 05 --phase-dir .planning/phases/07-other` names two
 different phases that are *both* inside the project.

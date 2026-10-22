@@ -29,9 +29,11 @@ the render-hooks invocation was scoped to — **authoritative over `STATE.curren
 artifact-order/mtime inference** for any dispatch below that needs a phase, since
 `STATE.current_phase` is project lifecycle status, not a claim about this invocation's scope,
 and the two diverge whenever one phase is being planned or verified while another still
-executes. Absent `context` means either `--phase` was omitted, or it did not resolve to a
-single directory (a warning is appended to `warnings` in that case) — dispatch exactly as if
-no phase were relevant.
+executes. Absent `context` means `--phase` was omitted, or it was dropped: it matched no
+directory or several, matched only an archived milestone's phase, resolved to a directory
+outside the project's `.planning/phases` tree, or disagreed with `--phase-dir`; `--phase-dir`
+without `--phase` is dropped too. Every case except an omitted `--phase` appends a warning to
+`warnings` — dispatch exactly as if no phase were relevant.
 
 ## Dispatch rules by `kind`
 
