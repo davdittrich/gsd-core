@@ -507,27 +507,11 @@ interface PhaseContext {
   phaseDir: string;
 }
 
-/**
- * #4030: why phase context was omitted — one key per warning path, so callers
- * and tests branch on a stable code instead of matching warning prose.
- */
-const PHASE_CONTEXT_REASON = Object.freeze({
-  ARCHIVED: 'archived',
-  ESCAPES: 'escapes',
-  MISMATCH: 'mismatch',
-  AMBIGUOUS: 'ambiguous',
-  UNRESOLVED: 'unresolved',
-  PHASE_DIR_WITHOUT_PHASE: 'phase-dir-without-phase',
-} as const);
-
-type PhaseContextReason = (typeof PHASE_CONTEXT_REASON)[keyof typeof PHASE_CONTEXT_REASON];
-
 interface ResolvedActiveHooks {
   point: string;
   activeHooks: ActiveHook[];
   warnings: string[];
   context?: PhaseContext;
-  contextReason?: PhaseContextReason;
 }
 
 /**
@@ -605,7 +589,6 @@ function resolveActiveHooksForPoint(
   const phaseArg = typeof options['phase'] === 'string' ? options['phase'] : undefined;
   const phaseDirArg = typeof options['phaseDir'] === 'string' ? options['phaseDir'] : undefined;
   let phaseContext: PhaseContext | undefined;
-  let contextReason: PhaseContextReason | undefined;
   const phaseWarnings: string[] = [];
   if (phaseArg !== undefined) {
     // guardedFindPhase is typed Record<string, unknown> | null; narrow once to
@@ -622,7 +605,6 @@ function resolveActiveHooksForPoint(
       // the same way). ADR-4030 scopes context to a direct child of the active
       // .planning/phases, so an archived hit degrades like an unresolved token
       // rather than pointing a hook at retired plans.
-      contextReason = PHASE_CONTEXT_REASON.ARCHIVED;
       phaseWarnings.push(
         `--phase ${JSON.stringify(phaseArg)} resolved only to an archived phase ` +
         `(${JSON.stringify(phaseResult.directory)}, milestone ${JSON.stringify(phaseResult.archived)}); ` +
@@ -656,13 +638,11 @@ function resolveActiveHooksForPoint(
         } catch { return false; }
       };
       if (escapes) {
-        contextReason = PHASE_CONTEXT_REASON.ESCAPES;
         phaseWarnings.push(
           `--phase ${JSON.stringify(phaseArg)} resolved to ${JSON.stringify(phaseResult.directory)}, ` +
           'which escapes the project\'s .planning/phases tree (symlink or unreadable path); context omitted.',
         );
       } else if (phaseDirArg !== undefined && !sameDir()) {
-        contextReason = PHASE_CONTEXT_REASON.MISMATCH;
         phaseWarnings.push(
           `--phase-dir ${JSON.stringify(phaseDirArg)} does not match the directory ` +
           `--phase ${JSON.stringify(phaseArg)} resolves to (${JSON.stringify(phaseResult.directory)}); context omitted.`,
@@ -674,19 +654,16 @@ function resolveActiveHooksForPoint(
       // No context even when --phase-dir names a candidate: the directory would
       // become an independent source of truth, and `init.*` does not
       // disambiguate here either (#2237).
-      contextReason = PHASE_CONTEXT_REASON.AMBIGUOUS;
       phaseWarnings.push(
         `--phase ${JSON.stringify(phaseArg)} is ambiguous: ${phaseResult.ambiguous_matches.length} ` +
         `directories match (${phaseResult.ambiguous_matches.map((m) => JSON.stringify(sanitizeForDisplay(m).slice(0, 80))).join(', ')}); context omitted.`,
       );
     } else {
-      contextReason = PHASE_CONTEXT_REASON.UNRESOLVED;
       phaseWarnings.push(`--phase ${JSON.stringify(phaseArg)} did not match a phase directory; context omitted.`);
     }
   } else if (phaseDirArg !== undefined) {
     // Nothing to check it against; honouring it would make it the unconfined
     // caller path this design avoids (#4354).
-    contextReason = PHASE_CONTEXT_REASON.PHASE_DIR_WITHOUT_PHASE;
     phaseWarnings.push('--phase-dir requires --phase; it is verified against the token\'s resolution, never used alone. Context omitted.');
   }
 
@@ -752,7 +729,7 @@ function resolveActiveHooksForPoint(
   // (in addition to the stderr emission above, which is the channel host workflows actually see).
   const combinedWarnings = [...(state.warnings || []), ...loadFailWarnings, ...phaseWarnings];
 
-  return { point: resolved.point, activeHooks: resolved.activeHooks, warnings: combinedWarnings, context: phaseContext, contextReason };
+  return { point: resolved.point, activeHooks: resolved.activeHooks, warnings: combinedWarnings, context: phaseContext };
 }
 
 // ─── #5105 R2: post-fingerprint hook gating ────────────────────────────────
@@ -915,7 +892,6 @@ export = {
   renderLoopHooks,
   cmdLoopRenderHooks,
   resolveActiveHooksForPoint,
-  PHASE_CONTEXT_REASON,
   partitionHooksByFingerprint,
   // Exported for tests
   _getNestedConfigValue,
