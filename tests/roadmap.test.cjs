@@ -2875,6 +2875,12 @@ describe('#5483: update-plan-progress ticks only the active milestone row', () =
     assert.ok(written.includes('- [x] 01-01-PLAN.md'), `row not ticked:\n${written}`);
   });
 
+  test('unscoped fallback ticks only the first matching row, not a later same-named row', () => {
+    const written = setupPhase(1, `# ROADMAP\n\n## Milestone v1.0\n\n**Phase 1: One**\n\n- [ ] 01-PLAN.md\n\n**Phase 2: Two**\n\n- [ ] 01-PLAN.md\n${TABLE}`);
+    assert.strictEqual(written.split('- [x] 01-PLAN.md').length - 1, 1);
+    assert.strictEqual(written.split('- [ ] 01-PLAN.md').length - 1, 1, `second row must stay unticked:\n${written}`);
+  });
+
   test('flat checklist with unindented plan rows ticks the rows under the phase bullet', () => {
     const written = setupPhase(1, `# ROADMAP\n\n## Milestone v1.0\n\n- [ ] **Phase 1: One**\n- [ ] 01-01-PLAN.md\n${TABLE}`, ['01-01-PLAN.md'], ['01-01-SUMMARY.md']);
     assert.ok(written.includes('- [x] 01-01-PLAN.md'), `row not ticked:\n${written}`);
