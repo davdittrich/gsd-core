@@ -1,7 +1,7 @@
 'use strict';
 // hooks/lib/agent-model-check.js — #5328: does the model a model-authored
 // Agent()/Task() call passes match the one GSD resolved for that agent?
-// Baseline is resolveModelInternal (what `init` records and the workflow
+// Baseline is resolveModelInternal (what `init` reports and the workflow
 // tells the model to pass). A fresh, session-matching `resolve-execution
 // --attempt N` record (gsd-core/bin/lib/model-escalation.cjs) legitimises
 // the escalated model. Never fails closed: any inability to verify is an allow.
@@ -29,7 +29,9 @@ function readGuardMode(root) {
   return { mode, skip: mode === false || !native };
 }
 
-// The model GSD resolved for `type`, or null when none applies (inherit).
+// The model GSD resolved for `type`, or null when none applies (inherit). Loads the config a second
+// time (readGuardMode did too): resolveModelInternal takes loadOptions, not a loaded config, and a
+// new param for this one caller is not worth the saved read.
 function resolveExpected(root, type) {
   const expected = require('../../gsd-core/bin/lib/model-resolver.cjs').resolveModelInternal(root, type, { persist: false });
   return !expected || expected === 'inherit' ? null : expected;

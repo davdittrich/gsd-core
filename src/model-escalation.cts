@@ -42,52 +42,54 @@ export function modelFamily(model: unknown): string {
   return /(?:^|[^a-z0-9])(opus|sonnet|haiku|fable)(?:$|[^a-z])/.exec(s)?.[1] ?? s;
 }
 
-/** Best-effort: a write failure only costs a guard warning. */
+/**
+ * tmp + rename: a reader never sees a half-written file, and rename replaces a symlink planted at
+ * `file` instead of following it. 'wx': nor is one at `tmp` followed. Not platformWriteSync: its
+ * tmp-failure fallback writes `file` directly, which follows exactly that planted link.
+ */
+function writeAtomic(file: string, content: string): void {
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.rmSync(tmp, { force: true }); // left by a crashed writer whose pid was reused
+  try {
+    fs.writeFileSync(tmp, content, { flag: 'wx' });
+    retryRenameSync(tmp, file); // Windows: a reader can hold `file` open briefly
+  } catch (e) {
+    fs.rmSync(tmp, { force: true });
+    throw e;
+  }
+}
+
+/**
+ * Throws when the record cannot be written. Under hooks.agent_model_guard:'deny' a missing record
+ * blocks the legitimate escalated model, so the caller (recordModelEscalation) must report it.
+ * The .gitignore upkeep stays best-effort: a rule that fails to land never loses the record.
+ */
 export function writeEscalation(
   root: string, agentType: string, model: string, session?: string, clock: Pick<Clock, 'now'> = realClock,
 ): void {
   if (!GUARDED_AGENT_TYPES.has(agentType)) return; // also keeps agentType, a file name, from traversing
+  const dir = path.join(root, '.gsd');
+  fs.mkdirSync(dir, { recursive: true });
+  // Catches a planted .gsd symlink; racing a swap after this needs repo write access already.
+  if (fs.lstatSync(dir).isSymbolicLink()) throw new Error(`${dir} is a symlink`);
+  const ignore = path.join(dir, '.gitignore');
   try {
-    const dir = path.join(root, '.gsd');
-    const file = escalationFile(root, agentType);
-    fs.mkdirSync(dir, { recursive: true });
-    // Catches a planted .gsd symlink; racing a swap after this needs repo write access already.
-    if (fs.lstatSync(dir).isSymbolicLink()) return;
-    const ignore = path.join(dir, '.gitignore');
+    fs.writeFileSync(ignore, '*\n', { flag: 'wx' });
+  } catch {
+    // Pre-existing (e.g. the dispatch sentinel's rules only): a bare `*` already covers the record,
+    // else add our own rule. Replace by rename so a link swapped in after the lstat is not written through.
+    // Own try: an oversized or unreadable .gitignore must not abort before the record is written.
     try {
-      fs.writeFileSync(ignore, '*\n', { flag: 'wx' });
-    } catch {
-      // Pre-existing (e.g. the dispatch sentinel's rules only): a bare `*` already covers the record,
-      // else add our own rule. Replace by rename so a link swapped in after the lstat is not written through.
-      // Own try: an oversized or unreadable .gitignore must not abort before the record is written.
-      try {
       if (!fs.lstatSync(ignore).isSymbolicLink()) {
         const cur = readSmallRegularFile(ignore, MAX_READ_BYTES) ?? '';
         if (!/^\*\r?$/m.test(cur) && !/^\/model-escalation-\*\r?$/m.test(cur)) {
-          const next = `${ignore}.${process.pid}.tmp`;
-          fs.rmSync(next, { force: true }); // left by a crashed writer whose pid was reused
-          try {
-            fs.writeFileSync(next, `${cur}${cur === '' || cur.endsWith('\n') ? '' : '\n'}/model-escalation-*\n`, { flag: 'wx' });
-            retryRenameSync(next, ignore);
-          } catch {
-            fs.rmSync(next, { force: true });
-          }
+          writeAtomic(ignore, `${cur}${cur === '' || cur.endsWith('\n') ? '' : '\n'}/model-escalation-*\n`);
         }
       }
-      } catch { /* leave the rules as they are */ }
-    }
-    const rec: EscalationRecord = { model, written_at: clock.now(), ...(session ? { session } : {}) };
-    // tmp + rename on every platform: the hook never reads a half-written record, and rename
-    // replaces a symlink planted at `file` instead of following it. 'wx': nor is one at `tmp` followed.
-    const tmp = `${file}.${process.pid}.tmp`;
-    fs.rmSync(tmp, { force: true }); // left by a crashed writer whose pid was reused
-    try {
-      fs.writeFileSync(tmp, JSON.stringify(rec), { flag: 'wx' });
-      retryRenameSync(tmp, file); // Windows: a reader can hold `file` open briefly
-    } catch {
-      fs.rmSync(tmp, { force: true });
-    }
-  } catch { /* best-effort */ }
+    } catch { /* leave the rules as they are */ }
+  }
+  const rec: EscalationRecord = { model, written_at: clock.now(), ...(session ? { session } : {}) };
+  writeAtomic(escalationFile(root, agentType), JSON.stringify(rec));
 }
 
 /** Parsed record, or null when absent, a symlink, non-regular, oversized or unparseable. */

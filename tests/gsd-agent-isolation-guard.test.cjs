@@ -50,10 +50,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const fc = require('./helpers/fast-check-setup.cjs');
-const { runHook: runHookSeam, runGit } = require('./helpers/process-seam.cjs');
+const { runHook: runHookSeam, runGit, runNode } = require('./helpers/process-seam.cjs');
 const { toLegacyResult, gitOrThrow } = require('./helpers/git-fixture.cjs');
 const { PROBE_TIMEOUT_MS, GIT_FIXTURE_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
-const { createTempDir, createTempProject, runGsdTools, cleanup } = require('./helpers.cjs');
+const { createTempDir, createTempProject, runGsdTools, cleanup, TOOLS_PATH } = require('./helpers.cjs');
 const { createFixture } = require('./fixtures/index.cjs');
 const { SENTINEL_RELATIVE_PATH, SENTINEL_STALE_MS, readSentinel } = require('../hooks/lib/isolation-sentinel.js');
 const { REASON_CODE, REASON_INTERPOLATION_MAX_LEN, sanitizeForReason, describeSentinelDiscard } = require('../hooks/lib/isolation-deny-reason.js');
@@ -2354,6 +2354,25 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
     assert.equal(fs.existsSync(tmp), false);
   });
 
+  test('writeEscalation throws when the record cannot be written, leaving no tmp file', { skip: NO_SYMLINKS }, (t) => {
+    setup(t);
+    const esc = require('../gsd-core/bin/lib/model-escalation.cjs');
+    const file = escalationFile(project, 'gsd-executor');
+    fs.mkdirSync(file, { recursive: true }); // rename of a file onto a directory fails
+    assert.throws(() => esc.writeEscalation(project, 'gsd-executor', 'opus'));
+    assert.equal(fs.existsSync(`${file}.${process.pid}.tmp`), false);
+  });
+
+  test('resolve-execution reports a skipped record (symlinked .gsd) on stderr', { skip: NO_SYMLINKS }, (t) => {
+    setup(t);
+    const elsewhere = createTempDir('gsd-aig-elsewhere-');
+    t.after(() => cleanup(elsewhere));
+    fs.symlinkSync(elsewhere, path.join(project, '.gsd'));
+    const r = runNode([TOOLS_PATH, 'resolve-execution', 'gsd-executor', '--attempt', '1'], { cwd: project, timeoutMs: PROBE_TIMEOUT_MS });
+    assert.match(r.stderr, /model-escalation record not written/);
+    assert.deepEqual(fs.readdirSync(elsewhere), []);
+  });
+
   test('writeEscalation still updates .gsd/.gitignore past a stale .gitignore tmp file', (t) => {
     setup(t);
     const esc = require('../gsd-core/bin/lib/model-escalation.cjs');
@@ -2444,7 +2463,7 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
     const elsewhere = createTempDir('gsd-aig-elsewhere-');
     t.after(() => cleanup(elsewhere));
     fs.symlinkSync(elsewhere, path.join(project, '.gsd'));
-    require('../gsd-core/bin/lib/model-escalation.cjs').writeEscalation(project, 'gsd-executor', 'opus');
+    assert.throws(() => require('../gsd-core/bin/lib/model-escalation.cjs').writeEscalation(project, 'gsd-executor', 'opus'), /symlink/);
     assert.deepEqual(fs.readdirSync(elsewhere), []);
   });
 
