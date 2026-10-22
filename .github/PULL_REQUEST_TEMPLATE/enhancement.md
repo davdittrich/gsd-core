@@ -1,8 +1,8 @@
 ## Enhancement PR
 
 > **Using the wrong template?**
-> — Bug fix: use [fix.md](?template=fix.md)
-> — New feature: use [feature.md](?template=feature.md)
+> — Bug fix: use [fix.md](https://github.com/open-gsd/gsd-core/blob/next/.github/PULL_REQUEST_TEMPLATE/fix.md)
+> — New feature: use [feature.md](https://github.com/open-gsd/gsd-core/blob/next/.github/PULL_REQUEST_TEMPLATE/feature.md)
 
 ---
 

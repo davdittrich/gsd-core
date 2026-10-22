@@ -1,9 +1,9 @@
 ## Registry Entry PR
 
 > **Using the wrong template?**
-> — Bug fix: use [fix.md](?template=fix.md)
-> — New feature (not a registry listing): use [feature.md](?template=feature.md)
-> — Enhancement to existing behavior: use [enhancement.md](?template=enhancement.md)
+> — Bug fix: use [fix.md](https://github.com/open-gsd/gsd-core/blob/next/.github/PULL_REQUEST_TEMPLATE/fix.md)
+> — New feature (not a registry listing): use [feature.md](https://github.com/open-gsd/gsd-core/blob/next/.github/PULL_REQUEST_TEMPLATE/feature.md)
+> — Enhancement to existing behavior: use [enhancement.md](https://github.com/open-gsd/gsd-core/blob/next/.github/PULL_REQUEST_TEMPLATE/enhancement.md)
 
 Full schema and process: [docs/registries/README.md](https://github.com/open-gsd/gsd-core/blob/next/docs/registries/README.md).
 
