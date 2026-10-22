@@ -473,10 +473,10 @@ describe('#5019 — --auto re-review keeps the external reviewer lane evidence',
       assert.deepStrictEqual(warns(sb, 'sym123'), degraded, 'lane dir is a symlink');
       // The evidence file itself must be a regular file: a symlink would be read through to its target.
       const target = path.join(sb.dir, 'target'); fs.writeFileSync(target, 'abc123\nsecret\n');
-      fs.rmSync(sb.file, { force: true }); fs.symlinkSync(target, sb.file);
+      cleanup(sb.file); fs.symlinkSync(target, sb.file);
       const viaLink = bash(`export TMPDIR="${sb.tmp}"; REVIEW_PATH="${sb.review}"\n${read}\nprintf '%s' "$EXTERNAL_EVIDENCE_BLOCK"`);
       assert.deepStrictEqual({ block: viaLink.stdout, warned: viaLink.stderr !== '' }, degraded, 'evidence file is a symlink');
-      fs.rmSync(sb.file, { force: true });
+      cleanup(sb.file);
       assert.strictEqual(warns(sb, 'abc123').warned, false, 'fresh valid evidence: no warning');
       fs.renameSync(sb.file, path.join(sb.dir, 'moved'));
       assert.strictEqual(bash(`export TMPDIR="${sb.tmp}"; REVIEW_PATH="${sb.review}"\n${read}`).stderr, '', 'no file: no warning');

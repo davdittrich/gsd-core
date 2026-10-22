@@ -90,6 +90,8 @@ export default tseslint.config(
       'node_modules/**',
       '**/dist/**',
       '.worktrees/**',
+      // #5019: deliberately-buggy sample code for the reviewer-hop harness; it must stay unlinted.
+      'docs/issueevidence/5019-reviewer-hop-harness/**',
       '.claude/**',
       'coverage/**',
       // #4141: Stryker's sandbox (tempDirName in stryker.config.mjs, also gitignored
