@@ -349,6 +349,7 @@ describe('#3190 — code-review-fix --auto REVIEW.md commit + FIX_REPORT_PATH en
     assert.strictEqual(phaseOff.count, '1', 'a skipped commit commits nothing');
     assert.ok(phaseOff.review && phaseOff.fix, 'backups are retained on disk');
     assert.match(phaseOff.stdout, /Warning: iteration backups not committed \(skipped\)/);
+    assert.doesNotMatch(phaseOff.stdout, /untracked/);
 
     // Backups already committed and unchanged: cmdCommit exits 0 printing "nothing" — success, no warning.
     const nothing = drive('true', 'issues_found', 'nothing');
@@ -362,6 +363,5 @@ describe('#3190 — code-review-fix --auto REVIEW.md commit + FIX_REPORT_PATH en
     const failed = drive('true', 'issues_found', 'fail');
     assert.match(failed.stdout, /Warning: iteration backups not committed \(failed\)/);
     assert.doesNotMatch(failed.stdout, /untracked/);
-    assert.doesNotMatch(phaseOff.stdout, /untracked/);
   });
 });

@@ -519,13 +519,16 @@ if [ "$AUTO_MODE" = "true" ]; then
       BACKUP_FILES=("${REVIEW_PATH%.md}".iter*.md "${FIX_REPORT_PATH%.md}".iter*.md)
       shopt -u nullglob
       if [ "${#BACKUP_FILES[@]}" -gt 0 ]; then
-        # --raw prints the hash (or "committed"/"nothing"/"skipped"); commit_docs=false per-phase exits 0 with "skipped", so judge by output, not exit code.
+        # --raw prints the hash (or "committed"/"nothing"/"skipped").
+        # Per-phase commit_docs=false exits 0 with "skipped": judge by output, not exit code.
         BACKUP_COMMIT=$(gsd_run query commit \
           "docs(${PADDED_PHASE}): retain code review iteration backups" \
           --files "${BACKUP_FILES[@]}" --raw) || BACKUP_COMMIT=failed
         case "$BACKUP_COMMIT" in
           nothing|committed) ;; # unchanged, or committed without a hash
-          ''|*[!0-9a-f]*) echo "Warning: iteration backups not committed (${BACKUP_COMMIT:-no output}): ${BACKUP_FILES[*]}" ;;
+          ''|*[!0-9a-f]*)
+            echo "Warning: iteration backups not committed" \
+              "(${BACKUP_COMMIT:-no output}): ${BACKUP_FILES[*]}" ;;
         esac
       fi
     fi
