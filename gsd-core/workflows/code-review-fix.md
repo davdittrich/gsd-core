@@ -424,7 +424,7 @@ if [ -f "${FIX_REPORT_PATH}" ]; then
   else
     echo "Warning: REVIEW-FIX.md has invalid frontmatter (no status field). Not committing REVIEW-FIX.md."
     echo "Agent may have produced malformed output. Review manually: ${FIX_REPORT_PATH}"
-    # Only when git sees it: an ignored .planning/ (commit_docs off) leaves the tree clean.
+    # Only when git sees the report.
     if [ -n "$(git status --porcelain -- "${FIX_REPORT_PATH}" 2>/dev/null)" ]; then
       echo "The working tree stays dirty: /gsd:ship will refuse until ${FIX_REPORT_PATH} is fixed and committed, or deleted."
     fi
@@ -439,7 +439,7 @@ if [ "$COMMIT_DOCS" = "true" ]; then
   # #3190: --auto's re-review loop overwrote REVIEW.md each iteration
   # (auto_iteration_loop), but the only prior REVIEW.md commit is the
   # initial code-review pass (iteration-1 content). Stage the converged
-  # REVIEW.md alongside REVIEW-FIX.md in this single docs commit so the two
+  # REVIEW.md alongside REVIEW-FIX.md in this single docs commit so, on the valid-report path, the two
   # committed artifacts agree. Non-auto single-pass runs never rewrite
   # REVIEW.md, so it is left untouched (guarded on AUTO_MODE).
   # #5527: stage REVIEW.md even when the fix report is invalid/missing, else the

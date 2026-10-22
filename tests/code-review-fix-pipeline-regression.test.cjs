@@ -357,14 +357,16 @@ describe('#3190 — code-review-fix --auto REVIEW.md commit + FIX_REPORT_PATH en
       ].join('\n');
       const res = runHook('-c', [script], { interpreter: 'bash', timeoutMs: SEAM_DEFAULT_TIMEOUT_MS });
       assert.strictEqual(res.exitCode, 0, 'step must not abort: ' + res.stderr);
-      return { status: git(dir, 'status', '--porcelain') };
+      return { status: git(dir, 'status', '--porcelain'), stdout: res.stdout };
     };
 
     const invalid = drive('---\nfoo: bar\n---\n');
+    assert.match(invalid.stdout, /stays dirty/, 'dirty-tree warning shown when git sees the malformed report');
     assert.strictEqual(invalid.status.trim(), '?? ' + FIX, 'REVIEW.md committed; only the malformed report remains');
 
     const ignoredRun = drive('---\nfoo: bar\n---\n', { ignored: true });
     assert.strictEqual(ignoredRun.status, '', 'gitignored .planning/: tree stays clean');
+    assert.doesNotMatch(ignoredRun.stdout, /stays dirty/, 'no dirty-tree warning when git ignores the report');
 
     const valid = drive(VALID_FIX_REPORT);
     assert.strictEqual(valid.status, '', 'valid report: both committed, tree clean');
