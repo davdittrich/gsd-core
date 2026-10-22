@@ -1475,12 +1475,8 @@ function assignedLaterInFence(lines, idx, name) {
 // that bind PHASE_NUMBER in their own fence still rely on the host carrying
 // $INIT/$PHASE_STATE from an earlier one. Keyed `file :: point` -> exact line.
 const WS_BIND = `GSD_WS=$(echo " $GSD_ARGS" | sed -nE 's/.* --ws +([A-Za-z0-9][A-Za-z0-9._-]*).*/--ws \\1/p' | head -n 1)`;
-const EXEC_INIT_BIND = 'INIT=$(gsd_run query init.execute-phase ${GSD_WS:+--ws=${GSD_WS##* }} "${PHASE_ARG}" $WAVE_PARAM)';
 const PHASE_ARG_OP = 'PHASE_ARG=$(echo "$GSD_ARGS" | sed -E \'s/--ws[[:space:]]+[A-Za-z0-9._-]+//g\' | xargs)';
 const SRC_CROSS_FENCE = {
-  'gsd-core/workflows/execute-phase.md :: execute:post': [WS_BIND, EXEC_INIT_BIND],
-  'gsd-core/workflows/execute-phase.md :: execute:wave:pre': [WS_BIND, EXEC_INIT_BIND],
-  'gsd-core/workflows/execute-phase.md :: execute:wave:post': [WS_BIND, EXEC_INIT_BIND],
   'gsd-core/workflows/secure-phase.md :: verify:post': [WS_BIND, PHASE_ARG_OP],
   'gsd-core/workflows/validate-phase.md :: verify:post': [WS_BIND, PHASE_ARG_OP],
   'gsd-core/workflows/code-review-fix.md :: execute:post': [WS_BIND, 'PHASE_ARG="${1}"'],
