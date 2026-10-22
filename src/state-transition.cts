@@ -2591,8 +2591,11 @@ function plannedPhaseCore(
   // `N of M` from either spelling (#3784 hybrid for `Current Plan:`). A replan
   // keeps the recorded leading N and moves only M; anything else starts at 0.
   // The recorded N carries over only for the SAME phase (`Phase:` or `Current Phase:` leading token).
-  // An absent phase line is not the same phase: the executed counter resets to 0.
-  const samePhase = phaseIdMod.phaseKeyFromProse((stateExtractField(posBefore, 'Phase') ?? stateExtractField(posBefore, 'Current Phase'))) === phaseIdMod.phaseKeyFromToken(intent.phaseNumber);
+  // With no body phase line the recorded frontmatter current_phase decides.
+  const bodyPhase = stateExtractField(posBefore, 'Phase') ?? stateExtractField(posBefore, 'Current Phase');
+  const fmPhase = existingFm['current_phase'];
+  const recordedPhase = bodyPhase ?? (typeof fmPhase === 'string' || typeof fmPhase === 'number' ? String(fmPhase) : null);
+  const samePhase = phaseIdMod.phaseKeyFromProse(recordedPhase) === phaseIdMod.phaseKeyFromToken(intent.phaseNumber);
   const executedAbove: { n?: number } = {};
   const planValue = (name: string): string | undefined => {
     if (intent.planCount == null) return undefined;

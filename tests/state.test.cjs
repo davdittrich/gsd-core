@@ -5716,6 +5716,20 @@ describe('state planned-phase command', () => {
     }
   });
 
+  test('#5320: replan with no Phase: line keeps the plan number when frontmatter current_phase matches', () => {
+    const statePath = path.join(tmpDir, '.planning', 'STATE.md');
+    for (const [fmPhase, want] of [['19', '2 of 6'], ['18', '0 of 6']]) {
+      fs.writeFileSync(statePath, [
+        '---', 'gsd_state_version: 1.0', 'status: planning', `current_phase: ${fmPhase}`, 'progress:', '  total_phases: 1', '  completed_phases: 0', '  total_plans: 0', '  completed_plans: 0', '  percent: 0', '---', '',
+        '# Project State', '', '## Current Position', '', 'Plan: 2 of 4 in current phase', 'Status: Ready', '',
+        '## Session Continuity', '', '**Stopped at:** None', '',
+      ].join('\n'));
+      const r = runGsdTools(['state', 'planned-phase', '--phase', '19', '--name', 'Tbd', '--plans', '6'], tmpDir);
+      assert.ok(r.success, r.error);
+      assert.match(fs.readFileSync(statePath, 'utf8'), new RegExp(`^Plan: ${want} in current phase$`, 'm'));
+    }
+  });
+
   test('#5320: different-phase replan resets a bare-number plan line beside Total Plans in Phase', () => {
     writeTbdPlanFixture(['Phase: 18', 'Plan: 2', 'Total Plans in Phase: 5', 'Status: Ready']);
     const r = runGsdTools(['state', 'planned-phase', '--phase', '19', '--name', 'Tbd', '--plans', '3'], tmpDir);
