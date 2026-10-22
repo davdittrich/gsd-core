@@ -15,15 +15,17 @@ const LINKS = [
   /\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g,
   /href=["']([^"']+)["']/gi,
   /^[ \t]*\[[^\]]+\]:[ \t]*<?(\S+?)>?(?:[ \t]+["(].*)?$/gm,
+  // angle-enclosed destinations may contain spaces
+  /\]\(\s*<([^>\n]*)>(?:\s+"[^"]*")?\s*\)/g,
+  /^[ \t]*\[[^\]]+\]:[ \t]*<([^>\n]*)>(?:[ \t]+["(].*)?$/gm,
 ];
 const REPO = 'https://github.com/open-gsd/gsd-core/';
 const DOCS_ANCHOR = 'CONTRIBUTING.md#documentation-updates--update-the-relevant-docs';
 const ANCHOR = /CONTRIBUTING\.md#(.+)$/;
 const slug = (h) => h.toLowerCase().replace(/[^\p{L}\p{M}\p{N}\p{Pc}\s-]/gu, '').replace(/\s/g, '-');
-const hrefsOf = (f) => {
-  const text = fs.readFileSync(path.join(GH, f), 'utf8');
-  return LINKS.flatMap((re) => [...text.matchAll(re)].map((m) => m[1]));
-};
+const hrefsIn = (text) => LINKS.flatMap((re) => [...text.matchAll(re)].map((m) => m[1]));
+const hrefsOf = (f) => hrefsIn(fs.readFileSync(path.join(GH, f), 'utf8'));
+const isBad = (h) => !h.startsWith('?template=') && !(h.startsWith(`${REPO}blob/next/`) || h === `${REPO}discussions`);
 
 // Not reusing markdown-sectionizer tokenizeHeadings (ATX only, no setext) or gen-adr-index extractLinks
 // (inline links only, no href=/reference defs): both would drop cases this guard must cover.
@@ -84,12 +86,29 @@ describe('heading anchors (#5427)', () => {
   });
 });
 
+describe('angle-enclosed destinations (#5427)', () => {
+  const ABS = `${REPO}blob/next/docs/my%20guide.md`;
+  test('inline: relative with spaces is extracted and rejected', () => {
+    const hs = hrefsIn('[guide](<docs/my guide.md>)');
+    assert.deepEqual(hs, ['docs/my guide.md']);
+    assert.deepEqual(hs.filter(isBad), hs);
+  });
+  test('reference definition: relative with spaces is extracted and rejected', () => {
+    const hs = hrefsIn('[guide]: <docs/my guide.md>');
+    assert.deepEqual(hs, ['docs/my guide.md']);
+    assert.deepEqual(hs.filter(isBad), hs);
+  });
+  test('absolute encoded form is accepted in both', () => {
+    for (const t of [`[guide](<${ABS}>)`, `[guide]: <${ABS}>`]) assert.deepEqual(hrefsIn(t).filter(isBad), []);
+  });
+});
+
 describe('PR template links (#5427)', () => {
   const headings = headingSet(fs.readFileSync(path.join(ROOT, 'CONTRIBUTING.md'), 'utf8').split(/\r?\n/));
   const files = ['pull_request_template.md', ...fs.readdirSync(DIR).filter((n) => n.endsWith('.md')).map((n) => `PULL_REQUEST_TEMPLATE/${n}`)];
   for (const f of files) {
     test(`${f}: only ?template= links are relative`, () => {
-      const bad = hrefsOf(f).filter((h) => !h.startsWith('?template=') && !(h.startsWith(`${REPO}blob/next/`) || h === `${REPO}discussions`));
+      const bad = hrefsOf(f).filter(isBad);
       assert.deepEqual(bad, []);
     });
     test(`${f}: blob/next links point at existing repo paths`, () => {
