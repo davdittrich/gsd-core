@@ -30,7 +30,7 @@ CURRENT_BRANCH=$(git branch --show-current)
 TARGET=${1:-$(gsd_run query git.base-branch)}
 ```
 
-Check preconditions:
+Check preconditions. The bash blocks of this step and of the later steps share variables (`CURRENT_BRANCH`, `TARGET`, `BASE`, `PR_BRANCH`, `*_REF`, `refkey`, `shq`, `pr_merged`); run them all in one shell session, in order:
 - Must be on a feature branch (not main/master)
 - Must have commits ahead of target
 - Working tree must be clean
@@ -60,11 +60,12 @@ shq() { case "$1" in ''|*[!A-Za-z0-9._/@%+=:,-]*) printf "'%s'" "$(printf %s "$1
 # content for every path TIP changed since it forked from $TARGET, or (once $TARGET has since
 # edited those paths) GitHub reports a PR for $PR_BRANCH merged into the target whose head was TIP.
 pr_merged() {
-  local _sha _fork _base _r _t _g
+  local _sha _fork _base _r _t _g _b=
+  command -v timeout >/dev/null 2>&1 && _b="timeout 10" # bounds the local git calls too; without it they run unbounded
   git merge-base --is-ancestor "$1" "$TARGET" 2>/dev/null && return 0
   _sha=$(git rev-parse -q --verify "$1") || return 1
-  if _fork=$(git merge-base "$_sha" "$TARGET" 2>/dev/null) && [ -n "$(git diff --name-only --no-renames "$_fork" "$_sha")" ] &&
-    git diff --name-only --no-renames -z "$_fork" "$_sha" | xargs -0 git --literal-pathspecs diff --quiet "$_sha" "$TARGET" --; then
+  if _fork=$($_b git merge-base "$_sha" "$TARGET" 2>/dev/null) && [ -n "$($_b git diff --name-only --no-renames "$_fork" "$_sha")" ] &&
+    $_b git diff --name-only --no-renames -z "$_fork" "$_sha" | xargs -0 $_b git --literal-pathspecs diff --quiet "$_sha" "$TARGET" --; then
     return 0
   fi
   # Unprovable offline stays "not merged" (fail-safe): gh missing, unauthenticated, offline,
@@ -120,6 +121,19 @@ DIRTY=$(git status --porcelain --untracked-files=no)
 if [ -n "$DIRTY" ]; then
   echo "Working tree has uncommitted changes — commit or stash them first:" >&2
   echo "$DIRTY" >&2
+  exit 1
+fi
+
+# A leftover -pr branch is reset only when already merged. Refuse here, before handle_sub_repos
+# pushes branches and opens PRs, so a refused run has no outward effects.
+if [ -n "$PR_BRANCH_TIP" ] && [ -z "$PR_BRANCH_MERGED" ]; then
+  echo "$PR_BRANCH exists and is not merged into $TARGET. Choose one, then re-run:" >&2
+  if git rev-parse -q --verify "$PENDING_REF" >/dev/null; then
+    echo "  merged by squash/rebase: git update-ref $(shq "$MARKER_REF") \$(git rev-parse $(shq "$PENDING_REF")) && git branch -D $(shq "$PR_BRANCH") && git update-ref -d $(shq "$PENDING_REF") && git update-ref -d $(shq "$PR_TIP_REF")" >&2
+    echo "  discard: git branch -D $(shq "$PR_BRANCH") && git update-ref -d $(shq "$PENDING_REF") && git update-ref -d $(shq "$PR_TIP_REF")" >&2
+  else
+    echo "  discard: git branch -D $(shq "$PR_BRANCH")" >&2
+  fi
   exit 1
 fi
 ```
@@ -416,20 +430,9 @@ Mixed planning commits: {N} ({included — structural + transient/other, plannin
 
 <step name="create_pr_branch">
 ```bash
-# Create PR branch from target. A leftover branch is reset only when already merged.
+# Create PR branch from target. A leftover branch here is merged (an unmerged one was refused in the preconditions).
 if [ -n "$PR_BRANCH_TIP" ]; then
-  if [ -n "$PR_BRANCH_MERGED" ]; then
-    git checkout -q -B "$PR_BRANCH" "$TARGET" || { echo "could not create $PR_BRANCH from $TARGET" >&2; exit 1; }
-  else
-    echo "$PR_BRANCH exists and is not merged into $TARGET. Choose one, then re-run:" >&2
-    if git rev-parse -q --verify "$PENDING_REF" >/dev/null; then
-      echo "  merged by squash/rebase: git update-ref $(shq "$MARKER_REF") \$(git rev-parse $(shq "$PENDING_REF")) && git branch -D $(shq "$PR_BRANCH") && git update-ref -d $(shq "$PENDING_REF") && git update-ref -d $(shq "$PR_TIP_REF")" >&2
-      echo "  discard: git branch -D $(shq "$PR_BRANCH") && git update-ref -d $(shq "$PENDING_REF") && git update-ref -d $(shq "$PR_TIP_REF")" >&2
-    else
-      echo "  discard: git branch -D $(shq "$PR_BRANCH")" >&2
-    fi
-    exit 1
-  fi
+  git checkout -q -B "$PR_BRANCH" "$TARGET" || { echo "could not create $PR_BRANCH from $TARGET" >&2; exit 1; }
 else
   git checkout -b "$PR_BRANCH" "$TARGET" || { echo "could not create $PR_BRANCH from $TARGET" >&2; exit 1; }
 fi

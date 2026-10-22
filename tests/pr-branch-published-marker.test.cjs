@@ -19,6 +19,7 @@ const { cleanup, createTempDir } = require('./helpers.cjs');
 const { runHook } = require('./helpers/process-seam.cjs');
 const { gitOrThrow, GIT_FIXTURE_TIMEOUT_MS } = require('./helpers/git-fixture.cjs');
 const { createFixture } = require('./fixtures/index.cjs');
+const fc = require('./helpers/fast-check-setup.cjs');
 
 const {
   WORKFLOW_PATH,
@@ -73,7 +74,7 @@ function commitRound(dir, n, file = 'code.txt') {
 }
 
 // Runs the shipped blocks in workflow order under pr_strict.
-function publish(dir, target = 'main', { branch = 'feature', mode = 'true', gh = 'return 1', prelude = '' } = {}) {
+function publish(dir, target = 'main', { branch = 'feature', mode = 'true', gh = 'return 1', prelude = '', afterPre = '' } = {}) {
   const text = fs.readFileSync(WORKFLOW_PATH, 'utf-8');
   const b = (marker) => extractBashBlockContaining(text, marker);
   const script = [
@@ -82,6 +83,7 @@ function publish(dir, target = 'main', { branch = 'feature', mode = 'true', gh =
     `gsd_run() { echo ${mode}; }`,
     prelude || `gh() { ${gh}; }`, // hermetic: no network lookup unless a test supplies one
     b('PR_BRANCH="${CURRENT_BRANCH}-pr"'),
+    afterPre, // stands in for the outward steps (handle_sub_repos) that run between the preconditions and the build
     b('TRANSIENT_DIRS="phases'),
     b('FILTER_PATHS=$(for d'),
     b('git log --oneline'),
@@ -154,6 +156,37 @@ describe('#5469 pr-branch published marker (real git)', () => {
       mergePr(dir);
       prevTip = tip;
     }
+  });
+
+  test('refusing a leftover unmerged -pr runs before any outward step', () => {
+    const dir = repo();
+    commitRound(dir, 1);
+    assert.equal(publish(dir).status, 0);
+    commitRound(dir, 2);
+    const r = publish(dir, 'main', { afterPre: 'echo OUTWARD' });
+    assert.notEqual(r.status, 0);
+    assert.ok(!r.stdout.includes('OUTWARD'), 'refusal must precede handle_sub_repos');
+  });
+
+  test('refkey is injective and never emits a slash (property)', () => {
+    const text = fs.readFileSync(WORKFLOW_PATH, 'utf-8');
+    const fn = extractBashBlockContaining(text, 'PR_BRANCH="${CURRENT_BRANCH}-pr"').match(/^refkey\(\) \{.*\}$/m)[0];
+    const keys = (inputs) => {
+      const tmp = createTempDir('gsd-refkey-');
+      try {
+        const f = path.join(tmp, 'in.txt');
+        fs.writeFileSync(f, inputs.join('\n') + '\n');
+        const r = runSh(`${fn}\nwhile IFS= read -r l; do refkey "$l"; echo; done < '${f.replace(/\\/g, '/')}'`, tmp);
+        assert.equal(r.status, 0, r.stderr);
+        return r.stdout.split(/\r?\n/).slice(0, inputs.length);
+      } finally { cleanup(tmp); }
+    };
+    const part = fc.stringMatching(/^[a%2F/]{1,6}$/);
+    fc.assert(fc.property(fc.uniqueArray(part, { minLength: 2, maxLength: 40 }), (inputs) => {
+      const out = keys(inputs);
+      assert.equal(new Set(out).size, inputs.length, 'distinct inputs must give distinct keys');
+      assert.ok(out.every((k) => !k.includes('/')));
+    }), { numRuns: 20 });
   });
 
   test('leftover UNmerged -pr is refused with a message naming it, and left intact', () => {
