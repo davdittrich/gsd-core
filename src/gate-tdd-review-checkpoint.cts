@@ -125,7 +125,7 @@ const isSha = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{4
 
 // A real seal is a few hundred bytes per plan; anything bigger is not read (the file is repo content, so hostile).
 const SEAL_MAX_BYTES = 64 * 1024;
-/** #5354: most distinct SUMMARY task commits probed per plan; each costs one `git merge-base` spawn. */
+/** #5354: most distinct SUMMARY task commits probed per plan; each costs one `git merge-base` spawn plus one `git show` (about 2x64 spawns) and the scope resolver. */
 const SUMMARY_REFS_MAX = 64;
 
 /** lstat, so a symlink is seen as a symlink. Never throws. */
@@ -158,35 +158,38 @@ function parseSeal(text: string): Evidence<SealPlans> {
   }
 }
 
-/** #5354: per-plan RED/GREEN hashes recorded pre-squash. Absent is `none`; a malformed, oversize, non-regular or unreadable seal is `unreadable`. */
-function readSeal(phaseDir: string): Evidence<SealPlans> {
-  const file = path.join(phaseDir, SEAL_FILE);
+/** Bounded, non-blocking read of repo-controlled text: a symlink, non-regular file or one over SEAL_MAX_BYTES is `unreadable`; absent is `none`. */
+function readBoundedText(file: string): Evidence<string> {
   // lstat rejects a symlink on every OS (O_NOFOLLOW is 0 on Windows); O_NOFOLLOW + fstat on the fd is the race backstop.
   const st = sealStat(file);
-  if (st.kind !== 'found') return st;
-  const notRegular = (): Evidence<SealPlans> => evidenceUnreadable(`${SEAL_FILE} is not a regular file or exceeds ${SEAL_MAX_BYTES} bytes`, file);
+  if (st.kind !== 'found') return st as Evidence<never>;
+  const notRegular = (): Evidence<string> => evidenceUnreadable(`${path.basename(file)} is not a regular file or exceeds ${SEAL_MAX_BYTES} bytes`, file);
   if (!st.value.isFile() || st.value.size > SEAL_MAX_BYTES) return notRegular();
   let fd: number | undefined;
-  let result: Evidence<SealPlans>;
+  let result: Evidence<string>;
   try {
     // O_NONBLOCK: a FIFO swapped in after lstat must not hang open(); fstat isFile() then rejects it.
     fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
     const fst = fs.fstatSync(fd);
-    result = !fst.isFile() || fst.size > SEAL_MAX_BYTES
-      ? notRegular()
-      : parseSeal(fs.readFileSync(fd, 'utf8'));
+    result = !fst.isFile() || fst.size > SEAL_MAX_BYTES ? notRegular() : evidenceFound(fs.readFileSync(fd, 'utf8'));
   } catch (err) {
-    result = evidenceFromError<SealPlans>(err, file);
+    result = evidenceFromError<string>(err, file);
   }
   // Closed outside a finally so a close() failure cannot mask (by throwing over) the read's result: it is reported as unreadable.
   if (fd !== undefined) {
     try {
       fs.closeSync(fd);
     } catch (err) {
-      return evidenceFromError<SealPlans>(err, file);
+      return evidenceFromError<string>(err, file);
     }
   }
   return result;
+}
+
+/** #5354: per-plan RED/GREEN hashes recorded pre-squash. Absent is `none`; a malformed, oversize, non-regular or unreadable seal is `unreadable`. */
+function readSeal(phaseDir: string): Evidence<SealPlans> {
+  const text = readBoundedText(path.join(phaseDir, SEAL_FILE));
+  return text.kind === 'found' ? parseSeal(text.value) : (text as Evidence<never>);
 }
 
 /** Merge `evidence` into the phase's seal via temp file + rename, refusing an existing non-regular target (a symlink would redirect the write). */
@@ -210,7 +213,9 @@ function writeSeal(phaseDir: string, evidence: Record<string, SealEntry>, prior:
 
 /**
  * #5354: a plan was squashed away when its SUMMARY names task commits and none is reachable from
- * HEAD (a missing object counts as unreachable). No SUMMARY, no listed hash, more than
+ * HEAD (a missing object counts as unreachable). A fabricated or foreign id is indistinguishable from a
+ * squashed commit that was garbage-collected or never fetched, so it is also `NotEvaluable`: the gate
+ * stays advisory and the row is visible to the maintainer rather than escalating on unverifiable ids. No SUMMARY, no listed hash, more than
  * SUMMARY_REFS_MAX distinct hashes, or any reachable hash is an ordinary failure. A ref whose subject
  * still appears on a reachable plan commit was rewritten (rebase/amend), not squashed, so it does not
  * count as unreachable.
@@ -229,7 +234,7 @@ function summaryCommitsAllUnreachable(projectDir: string, phaseDir: string, plan
     return !shallow.timedOut && shallow.exitCode === 0 && shallow.stdout === 'false';
   })();
   for (const candidate of summaryCandidates(rel)) {
-    const summary = readTextEvidence(path.join(phaseDir, candidate));
+    const summary = readBoundedText(path.join(phaseDir, candidate));
     if (summary.kind !== 'found') continue;
     const refs = [...new Set(extractTaskCommitRefs(summary.value))];
     // More refs than the cap is an ordinary failure: SUMMARY.md is repo content and must not buy unbounded git spawns.

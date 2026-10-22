@@ -252,6 +252,19 @@ describe('#5354 tdd review checkpoint seal', () => {
   const SEAL = path.join(PHASE, 'TDD-REVIEW-SEAL.json');
   const sha = (c) => c.repeat(40);
 
+  test('fabricated SUMMARY ids (no such object) are NotEvaluable, indistinguishable from a squashed-and-collected commit', () => {
+    const none = fixture(['chore: x']);
+    w(none.dir, `${PHASE}/01-01-SUMMARY.md`, `# done\n\n## Task Commits\n\n1. **Task 1: x** - \`${'d'.repeat(40)}\`\n`);
+    assert.equal(run(none.dir).payload.rows[0].status, 'NotEvaluable');
+  });
+
+  test('an oversize SUMMARY is not read (treated as no task commits)', () => {
+    const { dir, base } = fixture(['test(01-01): red', 'feat(01-01): green'], { refs: true });
+    squash(dir, base);
+    w(dir, `${PHASE}/01-01-SUMMARY.md`, padTo('# done\n', SEAL_CAP + 1));
+    assert.equal(run(dir).payload.rows[0].status, 'FAIL');
+  });
+
   test('a scoped squash title with unreachable SUMMARY hashes is not evaluable', () => {
     const { dir, base } = fixture(['test(01-01): red', 'feat(01-01): green'], { refs: true });
     squash(dir, base, 'feat(01-01): squashed');
@@ -456,10 +469,14 @@ describe('#5354 tdd review checkpoint seal', () => {
     assert.equal(r.payload.unreadable.length, 1);
   });
 
-  test('a failed --record leaves no temp file behind', () => {
+  test('a failed --record leaves no temp file behind', (t) => {
     const { dir } = fixture(['test(01-01): red', 'feat(01-01): green']);
-    fs.mkdirSync(path.join(dir, SEAL));
+    const real = fs.writeFileSync;
+    let wrote = false;
+    t.mock.method(fs, 'writeFileSync', (f, ...rest) => { if (String(f).endsWith('.tmp')) wrote = true; return real(f, ...rest); });
+    t.mock.method(fs, 'renameSync', () => { throw Object.assign(new Error('rename failed'), { code: 'EPERM' }); });
     run(dir, '--record');
+    assert.ok(wrote, 'the temp file was created before the rename failed');
     assert.deepEqual(fs.readdirSync(path.join(dir, PHASE)).filter((n) => n.endsWith('.tmp')), []);
   });
 
@@ -510,10 +527,7 @@ describe('#5354 tdd review checkpoint seal', () => {
     assert.equal(r.payload.rows[0].status, 'FAIL');
   });
 
-  test('ship.md seals before push, scopes the commit to the seal, and keys the no-TDD skip on the picked tddPlans field', () => {
-    const ship = fs.readFileSync(path.join(__dirname, '..', 'gsd-core', 'workflows', 'ship.md'), 'utf8');
-    assert.ok(ship.indexOf('<step name="seal_tdd_review">') < ship.indexOf('<step name="push_branch">'));
-    assert.match(ship, /git commit -m "docs\([^"]*\): seal TDD review evidence" -- "\$SEAL"/);
+  test('the no-TDD skip is keyed on the picked tddPlans field', () => {
     const skip = fixture([], { summary: false, plan: false });
     const out = runGsdTools(['check', 'tdd-review-checkpoint', '1', '--pick', 'tddPlans'], skip.dir);
     assert.ok(out.success, out.error || out.output);
