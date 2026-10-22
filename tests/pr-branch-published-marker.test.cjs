@@ -97,12 +97,12 @@ function publish(dir, target = 'main', { branch = 'feature', mode = 'true', gh =
 }
 
 // Script goes through a temp file, not argv (Windows MSYS2 mis-parses long quote-heavy argv).
-function runSh(script, cwd) {
+function runSh(script, cwd, interpreter = 'bash') {
   const tmp = createTempDir('gsd-prmarker-script-');
   try {
     const file = path.join(tmp, 'recipe.sh');
     fs.writeFileSync(file, script);
-    const r = runHook(file, [], { interpreter: 'bash', cwd, env: ISOLATED_ENV(cwd) });
+    const r = runHook(file, [], { interpreter, cwd, env: ISOLATED_ENV(cwd) });
     return { status: r.exitCode ?? 1, stdout: r.stdout, stderr: r.stderr };
   } finally { cleanup(tmp); }
 }
@@ -163,9 +163,9 @@ describe('#5469 pr-branch published marker (real git)', () => {
     commitRound(dir, 1);
     assert.equal(publish(dir).status, 0);
     commitRound(dir, 2);
-    const r = publish(dir, 'main', { afterPre: 'echo OUTWARD' });
+    const r = publish(dir, 'main', { afterPre: 'touch OUTWARD' });
     assert.notEqual(r.status, 0);
-    assert.ok(!r.stdout.includes('OUTWARD'), 'refusal must precede handle_sub_repos');
+    assert.ok(!fs.existsSync(path.join(dir, 'OUTWARD')), 'refusal must precede handle_sub_repos');
   });
 
   test('refkey is injective and never emits a slash (property)', () => {
@@ -593,5 +593,30 @@ describe('#5469 pr-branch published marker (real git)', () => {
     assert.equal(r.status, 0, r.stderr);
     assert.deepEqual(replayed(dir), ['r2.txt']);
     assert.equal(markerOf(dir), tip1);
+  });
+
+  test('-pr reset to the target before merging: the built tip was never merged, so the marker does not advance and the build is replayed', () => {
+    const dir = repo();
+    commitRound(dir, 1);
+    assert.equal(publish(dir).status, 0);
+    git(dir, 'branch', '-f', 'feature-pr', 'main');
+    commitRound(dir, 2);
+    const r = publish(dir);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(markerOf(dir), '', 'an unmerged built tip must not be promoted by the reset branch verdict');
+    assert.deepEqual(replayed(dir), ['r1.txt', 'r2.txt']);
+  });
+
+  // gsd-core#4109: a bare $VAR does not word-split under zsh, so the `timeout 10` prefix must not be one.
+  const zshTimeout = runSh('command -v zsh >/dev/null && timeout 1 true', os.tmpdir()).status === 0;
+  test('pr_merged proves a squash merge under zsh (timeout prefix splits)', { skip: !zshTimeout && 'needs zsh and timeout' }, () => {
+    const dir = repo();
+    commitRound(dir, 1);
+    assert.equal(publish(dir).status, 0);
+    squashMerge(dir);
+    const text = fs.readFileSync(WORKFLOW_PATH, 'utf-8');
+    const fn = extractBashBlockContaining(text, 'pr_merged() {').match(/^pr_merged\(\) \{[\s\S]*?^\}$/m)[0];
+    const r = runSh(`TARGET=main PR_BRANCH=feature-pr PR_BASE=main\n${fn}\npr_merged feature-pr && echo PROVEN`, dir, 'zsh');
+    assert.match(r.stdout, /PROVEN/, r.stderr);
   });
 });

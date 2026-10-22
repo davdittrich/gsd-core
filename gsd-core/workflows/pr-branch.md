@@ -52,6 +52,9 @@ MARKER_REF="refs/gsd/pr-published/$REF_KEY"
 PENDING_REF="refs/gsd/pr-built/$REF_KEY"
 PR_TIP_REF="refs/gsd/pr-built-head/$REF_KEY"
 PR_BRANCH_TIP=$(git rev-parse -q --verify "refs/heads/$PR_BRANCH")
+# gh --base value: TARGET without its leading remote name (any configured remote, not only origin).
+PR_BASE=$TARGET
+for _r in $(git remote); do [ "${TARGET#"$_r"/}" != "$TARGET" ] && { PR_BASE=${TARGET#"$_r"/}; break; }; done
 
 # shq STR — STR shell-quoted for the recovery commands printed below (branch names may hold ; $ ( ) & `).
 shq() { case "$1" in ''|*[!A-Za-z0-9._/@%+=:,-]*) printf "'%s'" "$(printf %s "$1" | sed "s/'/'\\\\''/g")" ;; *) printf %s "$1" ;; esac; }
@@ -60,38 +63,49 @@ shq() { case "$1" in ''|*[!A-Za-z0-9._/@%+=:,-]*) printf "'%s'" "$(printf %s "$1
 # content for every path TIP changed since it forked from $TARGET, or (once $TARGET has since
 # edited those paths) GitHub reports a PR for $PR_BRANCH merged into the target whose head was TIP.
 pr_merged() {
-  local _sha _fork _base _r _t _g _b=
+  local _sha _fork _g _b _t
+  _b=
+  _t=
   command -v timeout >/dev/null 2>&1 && _b="timeout 10" # bounds the local git calls too; without it they run unbounded
-  git merge-base --is-ancestor "$1" "$TARGET" 2>/dev/null && return 0
-  _sha=$(git rev-parse -q --verify "$1") || return 1
-  # shellcheck disable=SC2086 # $_b is deliberately word-split: "timeout 10" is a command prefix, empty when timeout is absent
-  if _fork=$($_b git merge-base "$_sha" "$TARGET" 2>/dev/null) && [ -n "$($_b git diff --name-only --no-renames "$_fork" "$_sha")" ] &&
-    $_b git diff --name-only --no-renames -z "$_fork" "$_sha" | xargs -0 $_b git --literal-pathspecs diff --quiet "$_sha" "$TARGET" --; then
-    return 0
-  fi
+  # $(printf '%s' "$_b") splits into prefix words under bash and zsh alike (gsd-core#4109: a bare $_b does not under zsh)
+  # shellcheck disable=SC2046
+  {
+    $(printf '%s' "$_b") git merge-base --is-ancestor "$1" "$TARGET" 2>/dev/null && return 0
+    _sha=$($(printf '%s' "$_b") git rev-parse -q --verify "$1") || return 1
+    if _fork=$($(printf '%s' "$_b") git merge-base "$_sha" "$TARGET" 2>/dev/null) && [ -n "$($(printf '%s' "$_b") git diff --name-only --no-renames "$_fork" "$_sha")" ] &&
+      $(printf '%s' "$_b") git diff --name-only --no-renames -z "$_fork" "$_sha" | xargs -0 $(printf '%s' "$_b") git --literal-pathspecs diff --quiet "$_sha" "$TARGET" --; then
+      return 0
+    fi
+  }
   # Unprovable offline stays "not merged" (fail-safe): gh missing, unauthenticated, offline,
-  # slower than 10s, or an executable gh with no `timeout` to bound it (stock macOS). Base-filtered: markers are keyed per target, and the
-  # base is TARGET without its leading remote name (any configured remote, not only origin).
+  # slower than 10s, or an executable gh with no `timeout` to bound it (stock macOS). Base-filtered:
+  # markers are keyed per target ($PR_BASE).
   _g=$(command -v gh) || return 1
-  _base=$TARGET
-  for _r in $(git remote); do [ "${TARGET#"$_r"/}" != "$TARGET" ] && { _base=${TARGET#"$_r"/}; break; }; done
-  case $_g in /*) command -v timeout >/dev/null 2>&1 || return 1; _t="timeout 10" ;; *) _t= ;; esac
-  $_t gh pr list --state merged --head "$PR_BRANCH" --base "$_base" --json headRefOid --jq '.[].headRefOid' 2>/dev/null | grep -qx "$_sha"
+  case $_g in /*) command -v timeout >/dev/null 2>&1 || return 1; _t="timeout 10" ;; esac
+  # shellcheck disable=SC2046
+  $(printf '%s' "$_t") gh pr list --state merged --head "$PR_BRANCH" --base "$PR_BASE" --json headRefOid --jq '.[].headRefOid' 2>/dev/null | grep -qx "$_sha"
 }
 
 # The last build counts as published only once its -pr tip (PR_TIP_REF) is merged, even if
 # the local -pr branch was since deleted; an unmerged build whose -pr branch is gone was
 # discarded, so its commits must be replayed.
 PENDING_TIP=$(git rev-parse -q --verify "$PENDING_REF")
-# One verdict for the leftover -pr branch, reused by create_pr_branch (each lookup may call gh).
+# One verdict for the leftover -pr branch (each lookup may call gh); the refusal below reads it.
 PR_BRANCH_MERGED=
 [ -n "$PR_BRANCH_TIP" ] && pr_merged "$PR_BRANCH_TIP" && PR_BRANCH_MERGED=1
+# Forgetting a pending build removes both refs; DISCARD_PENDING is the same pair as a printed recovery command.
+drop_pending() { git update-ref -d "$PENDING_REF"; git update-ref -d "$PR_TIP_REF" 2>/dev/null; }
+DISCARD_PENDING="git update-ref -d $(shq "$PENDING_REF") && git update-ref -d $(shq "$PR_TIP_REF")"
 if [ -n "$PENDING_TIP" ]; then
-  # PR_TIP_REF equals the branch tip unless the user edited -pr; only then is it a second lookup.
-  if [ -n "$PR_BRANCH_MERGED" ] || { [ "$(git rev-parse -q --verify "$PR_TIP_REF")" != "$PR_BRANCH_TIP" ] && pr_merged "$PR_TIP_REF"; }; then
-    git update-ref "$MARKER_REF" "$PENDING_TIP" && git update-ref -d "$PENDING_REF" && git update-ref -d "$PR_TIP_REF"
+  # The recorded built tip must itself be merged. The leftover branch's verdict stands in for it only
+  # while that branch is still the built tip: a -pr reset to the target or edited since says nothing about the build.
+  PR_BUILT_TIP=$(git rev-parse -q --verify "$PR_TIP_REF")
+  BUILT_MERGED=
+  if [ "$PR_BUILT_TIP" = "$PR_BRANCH_TIP" ]; then BUILT_MERGED=$PR_BRANCH_MERGED; else pr_merged "$PR_TIP_REF" && BUILT_MERGED=1; fi
+  if [ -n "$BUILT_MERGED" ]; then
+    git update-ref "$MARKER_REF" "$PENDING_TIP" && drop_pending
   elif [ -z "$PR_BRANCH_TIP" ]; then
-    git update-ref -d "$PENDING_REF"; git update-ref -d "$PR_TIP_REF" 2>/dev/null
+    drop_pending
     echo "WARNING: dropped the pending build $PENDING_TIP: $PR_BRANCH is gone and its tip is not merged into $TARGET, so its commits will be replayed. If it was squash/rebase merged and $TARGET changed those files since, re-anchor: git update-ref $(shq "$MARKER_REF") $PENDING_TIP" >&2
   fi
 fi
@@ -130,8 +144,8 @@ fi
 if [ -n "$PR_BRANCH_TIP" ] && [ -z "$PR_BRANCH_MERGED" ]; then
   echo "$PR_BRANCH exists and is not merged into $TARGET. Choose one, then re-run:" >&2
   if git rev-parse -q --verify "$PENDING_REF" >/dev/null; then
-    echo "  merged by squash/rebase: git update-ref $(shq "$MARKER_REF") \$(git rev-parse $(shq "$PENDING_REF")) && git branch -D $(shq "$PR_BRANCH") && git update-ref -d $(shq "$PENDING_REF") && git update-ref -d $(shq "$PR_TIP_REF")" >&2
-    echo "  discard: git branch -D $(shq "$PR_BRANCH") && git update-ref -d $(shq "$PENDING_REF") && git update-ref -d $(shq "$PR_TIP_REF")" >&2
+    echo "  merged by squash/rebase: git update-ref $(shq "$MARKER_REF") \$(git rev-parse $(shq "$PENDING_REF")) && git branch -D $(shq "$PR_BRANCH") && $DISCARD_PENDING" >&2
+    echo "  discard: git branch -D $(shq "$PR_BRANCH") && $DISCARD_PENDING" >&2
   else
     echo "  discard: git branch -D $(shq "$PR_BRANCH")" >&2
   fi
