@@ -1449,6 +1449,9 @@ const CROSS_FENCE = {
   'gsd-core/workflows/execute-phase/steps/verify-phase-goal.md :: execute:post': VERIFY_BIND,
   'gsd-core/workflows/verify-work.md :: verify:pre': INIT_BIND,
   'gsd-core/workflows/verify-work.md :: verify:post': INIT_BIND,
+  'gsd-core/workflows/secure-phase.md :: verify:post': INIT_BIND,
+  'gsd-core/workflows/validate-phase.md :: verify:post': INIT_BIND,
+  'gsd-core/workflows/code-review-fix.md :: execute:post': INIT_BIND,
 };
 
 // Sites that pass the autonomous driver's own loop variable. It is never
@@ -1474,13 +1477,8 @@ function assignedLaterInFence(lines, idx, name) {
 // Like CROSS_FENCE, for the variable the phase binding READS: the same sites
 // that bind PHASE_NUMBER in their own fence still rely on the host carrying
 // $INIT/$PHASE_STATE from an earlier one. Keyed `file :: point` -> exact line.
-const WS_BIND = `GSD_WS=$(echo " $GSD_ARGS" | sed -nE 's/.* --ws +([A-Za-z0-9][A-Za-z0-9._-]*).*/--ws \\1/p' | head -n 1)`;
-const PHASE_ARG_OP = 'PHASE_ARG=$(echo "$GSD_ARGS" | sed -E \'s/--ws[[:space:]]+[A-Za-z0-9._-]+//g\' | xargs)';
-const SRC_CROSS_FENCE = {
-  'gsd-core/workflows/secure-phase.md :: verify:post': [WS_BIND, PHASE_ARG_OP],
-  'gsd-core/workflows/validate-phase.md :: verify:post': [WS_BIND, PHASE_ARG_OP],
-  'gsd-core/workflows/code-review-fix.md :: execute:post': [WS_BIND, 'PHASE_ARG="${1}"'],
-};
+// Empty today: every phase binding reads variables assigned in its own fence.
+const SRC_CROSS_FENCE = {};
 
 // Turn the tail of a render-hooks call line into argv, substituting a real
 // token for the phase variable and the fingerprint path.
