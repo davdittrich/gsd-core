@@ -1413,9 +1413,9 @@ describe('workflow call sites declare --files (#2269)', () => {
     // a deletion-only call that declares `--files-removed <paths>` is scoped,
     // while a bare `--files` or `--files-removed` still has no value and fails.
     // `commit-to-subrepo` has no second list: its `--files` slices to the end.
-    const isCommit = tokens.slice(Math.max(segment.findIndex(isGsdBinary), 0)).find((t) => COMMIT_TOKENS.has(t)) !== 'commit-to-subrepo';
-    const listFlags = isCommit ? ['--files', '--files-removed'] : [];
-    return (isCommit ? listFlags : ['--files']).some((flag) => tokens.some((t, i) => {
+    const isNotSubrepo = tokens.slice(Math.max(segment.findIndex(isGsdBinary), 0)).find((t) => COMMIT_TOKENS.has(t)) !== 'commit-to-subrepo';
+    const listFlags = isNotSubrepo ? ['--files', '--files-removed'] : [];
+    return (isNotSubrepo ? listFlags : ['--files']).some((flag) => tokens.some((t, i) => {
       if (t !== flag) return false;
       for (let j = i + 1; j < tokens.length && !listFlags.includes(tokens[j]); j += 1) {
         if (!tokens[j].startsWith('--')) return true;
