@@ -162,7 +162,7 @@ function parseSeal(text: string): Evidence<SealPlans> {
 function readBoundedText(file: string): Evidence<string> {
   // lstat rejects a symlink on every OS (O_NOFOLLOW is 0 on Windows); O_NOFOLLOW + fstat on the fd is the race backstop.
   const st = sealStat(file);
-  if (st.kind !== 'found') return st as Evidence<never>;
+  if (st.kind !== 'found') return st;
   const notRegular = (): Evidence<string> => evidenceUnreadable(`${path.basename(file)} is not a regular file or exceeds ${SEAL_MAX_BYTES} bytes`, file);
   if (!st.value.isFile() || st.value.size > SEAL_MAX_BYTES) return notRegular();
   let fd: number | undefined;
@@ -189,7 +189,7 @@ function readBoundedText(file: string): Evidence<string> {
 /** #5354: per-plan RED/GREEN hashes recorded pre-squash. Absent is `none`; a malformed, oversize, non-regular or unreadable seal is `unreadable`. */
 function readSeal(phaseDir: string): Evidence<SealPlans> {
   const text = readBoundedText(path.join(phaseDir, SEAL_FILE));
-  return text.kind === 'found' ? parseSeal(text.value) : (text as Evidence<never>);
+  return text.kind === 'found' ? parseSeal(text.value) : text;
 }
 
 /** Merge `evidence` into the phase's seal via temp file + rename, refusing an existing non-regular target (a symlink would redirect the write). */
