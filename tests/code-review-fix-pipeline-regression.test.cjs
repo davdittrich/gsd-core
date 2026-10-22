@@ -305,6 +305,15 @@ describe('#5019 — --auto re-review keeps the external reviewer lane evidence',
     return fn({ dir, tmp, victim, review: path.join(dir, '01-REVIEW.md'), file: path.join(dir, '01-REVIEW-lane-evidence.md') });
   };
   const CALL = 'gsd_run lane-evidence-clear "$REVIEW_PATH"';
+  // dispatch_reviewer_lanes run for real; only `review-lane dispatch-step` (it would spawn a CLI) is stubbed
+  // to return `results`. It is the one fence that holds EXTERNAL_EVIDENCE_BLOCK and LANE_RUN_DIR, so it owns persisting them.
+  const dispatch = (sb, results) => bash([
+    `export TMPDIR="${sb.tmp}"; PHASE_DIR="${sb.dir}"; PADDED_PHASE=01; REPO_ROOT="${sb.dir}"; REVIEW_DEPTH=standard; DIFF_BASE=deadbeef; REVIEW_FILES=(a.ts)`,
+    'real_gsd_run() { node "' + GSD_TOOLS + '" "$@"; }',
+    'gsd_run() { if [ "$1" = "review-lane" ] && [ "$2" = "dispatch-step" ]; then cat >/dev/null; printf "%s" "$GSD_DISPATCH_JSON"; else real_gsd_run "$@"; fi; }',
+    'set -- --codex', stepFence(REVIEW, 'dispatch_reviewer_lanes'),
+    'printf "%s" "$EXTERNAL_EVIDENCE_BLOCK"'].join('\n'), { GSD_DISPATCH_JSON: JSON.stringify({ ok: true, selection: {}, results }) });
+  const laneDirs = (sb) => fs.readdirSync(sb.tmp).filter((n) => n.startsWith('gsd-review-lanes-'));
   const REMOVALS = {
     'cleanup_iteration_backups': () => lines(stepRegion(FIX, 'cleanup_iteration_backups'), CALL, CALL),
     'check_empty_scope': () => lines(stepRegion(REVIEW, 'check_empty_scope'), CALL, CALL),
@@ -383,13 +392,7 @@ describe('#5019 — --auto re-review keeps the external reviewer lane evidence',
     });
   });
 
-  test('the evidence block round-trips commit_review to the re-review read, and the cited lane file survives', { skip: !HAS_BASH }, (t) => {
-    const dir = createTempDir('gsd-5019-');
-    t.after(() => cleanup(dir));
-    const lanes = path.join(dir, 'gsd-review-lanes-abc123'); fs.mkdirSync(lanes);
-    const cited = path.join(lanes, 'gsd-review-x.md'); fs.writeFileSync(cited, 'lane-only finding');
-    const review = path.join(dir, '01-REVIEW.md'); fs.writeFileSync(review, '---\nstatus: issues_found\n---\n');
-    const block = `<external_reviewer_evidence>\n${cited}\n</external_reviewer_evidence>`;
+  test('the evidence block round-trips dispatch to the re-review read, and the cited lane file survives', { skip: !HAS_BASH }, (t) => {
     const read = lines(stepRegion(FIX, 'auto_iteration_loop'), '# #5019: re-surface', 'esac');
     // The re-review prompt template, run through bash so the block's place in it is executed, not grepped.
     // The reviewer agent that consumes it is the one step no test can run (stated in the PR body).
@@ -401,18 +404,56 @@ describe('#5019 — --auto re-review keeps the external reviewer lane evidence',
     const to = loop.indexOf('")', from);
     assert.ok(from > call && to > from, 're-review prompt literal not found');
     const tpl = loop.slice(from, to);
-    const out = bash([
-      `export TMPDIR="${dir}"; REVIEW_PATH="${review}"; LANE_RUN_DIR="${lanes}"; COMMIT_DOCS=false; FIX_AUTO=true`,
-      `EXTERNAL_EVIDENCE_BLOCK='${block}'`, stepFence(REVIEW, 'commit_review'),
-      'printf "---\\nstatus: clean\\n---\\n" > "$REVIEW_PATH"', // the re-review overwrites REVIEW.md; the lane finding must survive in the sibling file
-      'EXTERNAL_EVIDENCE_BLOCK=""', read,
-      'printf "%s" "$EXTERNAL_EVIDENCE_BLOCK"', "printf '\\0'",
-      `REVIEW_DEPTH=standard PHASE_DIR="${dir}"; PROMPT="${tpl}"; printf '%s' "$PROMPT"`].join('\n'));
-    const [blockOut, prompt] = out.stdout.split('\0');
-    assert.ok(blockOut.endsWith(`${block}\n\n`), 'the re-review reads back the exact block');
-    const promptHead = `\n${block}\n\n<config>\ndepth: standard\n`;
-    assert.strictEqual(prompt.slice(0, promptHead.length), promptHead, 'the re-review prompt is assembled with the block ahead of <config>');
-    assert.strictEqual(fs.readFileSync(cited, 'utf8'), 'lane-only finding', 'the reviewer can still re-read the cited path');
+    sandbox(t, (sb) => {
+      const cited = path.join(sb.dir, 'gsd-review-x.md'); fs.writeFileSync(cited, 'lane-only finding');
+      const block = dispatch(sb, [{ ok: true, slug: 'codex', reviewPath: cited }]).stdout;
+      assert.match(block, /^<external_reviewer_evidence>/);
+      const [lane] = laneDirs(sb);
+      fs.writeFileSync(path.join(sb.tmp, lane, 'kept'), 'lane-only finding');
+      fs.writeFileSync(sb.review, '---\nstatus: issues_found\n---\n');
+      // a FRESH shell: commit_review inherits nothing from dispatch but the file
+      bash(`export TMPDIR="${sb.tmp}"; REVIEW_PATH="${sb.review}"; COMMIT_DOCS=false; FIX_AUTO=true\n${stepFence(REVIEW, 'commit_review')}`);
+      fs.writeFileSync(sb.review, '---\nstatus: clean\n---\n'); // the re-review overwrites REVIEW.md; the lane finding must survive in the sibling file
+      const out = bash([
+        `export TMPDIR="${sb.tmp}"; REVIEW_PATH="${sb.review}"`, read,
+        'printf "%s" "$EXTERNAL_EVIDENCE_BLOCK"', "printf '\\0'",
+        `REVIEW_DEPTH=standard PHASE_DIR="${sb.dir}"; PROMPT="${tpl}"; printf '%s' "$PROMPT"`].join('\n'));
+      const [blockOut, prompt] = out.stdout.split('\0');
+      assert.ok(blockOut.endsWith(`${block}\n\n`), 'the re-review reads back the exact block');
+      const promptHead = `\n${block}\n\n<config>\ndepth: standard\n`;
+      assert.strictEqual(prompt.slice(0, promptHead.length), promptHead, 'the re-review prompt is assembled with the block ahead of <config>');
+      assert.strictEqual(fs.readFileSync(path.join(sb.tmp, lane, 'kept'), 'utf8'), 'lane-only finding', 'the lane dir the reviewer cites survives');
+    });
+  });
+
+  test('dispatch persists the evidence file beside REVIEW.md; a dispatch with no evidence leaves no lane dir', { skip: !HAS_BASH }, (t) => {
+    sandbox(t, (sb) => {
+      const block = dispatch(sb, [{ ok: true, slug: 'codex', reviewPath: '/x/codex.md' }]).stdout;
+      const [lane] = laneDirs(sb);
+      assert.strictEqual(fs.readFileSync(sb.file, 'utf8'), `${lane.slice('gsd-review-lanes-'.length)}\n${block}\n`);
+    });
+    sandbox(t, (sb) => {
+      dispatch(sb, [{ ok: false, slug: 'codex', reason: 'spawn_failed' }]);
+      assert.deepStrictEqual([laneDirs(sb), fs.existsSync(sb.file)], [[], false], 'no evidence: nothing for the fixer loop to read, so nothing is kept');
+    });
+  });
+
+  test('commit_review keeps the persisted evidence only for --auto with a valid REVIEW.md, from a fresh shell', { skip: !HAS_BASH }, (t) => {
+    const fence = stepFence(REVIEW, 'commit_review');
+    const drive = (auto, reviewText) => sandbox(t, (sb) => {
+      const lanes = path.join(sb.tmp, 'gsd-review-lanes-abc123'); fs.mkdirSync(lanes);
+      fs.writeFileSync(sb.file, `abc123\n${BLOCK}\n`);
+      if (reviewText !== null) fs.writeFileSync(sb.review, reviewText);
+      // Only what a fresh shell would still know: no LANE_RUN_DIR, no EXTERNAL_EVIDENCE_BLOCK.
+      bash(`export TMPDIR="${sb.tmp}"; REVIEW_PATH="${sb.review}"; COMMIT_DOCS=false${auto ? '; FIX_AUTO=true' : ''}\n${fence}`);
+      return { file: fs.existsSync(sb.file), lanes: fs.existsSync(lanes) };
+    });
+    const VALID = '---\nstatus: issues_found\n---\n';
+    assert.deepStrictEqual(drive(true, VALID), { file: true, lanes: true });
+    assert.deepStrictEqual(drive(false, VALID), { file: false, lanes: false });
+    // No fixer loop starts on an invalid or missing REVIEW.md, so nothing may be left for it to clean.
+    assert.deepStrictEqual(drive(true, '# no frontmatter\n'), { file: false, lanes: false }, 'invalid REVIEW.md');
+    assert.deepStrictEqual(drive(true, null), { file: false, lanes: false }, 'missing REVIEW.md');
   });
 
   test('loop read: a present but rejected evidence file warns instead of dropping the block silently', { skip: !HAS_BASH }, (t) => {
@@ -436,36 +477,9 @@ describe('#5019 — --auto re-review keeps the external reviewer lane evidence',
     });
   });
 
-  test('commit_review persists the block + keeps the lane dir only for --auto with a valid REVIEW.md', { skip: !HAS_BASH }, (t) => {
-    const fence = stepFence(REVIEW, 'commit_review');
-    const drive = (auto, reviewText) => {
-      const dir = createTempDir('gsd-5019-');
-      t.after(() => cleanup(dir));
-      const lanes = path.join(dir, 'gsd-review-lanes-abc123'); fs.mkdirSync(lanes);
-      const review = path.join(dir, '01-REVIEW.md');
-      const file = path.join(dir, '01-REVIEW-lane-evidence.md');
-      if (reviewText !== null) fs.writeFileSync(review, reviewText);
-      const script = [
-        `REVIEW_PATH="${review}"; LANE_RUN_DIR="${lanes}"; COMMIT_DOCS=false`,
-        auto ? 'FIX_AUTO=true' : '',
-        `EXTERNAL_EVIDENCE_BLOCK="${BLOCK}"`,
-        fence,
-      ].join('\n');
-      bash(script);
-      return { file: fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null, lanes: fs.existsSync(lanes) };
-    };
-    const VALID = '---\nstatus: issues_found\n---\n';
-    assert.deepStrictEqual(drive(true, VALID), { file: `abc123\n${BLOCK}\n`, lanes: true });
-    assert.deepStrictEqual(drive(false, VALID), { file: null, lanes: false });
-    // No fixer loop starts on an invalid or missing REVIEW.md, so nothing may be left for it to clean.
-    assert.deepStrictEqual(drive(true, '# no frontmatter\n'), { file: null, lanes: false }, 'invalid REVIEW.md');
-    assert.deepStrictEqual(drive(true, null), { file: null, lanes: false }, 'missing REVIEW.md');
-  });
-
   test('property: only a ^[A-Za-z0-9]{6}$ line 1 is acted on; the persist/read format round-trips', { skip: !HAS_BASH }, (t) => {
     const read = lines(stepRegion(FIX, 'auto_iteration_loop'), '# #5019: re-surface', 'esac');
     const removal = REMOVALS.cleanup_iteration_backups();
-    const persist = stepFence(REVIEW, 'commit_review');
     const SUFFIX = /^[A-Za-z0-9]{6}$/;
     const runs = { numRuns: 40 }; // every sample spawns bash
     // Line 1 never holds a newline (it is line 1) or a NUL (a bash variable cannot).
@@ -488,16 +502,14 @@ describe('#5019 — --auto re-review keeps the external reviewer lane evidence',
         return true;
       });
     }), runs);
-    const suffix = fc.string({ unit: fc.constantFrom(...'abcxyzABCXYZ0189'), minLength: 6, maxLength: 6 });
-    const block = fc.array(fc.string({ maxLength: 20 }), { minLength: 1, maxLength: 4 }).map((a) => a.join('\n'))
-      .filter((b) => b.length > 0 && !b.includes('\0') && !b.endsWith('\n'));
-    fc.assert(fc.property(suffix, block, (sfx, blk) => sandbox(t, (sb) => {
-      const lanes = path.join(sb.tmp, `gsd-review-lanes-${sfx}`); fs.mkdirSync(lanes);
-      fs.writeFileSync(sb.review, '---\nstatus: issues_found\n---\n');
+    // dispatch picks the suffix (mktemp), so the free variable is the cited path; the block must round-trip byte-exact.
+    const cited = fc.string({ maxLength: 20 }).filter((x) => x.length > 0 && !/[\n\0]/.test(x) && x.trim() === x);
+    fc.assert(fc.property(cited, (c) => sandbox(t, (sb) => {
+      const block = dispatch(sb, [{ ok: true, slug: 'codex', reviewPath: c }]).stdout;
+      const lanes = path.join(sb.tmp, laneDirs(sb)[0]);
       const env = `export TMPDIR="${sb.tmp}"; REVIEW_PATH="${sb.review}"`;
-      bash(`${env}; LANE_RUN_DIR="${lanes}"; COMMIT_DOCS=false; FIX_AUTO=true; EXTERNAL_EVIDENCE_BLOCK="$GSD_BLOCK"\n${persist}`, { GSD_BLOCK: blk });
       const got = bash(`${env}\n${read}\nprintf '%s' "$EXTERNAL_EVIDENCE_BLOCK"`).stdout;
-      assert.strictEqual(got, `${blk}\n\n`, 'the block round-trips byte-exact');
+      assert.strictEqual(got, `${block}\n\n`, 'the block round-trips byte-exact');
       bash(`${env}\n${removal}`);
       assert.deepStrictEqual([fs.existsSync(lanes), fs.existsSync(sb.file), fs.existsSync(path.join(sb.victim, 'keep'))], [false, false, true]);
       return true;
