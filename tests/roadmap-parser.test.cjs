@@ -35,6 +35,8 @@ const {
   getMilestonePhaseFilter,
   isMilestoneShippedInRoadmap,
   withPhaseSection,
+  editCurrentMilestone,
+  checklistBulletExtent,
 } = roadmapParser;
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -4056,5 +4058,65 @@ describe('roadmap-parser: sectioned ROADMAP with explicit `milestone: null` (#50
     const unbound = extractCurrentMilestone(sectioned, tmpDir);
     assert.ok(!bound.includes('Phase 1: First'), 'control narrows to v1.1');
     assert.ok(unbound.includes('Phase 1: First'), 'explicit null leaves the whole document, not the v1.1 slice');
+  });
+});
+
+describe('#5483 checklistBulletExtent', () => {
+  const BULLET = /^([ \t]*-[ \t]*\[)[ x](\][ \t]*(?:\*\*[ \t]*)?Phase[ \t]+1[^\n]*)/im;
+  const NEXT = /^[ \t]*-[ \t]*\[[ xX]\][ \t]*(?:\*\*[ \t]*)?Phase[ \t]/i;
+  const rows = (text) => {
+    const { start, end } = checklistBulletExtent(text, BULLET.exec(text), NEXT);
+    return text.slice(start, end);
+  };
+
+  test('EOF without a trailing newline: the last row is included', () => {
+    assert.strictEqual(rows('- [ ] **Phase 1: A**\n  - [ ] a\n  - [ ] b'), '  - [ ] a\n  - [ ] b');
+  });
+
+  test('bullet is the last line with no newline: empty extent', () => {
+    assert.strictEqual(rows('- [ ] **Phase 1: A**'), '');
+  });
+
+  test('depth boundary: deeper and equal-depth lines are in, shallower stops', () => {
+    assert.strictEqual(rows('  - [ ] **Phase 1: A**\n    deeper\n  equal\n shallower\n  after\n'), '    deeper\n  equal\n');
+  });
+
+  test('a blank line ends the extent', () => {
+    assert.strictEqual(rows('- [ ] **Phase 1: A**\n- [ ] a\n\n- [ ] b\n'), '- [ ] a\n');
+  });
+
+  test('the next phase bullet ends the extent', () => {
+    assert.strictEqual(rows('- [ ] **Phase 1: A**\n  - [ ] a\n- [ ] **Phase 2: B**\n  - [ ] b\n'), '  - [ ] a\n');
+  });
+});
+
+describe('#5483 editCurrentMilestone', () => {
+  const DETAILS = '<details>\n<summary>Notes</summary>\nX\n</details>\n';
+  let dir;
+  beforeEach(() => { dir = createTempProject(); });
+  afterEach(() => { cleanup(dir); });
+
+  test('no milestone resolves: one call over the whole document, <details> blocks restored byte-for-byte', () => {
+    const doc = `A X\n${DETAILS}B X\n`;
+    const calls = [];
+    const out = editCurrentMilestone(doc, dir, (t) => { calls.push(t); return t.replace(/X/g, 'Y'); });
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(out, `A Y\n${DETAILS}B Y\n`);
+  });
+
+  test('resolved milestone: windows edited in document order, length-changing edits splice correctly, outside untouched', () => {
+    fs.writeFileSync(path.join(dir, '.planning', 'STATE.md'), '---\nmilestone: v1.0\n---\n');
+    const doc = '# R\n\n## Milestone v1.0\n\nX\n\n## Milestone v0.9\n\nX\n\n## Milestone v1.0 (Phase Details)\n\nX\n';
+    let n = 0;
+    const out = editCurrentMilestone(doc, dir, (t) => t.replace('X', `W${++n}${'!'.repeat(n * 5)}`));
+    assert.strictEqual(n, 2);
+    assert.strictEqual(out, '# R\n\n## Milestone v1.0\n\nW1!!!!!\n\n## Milestone v0.9\n\nX\n\n## Milestone v1.0 (Phase Details)\n\nW2!!!!!!!!!!\n');
+  });
+
+  test('resolved milestone: a <details> block inside the window is hidden from edit and restored', () => {
+    fs.writeFileSync(path.join(dir, '.planning', 'STATE.md'), '---\nmilestone: v1.0\n---\n');
+    const doc = `## Milestone v1.0\n\nX\n${DETAILS}`;
+    const out = editCurrentMilestone(doc, dir, (t) => t.replace(/X/g, 'Y'));
+    assert.strictEqual(out, `## Milestone v1.0\n\nY\n${DETAILS}`);
   });
 });

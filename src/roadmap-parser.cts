@@ -2386,20 +2386,24 @@ function currentMilestoneRawRanges(
  * `currentMilestoneRawRanges`, or, when no milestone resolves, over the whole
  * ROADMAP with every `<details>` block hidden (#5543; `editOutsideShippedBlocks`
  * masks all of them, it does not check a summary for a shipped marker).
- * `edit` is called once per window, in document order. The one milestone
+ * `edit` is called once per window, in document order, with each window's own
+ * `<details>` blocks masked the same way. The one milestone
  * scoping for per-phase writers (`phase complete`, `roadmap
  * update-plan-progress` #5483), so neither cuts at the last `</details>`.
  */
 function editCurrentMilestone(content: string, cwd: string | undefined, edit: (text: string) => string): string {
   const ranges = currentMilestoneRawRanges(content, cwd);
-  if (!ranges) return editOutsideShippedBlocks(content, edit);
+  const masked = (text: string): string => editOutsideShippedBlocks(text, edit);
+  if (!ranges) return masked(content);
   const windows = [ranges.primary, ranges.details]
     .filter((w): w is { start: number; end: number } => w !== null)
     .sort((a, b) => a.start - b.start);
   // Edit in document order (so a "first window wins" caller means the primary
   // one), then splice last-first so an earlier window's offsets are not
   // shifted by a length-changing mutation in a later window.
-  const edited = windows.map((w) => edit(content.slice(w.start, w.end)));
+  // Each window hides its own `<details>` blocks, as the null path does: a block
+  // inside the window is never the active phase's section.
+  const edited = windows.map((w) => masked(content.slice(w.start, w.end)));
   return windows.reduceRight((acc, w, i) => acc.slice(0, w.start) + edited[i] + acc.slice(w.end), content);
 }
 

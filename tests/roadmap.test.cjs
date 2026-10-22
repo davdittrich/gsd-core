@@ -2848,8 +2848,11 @@ describe('#5483: update-plan-progress ticks only the active milestone row', () =
         assert.ok(result.success, `Command failed: ${result.error}`);
         const written = fs.readFileSync(path.join(dir, '.planning', 'ROADMAP.md'), 'utf-8');
         for (const n of order) {
-          const ticked = written.includes(`### Phase ${n}: p${n}\n\nPlans:\n- [x] 01-PLAN.md`);
-          assert.strictEqual(ticked, n === target, `phase ${n} ticked=${ticked} (target ${target}):\n${written}`);
+          const start = written.indexOf(`### Phase ${n}: p${n}\n`);
+          const rest = written.slice(start + 1);
+          const section = written.slice(start, rest.includes('\n### ') ? start + 1 + rest.indexOf('\n### ') : undefined);
+          const ticked = sectionizer.iterateBullets(section).map((b) => b.checked);
+          assert.deepStrictEqual(ticked, [n === target], `phase ${n} (target ${target}):\n${written}`);
         }
       }),
     ), { numRuns: 12 });
@@ -2943,6 +2946,46 @@ describe('#5483: update-plan-progress ticks only the active milestone row', () =
     const sec = '### Phase 1: One\n\nPlans:\n\n';
     const written = setupPhase(1, `# ROADMAP\n\n## Milestone v1.0\n\n${sec}## Milestone v1.0 (Phase Details)\n\n${sec}${TABLE}`, P1, S1);
     assert.deepStrictEqual(planRows(written).map((b) => b.checked), [true]);
+  });
+
+  // Progress-table cells of the row whose Phase cell starts with `n.`.
+  const progressRow = (text, n) => text.split('\n')
+    .find((l) => l.startsWith('|') && l.split('|')[1].trim().startsWith(`${n}.`))
+    .split('|').slice(1, -1).map((c) => c.trim());
+
+  test('Progress table before a non-milestone <details> notes block is still written', () => {
+    const written = setupPhase(1, `# ROADMAP\n\n## Milestone v1.0\n\n### Phase 1: One\n\nPlans:\n- [ ] 01-01-PLAN.md\n${TABLE}${NOTES}`, P1, S1);
+    assert.deepStrictEqual(progressRow(written, 1).slice(0, 2), ['1. One', '1/1']);
+  });
+
+  test('Progress table in a resolved milestone window before a notes block is still written', () => {
+    fs.writeFileSync(path.join(tmpDir, '.planning', 'STATE.md'), '---\nmilestone: v1.0\n---\n');
+    const written = setupPhase(1, `# ROADMAP\n\n## Milestone v1.0\n\n### Phase 1: One\n\nPlans:\n- [ ] 01-01-PLAN.md\n${TABLE}${NOTES}`, P1, S1);
+    assert.deepStrictEqual(progressRow(written, 1).slice(0, 2), ['1. One', '1/1']);
+  });
+
+  test('sibling phase carrying the same un-prefixed row does not make the phase look present', () => {
+    const p1 = '### Phase 1: first\n\nPlans:\n- [ ] 01-PLAN.md\n\n';
+    const written = setupPhase(2, `# ROADMAP\n\n## Milestone v1.0\n\n${p1}### Phase 2: test phase\n\nPlans:\n${TABLE}`);
+    assert.deepStrictEqual(planRows(written).map((b) => b.checked), [false, true]);
+  });
+
+  test('a row in both the detail section and the phase checklist bullet is ticked in both', () => {
+    const written = setupPhase(1, `# ROADMAP\n\n## Milestone v1.0\n\n- [ ] **Phase 1: One**\n  - [ ] 01-01-PLAN.md\n\n### Phase 1: One\n\nPlans:\n- [ ] 01-01-PLAN.md\n${TABLE}`, P1, S1);
+    assert.deepStrictEqual(planRows(written).map((b) => b.checked), [true, true]);
+  });
+
+  test('a <details> block inside the active milestone window is not edited', () => {
+    fs.writeFileSync(path.join(tmpDir, '.planning', 'STATE.md'), '---\nmilestone: v1.0\n---\n');
+    const input = `# ROADMAP\n\n## Milestone v1.0\n\n${ARCHIVED}### Phase 1: One\n\nPlans:\n- [ ] 01-01-PLAN.md\n${TABLE}`;
+    const written = setupPhase(1, input, P1, S1);
+    assertArchivedUntouched(input, written);
+    assert.deepStrictEqual(tickedInActive(written), ['01-01-PLAN.md']);
+  });
+
+  test('a "-[ ]" row (no space after the dash) is not a bullet and stays unticked, as in phase complete', () => {
+    const written = setupPhase(1, `# ROADMAP\n\n## Milestone v1.0\n\n### Phase 1: One\n\nPlans:\n-[ ] 01-01-PLAN.md\n${TABLE}`, P1, S1);
+    assert.ok(written.includes('-[ ] 01-01-PLAN.md'), `non-bullet row ticked:\n${written}`);
   });
 });
 
