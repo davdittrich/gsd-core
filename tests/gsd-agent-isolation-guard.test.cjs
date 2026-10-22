@@ -2368,6 +2368,33 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
     assert.equal(fs.existsSync(tmp), false);
   });
 
+  test('writeEscalation still writes the record when .gsd/.gitignore is over the read cap', (t) => {
+    setup(t);
+    const esc = require('../gsd-core/bin/lib/model-escalation.cjs');
+    const ignore = path.join(project, '.gsd', '.gitignore');
+    fs.mkdirSync(path.join(project, '.gsd'), { recursive: true });
+    fs.writeFileSync(ignore, '#'.repeat(esc.MAX_READ_BYTES + 1));
+    esc.writeEscalation(project, 'gsd-executor', 'opus', undefined, { now: () => 42 });
+    assert.equal(fs.statSync(ignore).size, esc.MAX_READ_BYTES + 1, 'left untouched');
+    assert.equal(esc.readEscalation(project, 'gsd-executor').model, 'opus');
+  });
+
+  test('64 KiB read caps: limit-1 and limit are read, limit+1 is not (escalation record, config)', (t) => {
+    setup(t);
+    const esc = require('../gsd-core/bin/lib/model-escalation.cjs');
+    const cap = esc.MAX_READ_BYTES;
+    assert.equal(cap, 64 * 1024);
+    const rec = JSON.stringify({ model: 'opus', written_at: Date.now() });
+    for (const [delta, ok] of [[-1, true], [0, true], [1, false]]) {
+      writeEscalation(project, 'gsd-executor', rec + ' '.repeat(cap + delta - rec.length));
+      assert.equal(esc.readEscalation(project, 'gsd-executor') !== null, ok, `record cap${delta}`);
+      const cfg = JSON.stringify(ISSUE_CONFIG);
+      writeConfig(project, cfg + ' '.repeat(cap + delta - cfg.length));
+      // wrong model: warns while the config is read, allows (fails open) once it is over the cap
+      assert.equal(evaluate(dispatch('gsd-planner', 'sonnet')).action, ok ? 'warn' : 'allow', `config cap${delta}`);
+    }
+  });
+
   test('the model check never rewrites .planning/config.json (legacy keys stay unmigrated on disk)', (t) => {
     setup(t, { ...ISSUE_CONFIG, depth: 'standard' });
     const config = path.join(project, '.planning', 'config.json');

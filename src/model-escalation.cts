@@ -59,6 +59,8 @@ export function writeEscalation(
     } catch {
       // Pre-existing (e.g. the dispatch sentinel's rules only): a bare `*` already covers the record,
       // else add our own rule. Replace by rename so a link swapped in after the lstat is not written through.
+      // Own try: an oversized or unreadable .gitignore must not abort before the record is written.
+      try {
       if (!fs.lstatSync(ignore).isSymbolicLink()) {
         const cur = readSmallRegularFile(ignore, MAX_READ_BYTES) ?? '';
         if (!/^\*\r?$/m.test(cur) && !/^\/model-escalation-\*\r?$/m.test(cur)) {
@@ -72,6 +74,7 @@ export function writeEscalation(
           }
         }
       }
+      } catch { /* leave the rules as they are */ }
     }
     const rec: EscalationRecord = { model, written_at: clock.now(), ...(session ? { session } : {}) };
     // tmp + rename on every platform: the hook never reads a half-written record, and rename

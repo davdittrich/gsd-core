@@ -612,7 +612,7 @@ function recordModelEscalation(cwd: string, agentType: string, model: string): v
       ? cwd
       : findProjectRoot(worktreeSafetyMod.resolveWorktreeRoot(cwd).root);
     writeEscalation(root, agentType, model, process.env['CLAUDE_CODE_SESSION_ID'] || undefined);
-  } catch { /* best-effort: a failure only costs a guard warning */ }
+  } catch (e) { process.stderr.write(`gsd: model-escalation record not written: ${(e as Error).message}\n`); } // best-effort: only costs a guard warning
 }
 
 /**

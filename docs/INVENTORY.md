@@ -650,8 +650,8 @@ Full listing: `gsd-core/bin/lib/*.cjs`.
 | `milestone.cjs` | Milestone archival, requirements marking |
 | `model-adapter.cjs` | Abstracts model routing — passive tier-based selection or active host-supplied resolution (#1680) |
 | `model-catalog.cjs` | CJS adapter over the shared model catalog JSON; exports canonical runtime tier defaults, agent profile maps, alias maps, and routing metadata for all CLI consumers |
-| `model-profiles.cjs` | Backward-compatible profile helpers derived from `model-catalog.cjs`; no longer owns its own model table |
 | `model-escalation.cjs` | Owner of the `.gsd/model-escalation-<agent>.json` record shared by `resolve-execution --attempt N` (writer) and `hooks/lib/agent-model-check.js` (reader): tier-alias `modelFamily`, `writeEscalation`/`readEscalation`, and `escalationAllows` (10-minute window, session match when both sides know one) (#5328) |
+| `model-profiles.cjs` | Backward-compatible profile helpers derived from `model-catalog.cjs`; no longer owns its own model table |
 | `model-resolver.cjs` | Model/effort resolution policy — resolves model, tier, granularity, effort, and fast-mode for an agent from config + model profiles/catalog (extracted from `core.cjs`, ADR-857) |
 | `onboard-projection.cjs` | Projects the onboarding situation from docs, package, and codebase-map readiness (#1671) |
 | `package-identity.cjs` | Generated single source for GSD's published-package coordinates (npm name, bin name, repo slug, changelog URL, manual-install command), derived from package.json; read by the update worker, `check-latest-version`, and installer (#498) |
