@@ -6577,6 +6577,7 @@ describe('roadmap update-plan-progress active-region scoping (#5553)', () => {
     'inline opener in prose': 'Wrap shipped work in <details> tags.\n',
     'indented (code) opener': '    <details>\n',
     'closer inside an HTML comment': '<!-- </details> -->\n',
+    'inline-code comment opener': 'Comments start with `<!--`.\n',
   };
   for (const [name, snippet] of Object.entries(NOT_A_TAG)) {
     test(`${name} does not unmask a later archive`, () => {

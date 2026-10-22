@@ -1478,8 +1478,8 @@ function maskArchivedDetails(content: string, cwd: string): { visible: string; r
   let nonce = 0;
   while (content.includes(`<!-- gsd-archived-details-${nonce}-`)) nonce += 1;
   const marker = (i: number): string => `<!-- gsd-archived-details-${nonce}-${i} -->`;
-  // Same-length copy with fenced blocks, HTML comments and inline code spans
-  // blanked, so a `<details>` mentioned in prose or an example never opens or
+  // Same-length copy with fenced blocks, inline code spans and HTML comments
+  // blanked (code first: a backticked `<!--` must not open a comment), so a `<details>` mentioned in prose or an example never opens or
   // closes a block.
   const lines = content.split('\n');
   const blank = (t: string): string => t.replace(/[^\r\n]/g, ' ');
@@ -1492,7 +1492,7 @@ function maskArchivedDetails(content: string, cwd: string): { visible: string; r
     }
     for (let i = f.openLineIdx; i <= last; i++) lines[i] = blank(lines[i]);
   }
-  const scan = lines.join('\n').replace(/<!--[\s\S]*?(?:-->|$)/g, blank).replace(/`[^`\n]*`/g, blank);
+  const scan = lines.join('\n').replace(/`[^`\n]*`/g, blank).replace(/<!--[\s\S]*?(?:-->|$)/g, blank);
   // Depth-aware: an outer block closes at its own `</details>`, so a nested
   // collapsed section inside an archive is masked with it.
   const spans: Array<{ start: number; end: number }> = [];
