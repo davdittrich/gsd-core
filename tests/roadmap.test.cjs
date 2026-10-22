@@ -2748,9 +2748,10 @@ describe('#5483: update-plan-progress ticks only the active milestone row', () =
   function setupPhase(n, roadmap, plans = ['01-PLAN.md'], summaries = ['01-SUMMARY.md'], verified = false) {
     fs.writeFileSync(roadmapPath, roadmap);
     const dir = createPhaseWithPlans(tmpDir, String(n), plans);
-    // A passed verification makes the phase complete, which stamps its checklist bullet.
-    if (verified) fs.writeFileSync(path.join(dir, `0${n}-VERIFICATION.md`), '---\nstatus: passed\n---\n# Verification\n');
     for (const f of summaries) fs.writeFileSync(path.join(dir, f), '# Summary\n');
+    // A passed verification makes the phase complete, which stamps its checklist bullet. Written after the
+    // summaries: a summary newer than the verification marks the phase stale, and macOS/Windows mtimes are finer than Linux's.
+    if (verified) fs.writeFileSync(path.join(dir, `0${n}-VERIFICATION.md`), '---\nstatus: passed\n---\n# Verification\n');
     const result = runGsdTools(['roadmap', 'update-plan-progress', String(n)], tmpDir);
     assert.ok(result.success, `Command failed: ${result.error}`);
     return fs.readFileSync(roadmapPath, 'utf-8');
