@@ -11,7 +11,8 @@ const { test, describe, before, after, beforeEach, afterEach } = require('node:t
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { runGsdTools, createTempDir, createTempProject, cleanup, delay, withIsolatedProcessState, homeSandboxEnv, mockPartialWriteThenThrow, suppressFdAsync } = require('./helpers.cjs');
+const { spawnSync } = require('node:child_process');
+const { TOOLS_PATH, runGsdTools, createTempDir, createTempProject, cleanup, delay, withIsolatedProcessState, homeSandboxEnv, mockPartialWriteThenThrow, suppressFdAsync } = require('./helpers.cjs');
 const fc = require('./helpers/fast-check-setup.cjs');
 const configLib = require('../gsd-core/bin/lib/config.cjs');
 const { ExitError } = require('../gsd-core/bin/lib/cli-exit.cjs');
@@ -2632,6 +2633,18 @@ describe('#5231: git.commit_timeout_ms config key', () => {
       assert.strictEqual(typeof stored(), 'number');
     }
     assert.strictEqual(runGsdTools(['config-get', 'git.commit_timeout_ms'], tmpDir, env).output.trim(), '3600000');
+  });
+
+  test('config-get keeps stdout raw but warns on stderr when a hand-edited value falls back to the default', (t) => {
+    const tmpDir = createTempProject('gsd-5231-handedit-');
+    t.after(() => cleanup(tmpDir));
+    const cfgPath = path.join(tmpDir, '.planning', 'config.json');
+    fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
+    fs.writeFileSync(cfgPath, JSON.stringify({ git: { commit_timeout_ms: 0 } }));
+    const r = spawnSync(process.execPath, [TOOLS_PATH, 'config-get', 'git.commit_timeout_ms'], { cwd: tmpDir, env: homeSandboxEnv(tmpDir), encoding: 'utf8' });
+    assert.strictEqual(r.status, 0, r.stderr);
+    assert.strictEqual(r.stdout.trim(), '0');
+    assert.match(r.stderr, /git\.commit_timeout_ms.*0.*30000/);
   });
 });
 

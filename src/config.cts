@@ -1527,6 +1527,10 @@ function cmdConfigGet(cwd: string, keyPath: string | undefined, raw: boolean, de
   if (kp === 'planner.stall_detection_enabled') {
     current = resolvePlannerStallDetectionEnabled(current);
   }
+  // #5231: stdout stays the stored value; tell the user when the SDK will ignore it.
+  if (kp === 'git.commit_timeout_ms' && !isValidCommitTimeoutMs(current)) {
+    process.stderr.write(`warning: git.commit_timeout_ms ${JSON.stringify(current)} is invalid; ${COMMIT_TIMEOUT_DEFAULT_MS} is used instead\n`);
+  }
 
   // Never echo plaintext for sensitive keys via config-get. Plaintext lives
   // in config.json on disk; the CLI surface always shows the masked form.
