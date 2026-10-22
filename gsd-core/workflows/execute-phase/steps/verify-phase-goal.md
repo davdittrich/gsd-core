@@ -32,7 +32,7 @@ GSD_WS=$(echo " $GSD_ARGS" | sed -nE 's/.* --ws +([A-Za-z0-9][A-Za-z0-9._-]*).*/
 VERIFIER_SKILLS=$(gsd_run query agent-skills gsd-verifier ${GSD_WS:+--ws=${GSD_WS##* }})
 CONTEXT_WINDOW=$(gsd_run query config-get context_window --raw 2>/dev/null || echo "200000")
 PHASE_GOAL=$(gsd_run query roadmap.get-phase "${PHASE_NUMBER}" ${GSD_WS:+--ws} ${GSD_WS:+"${GSD_WS##*[[:space:]]}"} --pick goal)
-PHASE_REQ_IDS=$(gsd_run query init.execute-phase "${PHASE_NUMBER}" ${GSD_WS:+--ws=${GSD_WS##* }} --pick phase_req_ids 2>/dev/null)
+PHASE_REQ_IDS=$(gsd_run query init.execute-phase "${PHASE_NUMBER}" ${GSD_WS:+--ws=${GSD_WS##* }} --pick phase_req_ids)
 PHASE_REQ_IDS="${PHASE_REQ_IDS:-TBD}"
 ```
 </step>

@@ -421,23 +421,20 @@ describe('check predicate dispatch sites forward every PHASE_* value (#4483)', (
     });
   }
 
-  test('all three flags reach ${PHASE_NUMBER}/${PHASE_DIR}/${PHASE_REQ_IDS} in the shelled command', () => {
+  test('all three flags reach ${PHASE_NUMBER}/${PHASE_DIR}/${PHASE_REQ_IDS} in the shelled command', (t) => {
     const projDir = createTempProject();
-    try {
-      fs.mkdirSync(path.join(projDir, '.planning', 'phases', '05-x'), { recursive: true });
-      const predicate = JSON.stringify({
-        kind: 'command-exit-zero',
-        command: 'test "${PHASE_NUMBER}" = "05" && test "${PHASE_REQ_IDS}" = "REQ-1,REQ-2" && test -d "${PHASE_DIR}"',
-      });
-      const result = runGsdTools(
-        ['check', 'predicate', '--predicate', predicate, '--phase-number', '05',
-          '--phase-dir', '.planning/phases/05-x', '--phase-req-ids', 'REQ-1,REQ-2', '--raw'],
-        projDir,
-      );
-      assert.ok(result.success, `Command failed: ${result.error}`);
-      assert.strictEqual(JSON.parse(result.output).block, false);
-    } finally {
-      cleanup(projDir);
-    }
+    t.after(() => cleanup(projDir));
+    fs.mkdirSync(path.join(projDir, '.planning', 'phases', '05-x'), { recursive: true });
+    const predicate = JSON.stringify({
+      kind: 'command-exit-zero',
+      command: 'test "${PHASE_NUMBER}" = "05" && test "${PHASE_REQ_IDS}" = "REQ-1,REQ-2" && test -d "${PHASE_DIR}"',
+    });
+    const result = runGsdTools(
+      ['check', 'predicate', '--predicate', predicate, '--phase-number', '05',
+        '--phase-dir', '.planning/phases/05-x', '--phase-req-ids', 'REQ-1,REQ-2', '--raw'],
+      projDir,
+    );
+    assert.ok(result.success, `Command failed: ${result.error}`);
+    assert.strictEqual(JSON.parse(result.output).block, false);
   });
 });
