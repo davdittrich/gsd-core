@@ -30,7 +30,7 @@ A killed commit can leave the hook running and the lock in place. If no git proc
 
 ## Notes
 
-- The key applies to all three commit sites, including sub-repo commits; the config is read from the workspace root.
+- The key applies to all three commit sites, including sub-repo commits.
 - Prefer making the hook faster over raising the ceiling; the hour limit exists so a repo-controlled config file
   cannot turn the bound off.
 

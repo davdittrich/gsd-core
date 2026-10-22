@@ -2712,7 +2712,8 @@ function cmdCommit(cwd: string, message: string | undefined, files: string[] | u
   };
   // #3886: `git commit` runs pre-commit hooks (husky/lint-staged routinely
   // idles ~4s on Windows before any task) — 10s is too tight, and a timeout
-  // kill is NOT an ordinary failure. Same band as the push call below.
+  // kill is NOT an ordinary failure. Bound comes from `git.commit_timeout_ms`
+  // (default 30 s, #5231).
   const commitTimeout = commitTimeoutMs(config.commit_timeout_ms);
   const commitResult = execGit(commitArgs, { cwd, env: commitEnv, timeout: commitTimeout });
   if (commitResult.exitCode !== 0) {
