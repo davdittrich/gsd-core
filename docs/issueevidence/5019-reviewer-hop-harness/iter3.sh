@@ -15,5 +15,6 @@ if [ "$arm" = head ]; then
   S=$(head -n 1 "$E"); [ -d "$P/tmp/gsd-review-lanes-$S" ] || { echo "FAIL lane dir gone: $P/tmp/gsd-review-lanes-$S" >&2; exit 1; }
   echo "OK evidence file + lane dir survive iteration 2" >&2
 fi
+cksum < "$R" > "$D/pre.cksum"
 run_shipped prompt "$arm" "$P" > "$D/prompt.iter3.txt"
 cat "$D/prompt.iter3.txt"

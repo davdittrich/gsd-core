@@ -15,12 +15,12 @@ Needs `bash`, `node`, `git`, `tar`. Not shipped: `docs/` is outside `package.jso
 
 ## Commands
 
-Run from anywhere; `H=docs/issueevidence/5019-reviewer-hop-harness`.
+Run from anywhere inside the checkout: `H=$(git rev-parse --show-toplevel)/docs/issueevidence/5019-reviewer-hop-harness`.
 
 1. `$H/build.sh head` and `$H/build.sh base` print `built $HOP_WORK/<arm>`. They write `<arm>/project` (fixture, plus lane dir and `01-REVIEW-lane-evidence.md` for head) and `<arm>/prompt.iter2.txt`.
 2. `$H/trial.sh <arm> <n>` prints `$HOP_WORK/<arm>/trial-<n>/prompt.txt`. The head prompt has an `<external_reviewer_evidence>` block naming the cursor lane file; the base prompt has none.
 3. Dispatch the reviewer, fresh context per trial, one at a time: `Agent(subagent_type='gsd-code-reviewer', model='sonnet', effort='low')` with `prompt` = the contents of that `prompt.txt`, verbatim. It writes `trial-<n>/project/phase/01-REVIEW.md`.
-4. `$H/check.sh $HOP_WORK/<arm>/trial-<n>` prints `RETAINED=0|1` and `TAGGED=0|1`. Exit 2 with `no .../01-REVIEW.md` if the reviewer wrote no file (void the trial and rerun).
+4. `$H/check.sh $HOP_WORK/<arm>/trial-<n>` prints `RETAINED=0|1` and `TAGGED=0|1`. Exit 2 if the reviewer wrote no file (`no .../01-REVIEW.md`) or left the given review unchanged (`reviewer wrote no new review`): void the trial and rerun.
 5. Iteration 3, head only, after a no-op fixer: `$H/iter3.sh $HOP_WORK/head/trial-<n>` prints `OK evidence file + lane dir survive iteration 2` on stderr, then the iteration-3 prompt on stdout. Dispatch it as in step 3, then `check.sh`. Exit 1 with `FAIL ...` otherwise.
 
 Dry run without a reviewer: after step 2, write any `01-REVIEW.md` with a `status:` line and a `## WR-01` section mentioning `LOCKOUT_MINUTES` and `30`, then run steps 4 and 5; expect `RETAINED=1`.
