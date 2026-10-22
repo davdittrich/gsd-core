@@ -2857,7 +2857,7 @@ describe('phase add allocation vs sibling git worktrees (#3849)', () => {
 
 describe('phase add / add-batch count bracket phases under phase_id_convention bracket (#5528)', () => {
   let tmp;
-  beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-5528-')); });
+  beforeEach(() => { tmp = createTempProject('gsd-5528-'); });
   afterEach(() => { cleanup(tmp); });
 
   function setup(roadmapLines, { convention = 'bracket', dirs = [] } = {}) {
@@ -2932,7 +2932,7 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
     assert.strictEqual(result.output.trim(), '04');
   });
 
-  test('a bracket directory held only by a sibling worktree blocks reuse of its number', () => {
+  test('a bracket directory held only by a sibling worktree blocks reuse of its number', (t) => {
     setup(['# Roadmap', '', '## Milestone v1.0', '']);
     const git = (args, cwd) => gitOrThrow(args, { cwd, timeoutMs: GIT_TIMEOUT_MS });
     git(['init', '-b', 'main'], tmp);
@@ -2940,17 +2940,35 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
     git(['config', 'user.name', 'Test'], tmp);
     git(['add', '-A'], tmp);
     git(['commit', '-m', 'init', '--allow-empty'], tmp);
-    const sibling = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-5528-sib-'));
-    try {
-      git(['worktree', 'add', '--detach', sibling, 'HEAD'], tmp);
-      fs.mkdirSync(path.join(sibling, '.planning', 'phases', 'GSD.02-09-elsewhere'), { recursive: true });
-      const result = runGsdTools('phase add "New thing" --raw', tmp);
-      assert.ok(result.success, result.error);
-      assert.strictEqual(result.output.trim(), '10');
-    } finally {
-      git(['worktree', 'remove', '--force', sibling], tmp);
-      cleanup(sibling);
-    }
+    const sibling = createTempProject('gsd-5528-sib-');
+    cleanup(sibling); // `git worktree add` needs a path that does not exist yet
+    t.after(() => cleanup(sibling)); // the worktree's git metadata lives in tmp, which afterEach removes
+    git(['worktree', 'add', '--detach', sibling, 'HEAD'], tmp);
+    fs.mkdirSync(path.join(sibling, '.planning', 'phases', 'GSD.02-09-elsewhere'), { recursive: true });
+    const result = runGsdTools('phase add "New thing" --raw', tmp);
+    assert.ok(result.success, result.error);
+    assert.strictEqual(result.output.trim(), '10');
+  });
+
+  test('a plain prose bullet "- Phase 2 ..." is not a phase under bracket', () => {
+    setup(['# Roadmap', '', '## Milestone v1.0', '', '- [ ] **[GSD.02] 01: Real**', '- Phase 2 of the rollout covers X', '']);
+    const result = runGsdTools('phase add "New thing" --raw', tmp);
+    assert.ok(result.success, result.error);
+    assert.strictEqual(result.output.trim(), '02');
+  });
+
+  test('a labeled icebox bullet "- [GSD.999] Phase 07" does not reserve 7', () => {
+    setup(['# Roadmap', '', '## Milestone v1.0', '', '- [ ] **[GSD.02] 01: Real**', '- [GSD.999] Phase 07: Icebox', '']);
+    const result = runGsdTools('phase add "New thing" --raw', tmp);
+    assert.ok(result.success, result.error);
+    assert.strictEqual(result.output.trim(), '02');
+  });
+
+  test('a "### Phase [GSD.02] 01:" heading with no bullet blocks reuse of its number', () => {
+    setup(['# Roadmap', '', '## Milestone v1.0', '', '### Phase [GSD.02] 01: Heading only', '', '**Goal:** x', '']);
+    const result = runGsdTools('phase add "New thing" --raw', tmp);
+    assert.ok(result.success, result.error);
+    assert.strictEqual(result.output.trim(), '02');
   });
 
   test('add-batch counts a bracket directory with no heading', () => {
@@ -2974,7 +2992,7 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
   });
 
   test('non-bracket repo: a bracket-looking heading is still not counted (byte-identical to before)', () => {
-    setup(['# Roadmap', '', '## Milestone v1.0', '', '### Phase [GSD.02] 01: Existing', '', '**Goal:** x', ''], { convention: null });
+    setup(['# Roadmap', '', '## Milestone v1.0', '', '- [ ] **[GSD.02] 01: Existing**', '', '### [GSD.02] 01: Existing', '', '**Goal:** x', ''], { convention: null });
     const result = runGsdTools('phase add "New thing" --raw', tmp);
     assert.ok(result.success, result.error);
     assert.strictEqual(result.output.trim(), '01');

@@ -55,7 +55,8 @@ const {
   phaseHeadingPrefixSrcFor,
   PHASE_HEADING_BASELINE,
   buildPhaseHeadingScanRegex,
-  BRACKET_DIR_PREFIX_SRC,
+  BRACKET_ID_SRC,
+  BRACKET_DIR_TOKEN_RE,
   isSentinelPhaseDir,
 } = phaseIdMod;
 import { escapeRegex } from './pattern.cjs';
@@ -1249,16 +1250,23 @@ function roadmapDeclaredPhaseNums(rawContent: string, convention: string | null,
   // any other convention compiles the same `Phase N` scan it always did.
   const bracket = convention === 'bracket';
   const { regex: headerPattern, phaseNumGroup } = buildPhaseHeadingScanRegex(PHASE_HEADING_BASELINE.LABEL_ONLY, convention);
-  // A bullet is one line, so the bracket label's `\s` becomes `[ \t]`; there the checkbox is optional too
-  // (`- [GSD.02] 03: X` is a bullet whose bracket is the id, not a checkbox).
+  const scans: [RegExp, number][] = [[headerPattern, phaseNumGroup]];
+  const checkbox = `\\[${bracket ? `(?!${BRACKET_ID_SRC}\\])` : ''}[^\\]]{0,200}\\][ \\t]*`;
   const label = bracket
     ? phaseHeadingPrefixSrcFor(PHASE_HEADING_BASELINE.LABEL_ONLY, convention, true).replace(/\\s/g, '[ \\t]')
     : 'Phase[ \\t]+';
-  const checkbox = `\\[[^\\]]{0,200}\\][ \\t]*`;
-  const bulletPattern = new RegExp(`^[ \\t]*-[ \\t]*${bracket ? `(?:${checkbox})?` : checkbox}\\*{0,2}${label}(\\d+)(?=[:.\\s*]|$)`, 'gim');
+  if (withBullets) {
+    scans.push([new RegExp(`^[ \\t]*-[ \\t]*${checkbox}\\*{0,2}${label}(\\d+)(?=[:.\\s*]|$)`, 'gim'), bracket ? 2 : 1]);
+  }
+  if (bracket) {
+    // A bracket id is never a checkbox, so a `- [CODE.MM] NN` bullet has none; and the heading
+    // `Phase [CODE.MM] NN` (the issue's own spelling) leads with the word instead of the id.
+    if (withBullets) {
+      scans.push([new RegExp(`^[ \\t]*-[ \\t]*\\*{0,2}\\[(${BRACKET_ID_SRC})\\][ \\t]*(?:Phase[ \\t]+)?(\\d+)(?=[:.\\s*]|$)`, 'gim'), 2]);
+    }
+    scans.push([new RegExp(`^ {0,3}#{2,4}\\s*Phase[ \\t]+\\[(${BRACKET_ID_SRC})\\][ \\t]*(\\d+)`, 'gim'), 2]);
+  }
   const nums = new Set<number>();
-  const scans: [RegExp, number][] = [[headerPattern, phaseNumGroup]];
-  if (withBullets) scans.push([bulletPattern, bracket ? 2 : 1]);
   for (const [re, numGroup] of scans) {
     let m: RegExpExecArray | null;
     while ((m = re.exec(rawContent)) !== null) {
@@ -1277,11 +1285,21 @@ function roadmapDeclaredPhaseNums(rawContent: string, convention: string | null,
  * `[PROJECT-]NN-slug` reading it always had.
  */
 function dirPhaseNum(entry: string, convention: string | null): number | null {
-  const bracketDir = convention === 'bracket' ? entry.match(new RegExp(`^${BRACKET_DIR_PREFIX_SRC}(\\d+)(?:\\.\\d+)?(?=-|$)`, 'i')) : null;
+  const bracketDir = convention === 'bracket' ? entry.match(BRACKET_DIR_TOKEN_RE) : null;
   const match = bracketDir ?? entry.match(/^(?:[A-Z][A-Z0-9]*-)?(\d+)-/);
   if (!match) return null;
-  const sentinel = bracketDir ? isSentinelPhaseDir(entry.toUpperCase()) : isSentinelPhaseId(parseInt(match[1], 10));
-  return sentinel ? null : parseInt(match[1], 10);
+  const num = parseInt(match[1], 10);
+  const sentinel = bracketDir ? isSentinelPhaseDir(entry.toUpperCase()) : isSentinelPhaseId(num);
+  return sentinel ? null : num;
+}
+
+/** Add the phase number of every phase directory under `phasesDir` to `used` (a missing dir adds nothing). */
+function collectPhaseDirNums(phasesDir: string, convention: string | null, used: Set<number>): void {
+  if (!fs.existsSync(phasesDir)) return;
+  for (const entry of fs.readdirSync(phasesDir)) {
+    const num = dirPhaseNum(entry, convention);
+    if (num !== null) used.add(num);
+  }
 }
 
 /**
@@ -1406,8 +1424,8 @@ function assertDescriptionPreservesMilestoneScope(cwd: string, description: stri
  * allocation then behaves exactly as it did before this horizon existed.
  * A sibling that simply lacks the active workstream's directory is the same
  * fail-open case: it contributes nothing. Sentinels reuse the canonical
- * `isSentinelPhaseId`; the dir pattern is the same one the on-disk scan uses,
- * so decimal sub-phases (`411.1-foo`) are correctly not integers.
+ * `isSentinelPhaseId` (`isSentinelPhaseDir` for bracket dirs); the dir pattern is the same one the
+ * on-disk scan uses, so decimal sub-phases (`411.1-foo`) are correctly not integers.
  */
 function collectSiblingWorktreePhaseNums(cwd: string, used: Set<number>, convention: string | null): void {
   let porcelain: string;
@@ -1436,10 +1454,7 @@ function collectSiblingWorktreePhaseNums(cwd: string, used: Set<number>, convent
     const wt = line.slice('worktree '.length).trim();
     if (!wt || path.resolve(wt) === path.resolve(cwd)) continue;
     try {
-      for (const entry of fs.readdirSync(path.join(siblingPlanningDir(wt), 'phases'))) {
-        const num = dirPhaseNum(entry, convention);
-        if (num !== null) used.add(num);
-      }
+      collectPhaseDirNums(path.join(siblingPlanningDir(wt), 'phases'), convention, used);
     } catch {
       /* worktree has no .planning (or no copy of this scope) — normal, contributes nothing */
     }
@@ -1491,13 +1506,7 @@ function cmdPhaseAdd(cwd: string, description: string, raw: boolean, customId?: 
       const usedPhaseNums = new Set(roadmapDeclaredPhaseNums(content, convention));
 
       // 3) On-disk phase directories (e.g. phases/11-foo/ with no header yet)
-      const phasesOnDisk = path.join(planningDir(cwd), 'phases');
-      if (fs.existsSync(phasesOnDisk)) {
-        for (const entry of fs.readdirSync(phasesOnDisk)) {
-          const num = dirPhaseNum(entry, convention);
-          if (num !== null) usedPhaseNums.add(num);
-        }
-      }
+      collectPhaseDirNums(path.join(planningDir(cwd), 'phases'), convention, usedPhaseNums);
 
       // phase.add appends after the highest *used* number. Collecting numbers from
       // section headers, roadmap bullets, AND on-disk dirs above is what prevents the
@@ -1586,13 +1595,7 @@ function cmdPhaseAddBatch(cwd: string, descriptions: string[], raw: boolean): vo
       // Same three cwd-scoped sources as cmdPhaseAdd (#1229, #5528): headers, roadmap bullets,
       // on-disk dirs, then sibling worktrees (#3849) — same max+1, wider horizon.
       const used = new Set(roadmapDeclaredPhaseNums(content, convention));
-      const phasesOnDisk = path.join(planningDir(cwd), 'phases');
-      if (fs.existsSync(phasesOnDisk)) {
-        for (const entry of fs.readdirSync(phasesOnDisk)) {
-          const num = dirPhaseNum(entry, convention);
-          if (num !== null) used.add(num);
-        }
-      }
+      collectPhaseDirNums(path.join(planningDir(cwd), 'phases'), convention, used);
       collectSiblingWorktreePhaseNums(cwd, used, convention);
       for (const num of used) {
         if (num > maxPhase) maxPhase = num;
