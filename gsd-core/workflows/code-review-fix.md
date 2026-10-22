@@ -510,7 +510,29 @@ if [ "$AUTO_MODE" = "true" ]; then
   # review is not evidence of convergence, and retaining costs a few scratch files where deleting
   # costs the post-mortem trail the retention rule exists for.
   if [ "$FINAL_STATUS" = "clean" ]; then
+    # #5506: an earlier degraded run may have committed backups; commit their deletion too.
+    TRACKED_BACKUPS=()
+    if [ "$COMMIT_DOCS" = "true" ]; then
+      shopt -s nullglob
+      BACKUP_FILES=("${REVIEW_PATH%.md}".iter*.md "${FIX_REPORT_PATH%.md}".iter*.md)
+      shopt -u nullglob
+      if [ "${#BACKUP_FILES[@]}" -gt 0 ]; then
+        TRACKED_BACKUPS=()
+        while IFS= read -r _f; do TRACKED_BACKUPS+=("$_f"); done < <(git ls-files -- "${BACKUP_FILES[@]}" 2>/dev/null)
+      fi
+    fi
     rm -f "${REVIEW_PATH%.md}.iter"*.md "${FIX_REPORT_PATH%.md}.iter"*.md 2>/dev/null || true
+    if [ "${#TRACKED_BACKUPS[@]}" -gt 0 ]; then
+      BACKUP_COMMIT=$(gsd_run query commit \
+        "docs(${PADDED_PHASE}): remove converged code review iteration backups" \
+        --files "${TRACKED_BACKUPS[@]}" --raw) || BACKUP_COMMIT=failed
+      case "$BACKUP_COMMIT" in
+        nothing|committed) ;;
+        ''|*[!0-9a-f]*)
+          echo "Warning: iteration backup deletions not committed" \
+            "(${BACKUP_COMMIT:-no output}): ${TRACKED_BACKUPS[*]}" ;;
+      esac
+    fi
   else
     echo "Iteration backups retained (final review status: ${FINAL_STATUS}) — post-mortem trail."
     # #5506: untracked backups leave a dirty tree. Commit them so the trail stays recoverable.

@@ -364,4 +364,38 @@ describe('#3190 — code-review-fix --auto REVIEW.md commit + FIX_REPORT_PATH en
     assert.match(failed.stdout, /Warning: iteration backups not committed \(failed\)/);
     assert.doesNotMatch(failed.stdout, /untracked/);
   });
+
+  test('T6d — #5506: a converged run commits the deletion of backups an earlier degraded run committed', { skip: !HAS_BASH }, (t) => {
+    const fence = stepFence(fs.readFileSync(WORKFLOW_PATH, 'utf8'), 'cleanup_iteration_backups');
+    const dir = createTempDir('gsd-5506-converged-');
+    t.after(() => cleanup(dir));
+    const git = (...a) => runGit(a, { cwd: dir, timeoutMs: PROBE_TIMEOUT_MS });
+    git('init', '-q');
+    git('config', 'user.email', 't@t');
+    git('config', 'user.name', 't');
+    git('config', 'commit.gpgsign', 'false');
+    fs.writeFileSync(path.join(dir, '01-REVIEW.md'), ['---', 'status: clean', '---'].join('\n'));
+    fs.writeFileSync(path.join(dir, '01-REVIEW-FIX.md'), 'fix');
+    fs.writeFileSync(path.join(dir, '01-REVIEW.iter2.md'), 'scratch');
+    fs.writeFileSync(path.join(dir, '01-REVIEW-FIX.iter2.md'), 'scratch');
+    git('add', '.');
+    git('commit', '-q', '-m', 'seed');
+    const script = [
+      'set -euo pipefail',
+      'cd "' + dir + '"',
+      'gsd_run() { [ "$1 $2" = "query commit" ] || return 1; local msg="$3"; shift 4; local f=("$@"); unset "f[${#f[@]}-1]";'
+        + ' git add -- "${f[@]}" && git commit -q -m "$msg" && git rev-parse --short HEAD; }',
+      'AUTO_MODE=true',
+      'COMMIT_DOCS=true',
+      'PADDED_PHASE=01',
+      'REVIEW_PATH="' + path.join(dir, '01-REVIEW.md') + '"',
+      'FIX_REPORT_PATH="' + path.join(dir, '01-REVIEW-FIX.md') + '"',
+      fence,
+    ].join('\n');
+    const res = runHook('-c', [script], { interpreter: 'bash', timeoutMs: PROBE_TIMEOUT_MS });
+    assert.strictEqual(res.exitCode, 0, 'the cleanup step must never abort: ' + res.stderr);
+    assert.strictEqual(git('status', '--porcelain').stdout.trim(), '', 'the tree must be clean');
+    assert.deepStrictEqual(splitLines(git('ls-tree', '-r', '--name-only', 'HEAD').stdout).filter(Boolean).sort(),
+      ['01-REVIEW-FIX.md', '01-REVIEW.md'], 'the backups are gone from HEAD');
+  });
 });
