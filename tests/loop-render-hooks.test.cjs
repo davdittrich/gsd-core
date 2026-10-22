@@ -1462,6 +1462,13 @@ const SRC_CROSS_FENCE = {
 // Turn the tail of a render-hooks call line into argv, substituting a real
 // token for the phase variable and the fingerprint path.
 const WS_EXPANSION = '${GSD_WS:+--ws=${GSD_WS##* }}';
+// Value level: the expansion must yield the bare workstream name (last word of GSD_WS) or nothing.
+test('[unit] WS_EXPANSION expands GSD_WS to --ws=<name>, and to nothing when unset', () => {
+  const sh = (env) => require('node:child_process').execFileSync('bash', ['-c', `printf '%s' ${WS_EXPANSION}`], { env, encoding: 'utf8' });
+  assert.strictEqual(sh({ GSD_WS: '--ws b' }), '--ws=b');
+  assert.strictEqual(sh({ GSD_WS: 'a b' }), '--ws=b');
+  assert.strictEqual(sh({}), '');
+});
 function callArgv(rest) {
   return (rest
     .replace(WS_EXPANSION, '') // unset GSD_WS expands to nothing
