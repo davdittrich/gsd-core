@@ -891,6 +891,18 @@ describe('W031 — derived state.json still tracked by git', () => {
     );
   });
 
+  test('W031 single-quotes a path the shell would split or expand, so the advised command pastes safely', (t) => {
+    const cwd = createTempGitProject('gsd-5505-w031-quote-');
+    t.after(() => cleanup(cwd));
+    trackStateJson(cwd, [".planning/my $proj's/state.json"]);
+
+    const [diagnostic] = ruleFor('W031').check(buildPlanningSnapshot(cwd));
+    assert.ok(
+      diagnostic.remedy.args.command.includes(`\`git rm --cached --ignore-unmatch -- '.planning/my $proj'\\''s/state.json'\``),
+      diagnostic.remedy.args.command,
+    );
+  });
+
   test('W031 is silent when state.json is untracked, or only an unrelated state.json is tracked', (t) => {
     const cwd = createTempGitProject('gsd-5505-w031-silent-');
     t.after(() => cleanup(cwd));

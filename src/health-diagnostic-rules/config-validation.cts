@@ -321,13 +321,15 @@ function checkW029(snapshot: PlanningSnapshot): Diagnostic[] {
 function checkW031(snapshot: PlanningSnapshot): Diagnostic[] {
   const paths = snapshot.stateJsonTracked;
   if (!paths || paths.length === 0) return [];
+  // POSIX single-quote any path the shell would split or expand, so the command pastes as-is.
+  const args = paths.map((p) => (/^[\w./-]+$/.test(p) ? p : `'${p.replace(/'/g, `'\\''`)}'`)).join(' ');
   return [
     {
       code: 'W031',
       severity: SEVERITY.WARNING,
       message: `${paths.join(', ')} is tracked by git, but it is a derived cache rewritten at every boundary command — the tracked copy stays modified and /gsd-ship refuses the dirty tree`,
       remedy: adviseRemedy(
-        `Run \`git rm --cached --ignore-unmatch -- ${paths.join(' ')}\` once and commit the removal; the file stays on disk and GSD's .git/info/exclude entry keeps it ignored from then on`,
+        `Run \`git rm --cached --ignore-unmatch -- ${args}\` once and commit the removal; the file stays on disk and GSD's .git/info/exclude entry keeps it ignored from then on`,
       ),
     },
   ];
