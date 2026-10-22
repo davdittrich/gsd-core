@@ -2646,6 +2646,20 @@ describe('#5231: git.commit_timeout_ms config key', () => {
     assert.strictEqual(r.stdout.trim(), '0');
     assert.match(r.stderr, /git\.commit_timeout_ms.*0.*30000/);
   });
+
+  for (const [label, rootVal, warns] of [['invalid', 0, true], ['valid', 5000, false]]) {
+    test(`config-get warns=${warns} for a ${label} value inherited from root by a workstream with no config`, (t) => {
+      const tmpDir = createTempProject('gsd-5231-inherit-');
+      t.after(() => cleanup(tmpDir));
+      fs.writeFileSync(path.join(tmpDir, '.planning', 'config.json'), JSON.stringify({ git: { commit_timeout_ms: rootVal } }));
+      fs.mkdirSync(path.join(tmpDir, '.planning', 'workstreams', 'ws'), { recursive: true });
+      const r = spawnSync(process.execPath, [TOOLS_PATH, 'config-get', 'git.commit_timeout_ms'], { cwd: tmpDir, env: { ...homeSandboxEnv(tmpDir), GSD_WORKSTREAM: 'ws' }, encoding: 'utf8' });
+      assert.strictEqual(r.status, 0, r.stderr);
+      assert.strictEqual(r.stdout.trim(), String(rootVal));
+      if (warns) assert.match(r.stderr, /git\.commit_timeout_ms.*0.*30000/);
+      else assert.doesNotMatch(r.stderr, /commit_timeout_ms/);
+    });
+  }
 });
 
 describe('#3086: git.create_tag config key', () => {

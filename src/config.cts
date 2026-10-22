@@ -193,6 +193,13 @@ function resolveSchemaDefault(cwd: string, kp: string): { found: boolean; value:
   return { found: false, value: undefined };
 }
 
+/** #5231: stdout stays the stored value; tell the user when the SDK will ignore it. */
+function warnInvalidCommitTimeout(kp: string, value: unknown): void {
+  if (kp === 'git.commit_timeout_ms' && !isValidCommitTimeoutMs(value)) {
+    process.stderr.write(`warning: git.commit_timeout_ms ${JSON.stringify(value)} is invalid; ${COMMIT_TIMEOUT_DEFAULT_MS} is used instead\n`);
+  }
+}
+
 /**
  * Emit a schema-resolved default (#2256), applying the same secret-masking
  * invariant the found-key path applies. getCapabilityConfigSchema is a
@@ -1467,7 +1474,7 @@ function cmdConfigGet(cwd: string, keyPath: string | undefined, raw: boolean, de
       // --default). Only when root also misses do --default / schema default apply.
       // (When no workstream is active, resolveFromRootConfig is a no-op: same file.)
       const rootVal = resolveFromRootConfig(cwd, kp);
-      if (rootVal.found) { emitResolvedDefault(kp, rootVal.value, raw); return; }
+      if (rootVal.found) { warnInvalidCommitTimeout(kp, rootVal.value); emitResolvedDefault(kp, rootVal.value, raw); return; }
       if (hasDefault) { emitResolvedDefault(kp, defaultValue, raw); return; }
       const sd = resolveSchemaDefault(cwd, kp);
       if (sd.found) { emitResolvedDefault(kp, sd.value, raw); return; }
@@ -1494,7 +1501,7 @@ function cmdConfigGet(cwd: string, keyPath: string | undefined, raw: boolean, de
     if (current === undefined || current === null || typeof current !== 'object') {
       // #2702: root-config inheritance before --default / schema default (see above).
       const rootVal = resolveFromRootConfig(cwd, kp);
-      if (rootVal.found) { emitResolvedDefault(kp, rootVal.value, raw); return; }
+      if (rootVal.found) { warnInvalidCommitTimeout(kp, rootVal.value); emitResolvedDefault(kp, rootVal.value, raw); return; }
       if (hasDefault) { emitResolvedDefault(kp, defaultValue, raw); return; }
       const sd = resolveSchemaDefault(cwd, kp);
       if (sd.found) { emitResolvedDefault(kp, sd.value, raw); return; }
@@ -1517,7 +1524,7 @@ function cmdConfigGet(cwd: string, keyPath: string | undefined, raw: boolean, de
   if (current === undefined) {
     // #2702: root-config inheritance before --default / schema default (see above).
     const rootVal = resolveFromRootConfig(cwd, kp);
-    if (rootVal.found) { emitResolvedDefault(kp, rootVal.value, raw); return; }
+    if (rootVal.found) { warnInvalidCommitTimeout(kp, rootVal.value); emitResolvedDefault(kp, rootVal.value, raw); return; }
     if (hasDefault) { emitResolvedDefault(kp, defaultValue, raw); return; }
     const sd = resolveSchemaDefault(cwd, kp);
     if (sd.found) { emitResolvedDefault(kp, sd.value, raw); return; }
@@ -1528,9 +1535,7 @@ function cmdConfigGet(cwd: string, keyPath: string | undefined, raw: boolean, de
     current = resolvePlannerStallDetectionEnabled(current);
   }
   // #5231: stdout stays the stored value; tell the user when the SDK will ignore it.
-  if (kp === 'git.commit_timeout_ms' && !isValidCommitTimeoutMs(current)) {
-    process.stderr.write(`warning: git.commit_timeout_ms ${JSON.stringify(current)} is invalid; ${COMMIT_TIMEOUT_DEFAULT_MS} is used instead\n`);
-  }
+  warnInvalidCommitTimeout(kp, current);
 
   // Never echo plaintext for sensitive keys via config-get. Plaintext lives
   // in config.json on disk; the CLI surface always shows the masked form.
