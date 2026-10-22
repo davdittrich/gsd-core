@@ -64,6 +64,7 @@ pr_merged() {
   command -v timeout >/dev/null 2>&1 && _b="timeout 10" # bounds the local git calls too; without it they run unbounded
   git merge-base --is-ancestor "$1" "$TARGET" 2>/dev/null && return 0
   _sha=$(git rev-parse -q --verify "$1") || return 1
+  # shellcheck disable=SC2086 # $_b is deliberately word-split: "timeout 10" is a command prefix, empty when timeout is absent
   if _fork=$($_b git merge-base "$_sha" "$TARGET" 2>/dev/null) && [ -n "$($_b git diff --name-only --no-renames "$_fork" "$_sha")" ] &&
     $_b git diff --name-only --no-renames -z "$_fork" "$_sha" | xargs -0 $_b git --literal-pathspecs diff --quiet "$_sha" "$TARGET" --; then
     return 0
