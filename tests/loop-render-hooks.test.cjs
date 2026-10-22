@@ -1464,7 +1464,7 @@ const SRC_CROSS_FENCE = {
 const WS_EXPANSION = '${GSD_WS:+--ws=${GSD_WS##* }}';
 // Value level: the expansion must yield the bare workstream name (last word of GSD_WS) or nothing.
 test('[unit] WS_EXPANSION expands GSD_WS to --ws=<name>, and to nothing when unset', () => {
-  const sh = (env) => require('node:child_process').execFileSync('bash', ['-c', `printf '%s' ${WS_EXPANSION}`], { env, encoding: 'utf8' });
+  const sh = (env) => require('node:child_process').execFileSync('bash', ['-c', `printf '%s' ${WS_EXPANSION}`], { env, encoding: 'utf8', timeout: PROBE_TIMEOUT_MS });
   assert.strictEqual(sh({ GSD_WS: '--ws b' }), '--ws=b');
   assert.strictEqual(sh({ GSD_WS: 'a b' }), '--ws=b');
   assert.strictEqual(sh({}), '');
