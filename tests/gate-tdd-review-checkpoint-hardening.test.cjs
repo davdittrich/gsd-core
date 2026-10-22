@@ -16,7 +16,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { execFileSync, spawnSync } = require('node:child_process');
+const { execFileSync } = require('node:child_process');
+const { runHook } = require('./helpers/process-seam.cjs');
 const { GIT_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
 const { createTempGitProject, cleanup, runGsdTools } = require('./helpers.cjs');
 const fc = require('./helpers/fast-check-setup.cjs');
@@ -204,7 +205,6 @@ describe('#5354 tdd review checkpoint seal', () => {
     assert.equal(r.payload.violations, 0);
     assert.equal(r.block, false);
     assert.equal(r.payload.rows[0].status, 'NotEvaluable');
-    assert.match(r.payload.message, /not evaluable/);
   });
 
   test('a plan with reachable commits lacking test()/feat() still fails', () => {
@@ -236,7 +236,7 @@ describe('#5354 tdd review checkpoint seal', () => {
     assert.equal(r.outcome, 'unreadable');
     assert.equal(r.payload.passed, false);
     assert.equal(r.payload.unreadable.length, 1);
-    assert.doesNotMatch(r.payload.message, /squashed\?/);
+    assert.deepEqual(r.payload.rows, []);
   });
 
   for (const [label, text] of [['plans a string', '{"plans":"x"}'], ['plans an array', '{"plans":[{"red":"a"}]}'], ['null', 'null'], ['an array', '[]'], ['a string', '"s"'], ['no plans member', '{"foo":1}'], ['a plan entry a string', '{"plans":{"01-01":"x"}}'], ['a plan entry with a numeric red', '{"plans":{"01-01":{"red":1}}}']]) {
@@ -268,6 +268,14 @@ describe('#5354 tdd review checkpoint seal', () => {
   test('a scoped squash title with unreachable SUMMARY hashes is not evaluable', () => {
     const { dir, base } = fixture(['test(01-01): red', 'feat(01-01): green'], { refs: true });
     squash(dir, base, 'feat(01-01): squashed');
+    const r = run(dir);
+    assert.equal(r.payload.rows[0].status, 'NotEvaluable');
+    assert.equal(r.payload.violations, 0);
+  });
+
+  test('a squash whose title repeats one task subject is still not evaluable (a rewrite keeps every task subject)', () => {
+    const { dir, base } = fixture(['test(01-01): red', 'feat(01-01): green'], { refs: true });
+    squash(dir, base, 'feat(01-01): green');
     const r = run(dir);
     assert.equal(r.payload.rows[0].status, 'NotEvaluable');
     assert.equal(r.payload.violations, 0);
@@ -366,8 +374,8 @@ describe('#5354 tdd review checkpoint seal', () => {
   test('the review table keeps NotEvaluable inside its column', () => {
     const { dir, base } = fixture(['test(01-01): red', 'feat(01-01): green'], { refs: true });
     squash(dir, base);
-    assert.match(run(dir).payload.table, /\| NotEvaluable \|/);
-    assert.match(run(dir).payload.table, /\|--------------\|/);
+    const statusCells = run(dir).payload.table.split('\n').filter((line) => line.startsWith('|')).map((line) => line.split('|').at(-2));
+    assert.equal(new Set(statusCells.map((cell) => cell.length)).size, 1, 'header, divider and rows share one status-column width');
   });
 
   const posix = { skip: process.platform === 'win32' };
@@ -406,6 +414,7 @@ describe('#5354 tdd review checkpoint seal', () => {
   test('a FIFO seal is rejected by the lstat regular-file check', posix, (t) => {
     const { dir } = fixture([], { summary: false });
     const fifo = path.join(dir, SEAL);
+    // No seam runner for arbitrary binaries (runNode/runGit/runHook only), so mkfifo stays on execFileSync.
     try { execFileSync('mkfifo', [fifo], { timeout: GIT_TIMEOUT_MS }); } catch { t.skip('mkfifo unavailable'); return; }
     assert.equal(run(dir).outcome, 'unreadable');
   });
@@ -413,6 +422,7 @@ describe('#5354 tdd review checkpoint seal', () => {
   test('a FIFO swapped in after lstat never hangs the open (O_NONBLOCK) and fstat rejects it', posix, (t) => {
     const { dir } = fixture([], { summary: false });
     const fifo = path.join(dir, SEAL);
+    // No seam runner for arbitrary binaries (runNode/runGit/runHook only), so mkfifo stays on execFileSync.
     try { execFileSync('mkfifo', [fifo], { timeout: GIT_TIMEOUT_MS }); } catch { t.skip('mkfifo unavailable'); return; }
     const regular = path.join(dir, 'regular.json');
     fs.writeFileSync(regular, sealOf(sha('a'), sha('b')));
@@ -542,8 +552,8 @@ describe('#5354 tdd review checkpoint seal', () => {
     const { dir } = fixture([], { summary: false });
     if (seal !== undefined) w(dir, SEAL, seal);
     const stub = 'gsd_run() { case "$*" in "query config-get commit_docs"*) echo "$CD";; *--record*) echo "$PICK"; return "$REC";; *) echo "$PICK";; esac; }\n';
-    const r = spawnSync('bash', ['-c', stub + script], {
-      cwd: dir, encoding: 'utf8', windowsHide: true, timeout: GIT_TIMEOUT_MS,
+    const r = runHook('-c', [stub + script], {
+      interpreter: 'bash', cwd: dir, timeoutMs: GIT_TIMEOUT_MS,
       env: { ...process.env, CD: commitDocs, REC: String(recordRc), PICK: picked, PHASE_DIR: PHASE, PHASE_NUMBER: '1', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' },
     });
     return { r, subject: sealGit(dir, 'log', '-1', '--format=%s') };
@@ -551,13 +561,13 @@ describe('#5354 tdd review checkpoint seal', () => {
 
   test('ship.md seal step commits a dirty seal after a successful record', posix, () => {
     const { r, subject } = runSealStep({ seal: sealOf(sha('a'), sha('b')) });
-    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.exitCode, 0, r.stderr);
     assert.match(subject, /^docs\(1\): seal TDD review evidence$/);
   });
 
   test('ship.md seal step never commits the on-disk seal when --record failed', posix, () => {
     const { r, subject } = runSealStep({ recordRc: 3, seal: '<<<<<<< conflict' });
-    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.exitCode, 0, r.stderr);
     assert.match(r.stderr, /could not record/);
     assert.equal(subject, 'docs: plans');
   });

@@ -99,23 +99,22 @@ function transitiveDependents(planId: string, dependents: ReadonlyMap<string, re
 }
 
 /**
- * The commit types (`test`, `feat`, `refactor`, …) among the plan's own commits — those that
- * touched at least one path (`pathspecs: ['.']`, as the old `git log -- .` lookup did). An
- * unresolvable scope (git unavailable, an id that is not `<phase>-<plan>`) is "no commits".
+ * The plan's own commits — those that touched at least one path (`pathspecs: ['.']`, as the old
+ * `git log -- .` lookup did). An unresolvable scope (git unavailable, an id that is not
+ * `<phase>-<plan>`) is "no commits".
  */
-function planCommitKinds(projectDir: string, planId: string): ReadonlyMap<string, string> {
-  const scope = resolveEvaluationScope(projectDir, { kind: 'plan', planId }, { pathspecs: ['.'], commitsOnly: true });
+function planCommits(projectDir: string, planId: string): readonly { sha: string; subject: string }[] {
+  return resolveEvaluationScope(projectDir, { kind: 'plan', planId }, { pathspecs: ['.'], commitsOnly: true }).commits;
+}
+
+/** The commit types (`test`, `feat`, `refactor`, …) among `commits`, each mapped to its first sha. */
+function commitKinds(commits: readonly { sha: string; subject: string }[]): ReadonlyMap<string, string> {
   const kinds = new Map<string, string>();
-  for (const commit of scope.commits) {
+  for (const commit of commits) {
     const kind = /^([a-z]+)\(/.exec(commit.subject)?.[1];
     if (kind && !kinds.has(kind)) kinds.set(kind, commit.sha);
   }
   return kinds;
-}
-
-function planCommitSubjects(projectDir: string, planId: string): ReadonlySet<string> {
-  const scope = resolveEvaluationScope(projectDir, { kind: 'plan', planId }, { pathspecs: ['.'], commitsOnly: true });
-  return new Set(scope.commits.map((commit) => commit.subject));
 }
 
 const SEAL_FILE = 'TDD-REVIEW-SEAL.json';
@@ -192,11 +191,9 @@ function readSeal(phaseDir: string): Evidence<SealPlans> {
   return text.kind === 'found' ? parseSeal(text.value) : text;
 }
 
-/** Merge `evidence` into the phase's seal via temp file + rename, refusing an existing non-regular target (a symlink would redirect the write). */
+/** Merge `evidence` into the phase's seal via temp file + rename, refusing an existing non-regular target (a symlink would redirect the write). `prior` is never `unreadable`: the caller returns early on that, so no earlier plan's credit is dropped. */
 function writeSeal(phaseDir: string, evidence: Record<string, SealEntry>, prior: Evidence<SealPlans>): void {
   const file = path.join(phaseDir, SEAL_FILE);
-  // Never overwrite a seal we could not read: that would silently drop earlier plans' credit.
-  if (prior.kind === 'unreadable') throw new Error(`${SEAL_FILE} cannot be read, refusing to overwrite it: ${prior.reason}`);
   const content = `${JSON.stringify({ plans: { ...(prior.kind === 'found' ? prior.value : {}), ...evidence } }, null, 2)}\n`;
   const st = sealStat(file);
   if (st.kind === 'unreadable') throw new Error(`${SEAL_FILE} cannot be examined: ${st.reason}`);
@@ -213,12 +210,14 @@ function writeSeal(phaseDir: string, evidence: Record<string, SealEntry>, prior:
 
 /**
  * #5354: a plan was squashed away when its SUMMARY names task commits and none is reachable from
- * HEAD (a missing object counts as unreachable). A fabricated or foreign id is indistinguishable from a
- * squashed commit that was garbage-collected or never fetched, so it is also `NotEvaluable`: the gate
- * stays advisory and the row is visible to the maintainer rather than escalating on unverifiable ids. No SUMMARY, no listed hash, more than
- * SUMMARY_REFS_MAX distinct hashes, or any reachable hash is an ordinary failure. A ref whose subject
- * still appears on a reachable plan commit was rewritten (rebase/amend), not squashed, so it does not
- * count as unreachable.
+ * HEAD (a missing object counts as unreachable only in a complete history). A fabricated or foreign
+ * id is indistinguishable from a squashed commit that was garbage-collected or never fetched, so it
+ * is also `NotEvaluable`: the gate stays advisory and the row is visible to the maintainer rather
+ * than escalating on unverifiable ids. No SUMMARY, no listed hash, more than SUMMARY_REFS_MAX
+ * distinct hashes, or any reachable hash is an ordinary failure. When every ref's subject still
+ * appears on a reachable plan commit the plan was rewritten (rebase/amend), not squashed, so it is
+ * not unreachable. A squash that repeats a single task subject therefore stays `NotEvaluable`; a
+ * single-task plan squashed under its own subject is indistinguishable from a rewrite and FAILs.
  */
 function summaryCommitsAllUnreachable(projectDir: string, phaseDir: string, planPath: string, reachableSubjects: ReadonlySet<string>): boolean {
   const subjectOf = (id: string): string => {
@@ -238,11 +237,13 @@ function summaryCommitsAllUnreachable(projectDir: string, phaseDir: string, plan
     if (summary.kind !== 'found') continue;
     const refs = [...new Set(extractTaskCommitRefs(summary.value))];
     // More refs than the cap is an ordinary failure: SUMMARY.md is repo content and must not buy unbounded git spawns.
-    return refs.length > 0 && refs.length <= SUMMARY_REFS_MAX && refs.every((id) => {
+    if (refs.length === 0 || refs.length > SUMMARY_REFS_MAX) return false;
+    const probes = refs.map((id) => {
       const r = execGit(['merge-base', '--is-ancestor', id, 'HEAD'], { cwd: projectDir });
-      const u = !r.timedOut && (r.exitCode === 1 || (r.exitCode === 128 && historyComplete()));
-      return u && !(r.exitCode === 1 && reachableSubjects.has(subjectOf(id)));
+      const unreachable = !r.timedOut && (r.exitCode === 1 || (r.exitCode === 128 && historyComplete()));
+      return { unreachable, rewritten: r.exitCode === 1 && reachableSubjects.has(subjectOf(id)) };
     });
+    return probes.every((p) => p.unreachable) && !probes.every((p) => p.rewritten);
   }
   return false;
 }
@@ -344,7 +345,8 @@ export function evaluateTddReviewCheckpoint(input: { projectDir: string; args: r
   const evidence: Record<string, SealEntry> = {};
   for (const planPath of tddPlanFiles) {
     const planId = path.basename(planPath, '-PLAN.md');
-    const kinds = planCommitKinds(projectDir, planId);
+    const commits = planCommits(projectDir, planId);
+    const kinds = commitKinds(commits);
     const sealed = Object.hasOwn(seal, planId) && seal[planId]?.red !== seal[planId]?.green ? seal[planId] : {};
     const redSha = kinds.get('test') ?? (isSha(sealed.red) ? sealed.red : undefined);
     const red = redSha !== undefined;
@@ -358,7 +360,7 @@ export function evaluateTddReviewCheckpoint(input: { projectDir: string; args: r
     const greenFrom: string[] = [];
     if (!ownGreen) {
       for (const dependentId of transitiveDependents(planId, dependents)) {
-        const sha = planCommitKinds(projectDir, dependentId).get('feat');
+        const sha = commitKinds(planCommits(projectDir, dependentId)).get('feat');
         if (sha === undefined) continue;
         greenSha ??= sha;
         greenFrom.push(dependentId);
@@ -371,7 +373,7 @@ export function evaluateTddReviewCheckpoint(input: { projectDir: string; args: r
     if (!red) missing.push('RED');
     if (!green) missing.push('GREEN');
     // #5354: credit incomplete, nothing sealed, and the SUMMARY's task commits are all gone = squashed away.
-    const notEvaluable = missing.length > 0 && !(isSha(sealed.red) || isSha(sealed.green)) && summaryCommitsAllUnreachable(projectDir, phaseDir, planPath, planCommitSubjects(projectDir, planId));
+    const notEvaluable = missing.length > 0 && !(isSha(sealed.red) || isSha(sealed.green)) && summaryCommitsAllUnreachable(projectDir, phaseDir, planPath, new Set(commits.map((commit) => commit.subject)));
     const status: TddPlanRow['status'] = notEvaluable ? 'NotEvaluable' : missing.length === 0 ? 'Pass' : 'FAIL';
     if (redSha !== undefined && greenSha !== undefined) evidence[planId] = { red: redSha, green: greenSha };
 
