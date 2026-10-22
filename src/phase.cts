@@ -1261,7 +1261,8 @@ function roadmapDeclaredPhaseNums(
       const num = parseInt(m[numGroup], 10);
       const id = idGroup !== null && m[idGroup] ? m[idGroup].toUpperCase() : null;
       if (id) {
-        if (isSentinelPhaseId(id, 'bracket') || (onlyMilestone !== null && bracketIdMilestone(id) !== onlyMilestone)) continue;
+        // 999 is a backlog number in any milestone, as in the legacy scans.
+        if (isSentinelPhaseId(id, 'bracket') || isSentinelPhaseId(num, 'bracket') || (onlyMilestone !== null && bracketIdMilestone(id) !== onlyMilestone)) continue;
       } else if (isSentinelPhaseId(num)) continue;
       nums.add(num);
     }
@@ -1277,7 +1278,7 @@ function roadmapDeclaredPhaseNums(
 function dirPhaseNum(entry: string, convention: string | null, onlyMilestone: number | null): number | null {
   const bracketDir = convention === 'bracket' ? parseBracketPhaseDir(entry) : null;
   if (bracketDir) {
-    const skip = isSentinelPhaseDir(entry.toUpperCase()) || (onlyMilestone !== null && bracketDir.milestone !== onlyMilestone);
+    const skip = isSentinelPhaseDir(entry.toUpperCase()) || isSentinelPhaseId(bracketDir.phase, 'bracket') || (onlyMilestone !== null && bracketDir.milestone !== onlyMilestone);
     return skip ? null : bracketDir.phase;
   }
   const match = entry.match(/^(?:[A-Z][A-Z0-9]*-)?(\d+)-/);
@@ -1291,8 +1292,8 @@ function dirPhaseNum(entry: string, convention: string | null, onlyMilestone: nu
  * cannot be trusted — numbering then counts every milestone, which can only skip a number. Bracket ids
  * restart per milestone, so a finished milestone's leftover `GSD.01-12-x` must not push milestone 2's
  * next phase to 13. `getMilestoneInfo` falls back to the first `vN.M` in roadmap prose ("requires Node
- * v18.0") when STATE.md names none, so the version is trusted only when STATE.md names it or `content`
- * (the current milestone's text) itself carries a `[CODE.N]` id for it; a wrong milestone would otherwise drop the
+ * v18.0") when STATE.md names none, so the version is trusted only when `content`
+ * (the current milestone's text) carries a `[CODE.N]` id for it, or STATE.md names it and no id there says otherwise; a wrong milestone would otherwise drop the
  * real one's directories and let their numbers be reused.
  */
 function activeBracketMilestone(cwd: string, convention: string | null, content: string): number | null {
@@ -1301,18 +1302,24 @@ function activeBracketMilestone(cwd: string, convention: string | null, content:
   const m = typeof version === 'string' ? version.match(/^v?(\d+)/i) : null;
   const milestone = m ? parseInt(m[1], 10) : null;
   if (milestone === null) return null;
-  // STATE.md naming the milestone is first-hand, even before any phase of it is tagged.
-  try {
-    const state = fs.readFileSync(path.join(planningDir(cwd), 'STATE.md'), 'utf-8');
-    const declared = state.match(/^milestone:\s*["']?v?(\d+)/im);
-    if (declared && parseInt(declared[1], 10) === milestone) return milestone;
-  } catch { /* no STATE.md: fall through to the roadmap's own ids */ }
+  let tagged = false;
   for (const { regex, idGroup } of buildPhaseDeclarationScans(convention)) {
     if (idGroup === null) continue;
     let hit: RegExpExecArray | null;
     while ((hit = regex.exec(content)) !== null) {
-      if (hit[idGroup] && bracketIdMilestone(hit[idGroup].toUpperCase()) === milestone) return milestone;
+      if (!hit[idGroup]) continue;
+      if (bracketIdMilestone(hit[idGroup].toUpperCase()) === milestone) return milestone;
+      tagged = true;
     }
+  }
+  // STATE.md naming the milestone is first-hand, but only while no id contradicts it: ids of
+  // another MM mean STATE's `vN` is not the number these directories carry (`v1.0` over `[GSD.02]`).
+  if (!tagged) {
+    try {
+      const state = fs.readFileSync(path.join(planningDir(cwd), 'STATE.md'), 'utf-8');
+      const declared = state.match(/^milestone:\s*["']?v?(\d+)/im);
+      if (declared && parseInt(declared[1], 10) === milestone) return milestone;
+    } catch { /* no STATE.md: nothing first-hand */ }
   }
   return null;
 }

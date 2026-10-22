@@ -3088,9 +3088,29 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
     assert.match(text, /### Phase 6: New thing[\s\S]*?\*\*Depends on:\*\* Phase 1\b/);
   });
 
-  test('checkbox length boundary: 200 characters still counts, 201 does not (limit/limit+1)', () => {
+  test('a STATE milestone whose number no bracket id carries does not hide that id\'s directories (v1.0 STATE, [GSD.02] ids)', () => {
+    setup(['# Roadmap', '', '### [GSD.02] 01: Current', ''], { milestone: 'v1.0', dirs: ['GSD.02-05-held'] });
+    assert.strictEqual(runGsdTools('phase add "New thing" --raw', tmp).output.trim(), '06');
+    setup(['# Roadmap', '', '### [GSD.02] 01: Current', ''], { milestone: 'v1.0', dirs: ['GSD.02-05-held'] });
+    const batch = runGsdTools(['phase', 'add-batch', '--descriptions', '["A","B"]'], tmp);
+    assert.deepStrictEqual(JSON.parse(batch.output).phases.map((p) => p.phase_number), [6, 7]);
+  });
+
+  test('a no-checkbox prose bullet "- [GSD.02] 2026 release notes" is not a phase', () => {
+    setup(['# Roadmap', '', '## Milestone v2.0', '', '- [GSD.02] 01: Real', '- [GSD.02] 2026 release notes', '']);
+    assert.strictEqual(runGsdTools('phase add "New thing" --raw', tmp).output.trim(), '02');
+  });
+
+  test('phase 999 inside an ordinary milestone is a sentinel, in a heading and in a directory', () => {
+    setup(['# Roadmap', '', '## Milestone v2.0', '', '### [GSD.02] 01: Real', '', '### [GSD.02] 999: Backlog', ''], { dirs: ['GSD.02-999-parked'] });
+    assert.strictEqual(runGsdTools('phase add "New thing" --raw', tmp).output.trim(), '02');
+  });
+
+  test('checkbox length boundary: 199 and 200 characters still count, 201 does not (limit-1/limit/limit+1)', () => {
     setup(['# Roadmap', '', '## Milestone v2.0', '', `- [${'x'.repeat(200)}] **[GSD.02] 05: At the limit**`, '']);
     assert.strictEqual(runGsdTools('phase add "New thing" --raw', tmp).output.trim(), '06');
+    setup(['# Roadmap', '', '## Milestone v2.0', '', `- [${'x'.repeat(199)}] **[GSD.02] 05: Below the limit**`, '']);
+    assert.strictEqual(runGsdTools('phase add "Below" --raw', tmp).output.trim(), '06');
     setup(['# Roadmap', '', '## Milestone v2.0', '', `- [${'x'.repeat(201)}] **[GSD.02] 05: Over the limit**`, '']);
     assert.strictEqual(runGsdTools('phase add "Another" --raw', tmp).output.trim(), '01');
   });
@@ -3104,7 +3124,7 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
           ...nums.map((n) => (asBullets ? `- [ ] **[GSD.02] ${nn(n)}: P${n}**` : `### [GSD.02] ${nn(n)}: P${n}`)), '']);
         return runGsdTools('phase add "New thing" --raw', tmp).output.trim() === nn(Math.max(...nums) + 1);
       }),
-      { numRuns: 6, seed: 5528 },
+      { numRuns: 20, seed: 5528 },
     );
   });
 

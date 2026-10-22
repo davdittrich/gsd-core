@@ -430,7 +430,8 @@ function buildPhaseDeclarationScans(convention?: string | null, withBullets = tr
   if (withBullets) {
     const label = `(?:\\[(${BRACKET_ID_SRC})\\][ \\t]*(?:Phase[ \\t]+|(?=\\d))|Phase[ \\t]+)`;
     scans.push({ regex: new RegExp(`${bullet}${checkbox}\\*{0,2}${label}${tail}`, 'gim'), idGroup: 1, numGroup: 2 });
-    scans.push({ regex: new RegExp(`${bullet}\\*{0,2}\\[(${BRACKET_ID_SRC})\\][ \\t]*(?:Phase[ \\t]+|(?=\\d))${tail}`, 'gim'), idGroup: 1, numGroup: 2 });
+    // No checkbox to vouch for it: the number needs a `:` or end of line, or `- [GSD.02] 2026 notes` is phase 2026.
+    scans.push({ regex: new RegExp(`${bullet}\\*{0,2}\\[(${BRACKET_ID_SRC})\\][ \\t]*(?:Phase[ \\t]+|(?=\\d))(\\d+)(?=:|[ \\t]*$)`, 'gim'), idGroup: 1, numGroup: 2 });
   }
   return scans;
 }
