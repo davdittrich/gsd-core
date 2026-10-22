@@ -2122,7 +2122,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     const dir = makePhaseProject('05-widgets');
     t.after(() => cleanup(dir));
     const pad = fc.stringMatching(/^[ \t]{0,3}$/);
-    fc.assert(fc.property(fc.boolean(), pad, pad, fc.stringMatching(/^[a-z]{1,6}$/), (eq, l, r, junk) => {
+    fc.assert(fc.property(fc.boolean(), pad, pad, fc.stringMatching(/^[a-zA-Z0-9._=-]{0,8}$/), (eq, l, r, junk) => {
       const padded = `${l}05${r}`;
       const ok = renderWithPhase(dir, 'plan:pre', eq ? [`--phase=${padded}`, '--raw'] : ['--phase', padded, '--raw']);
       assert.strictEqual(ok.exitCode, 0, ok.stderr);
