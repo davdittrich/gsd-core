@@ -426,7 +426,7 @@ function buildPhaseDeclarationScans(convention?: string | null, withBullets = tr
     if (withBullets) scans.push({ regex: new RegExp(`${bullet}${checkbox}\\*{0,2}Phase[ \\t]+${tail}`, 'gim'), idGroup: null, numGroup: 1 });
     return scans;
   }
-  scans.push({ regex: new RegExp(`^ {0,3}#{2,4}\\s*Phase[ \\t]+\\[(${BRACKET_ID_SRC})\\][ \\t]*(\\d+)`, 'gim'), idGroup: 1, numGroup: 2 });
+  scans.push({ regex: new RegExp(`^ {0,3}#{2,4}\\s*Phase[ \\t]+\\[(${BRACKET_ID_SRC})\\][ \\t]*(${PHASE_NUMBER_TOKEN_SOURCE})${OPTIONAL_PHASE_TAG_SOURCE}\\s*:`, 'gim'), idGroup: 1, numGroup: 2 });
   if (withBullets) {
     const label = `(?:\\[(${BRACKET_ID_SRC})\\][ \\t]*(?:Phase[ \\t]+|(?=\\d))|Phase[ \\t]+)`;
     scans.push({ regex: new RegExp(`${bullet}${checkbox}\\*{0,2}${label}${tail}`, 'gim'), idGroup: 1, numGroup: 2 });
@@ -1839,7 +1839,6 @@ export = {
   BRACKET_MILESTONE_INTRO_CAPTURING_SRC,
   BRACKET_MILESTONE_NUMERIC_SRC,
   BRACKET_DIR_PREFIX_SRC,
-  BRACKET_DIR_TOKEN_RE,
   BASE_ANY_BRACKET_HEADING_PREFIX_SRC,
   BASE_PHASE_LABEL_PREFIX_SRC,
   PHASE_HEADING_BASELINE,

@@ -1287,7 +1287,7 @@ function dirPhaseNum(entry: string, convention: string | null, onlyMilestone: nu
 
 /**
  * The milestone integer bracket numbering is scoped to: the active milestone's `vN` (null when none
- * resolves, which scopes nothing). Bracket ids restart per milestone, so a finished milestone's
+ * resolves, which scopes nothing — numbering then counts every milestone, erring toward a skipped number). Bracket ids restart per milestone, so a finished milestone's
  * leftover `GSD.01-12-x` must not push milestone 2's next phase to 13.
  */
 function activeBracketMilestone(cwd: string, convention: string | null): number | null {
@@ -1537,7 +1537,7 @@ function cmdPhaseAdd(cwd: string, description: string, raw: boolean, customId?: 
     platformWriteSync(path.join(dirPath, '.gitkeep'), '');
 
     const dependsOn =
-      config.phase_naming === 'custom' ? '' : dependsOnLine(_newPhaseId, roadmapDeclaredPhaseNums(rawContent, convention));
+      config.phase_naming === 'custom' ? '' : dependsOnLine(_newPhaseId, roadmapDeclaredPhaseNums(rawContent, convention, true, activeMilestone));
     const phaseEntry =
       `\n### Phase ${_newPhaseId}: ${description}\n\n**Goal:** [To be planned]\n**Requirements**: TBD${dependsOn}\n**Plans:** 0 plans\n\nPlans:\n- [ ] TBD (run ${formatGsdSlash('plan-phase', resolveRuntime(cwd)) as string} ${_newPhaseId} to break down)\n`;
 
@@ -1629,7 +1629,7 @@ function cmdPhaseAddBatch(cwd: string, descriptions: string[], raw: boolean): vo
       platformEnsureDir(dirPath);
       platformWriteSync(path.join(dirPath, '.gitkeep'), '');
       const dependsOn =
-        config.phase_naming === 'custom' ? '' : dependsOnLine(newPhaseId, roadmapDeclaredPhaseNums(rawContent, convention));
+        config.phase_naming === 'custom' ? '' : dependsOnLine(newPhaseId, roadmapDeclaredPhaseNums(rawContent, convention, true, activeMilestone));
       const phaseEntry =
         `\n### Phase ${newPhaseId}: ${description}\n\n**Goal:** [To be planned]\n**Requirements**: TBD${dependsOn}\n**Plans:** 0 plans\n\nPlans:\n- [ ] TBD (run ${formatGsdSlash('plan-phase', resolveRuntime(cwd)) as string} ${newPhaseId} to break down)\n`;
       const insertAt = phaseEntryInsertOffset(rawContent, cwd);

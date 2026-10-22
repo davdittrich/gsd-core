@@ -3070,6 +3070,18 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
     assert.strictEqual(runGsdTools('phase add "New thing" --raw', tmp).output.trim(), '01');
   });
 
+  test('Depends on names a phase of the active milestone, not an archived one (the number came from a directory)', () => {
+    setup(['# Roadmap', '', '## Milestone v1.0 (shipped)', '', '### [GSD.01] 04: Old', '', '## Milestone v2.0', '', '### [GSD.02] 01: Current', ''], { dirs: ['GSD.02-05-held'] });
+    assert.strictEqual(runGsdTools('phase add "New thing" --raw', tmp).output.trim(), '06');
+    const text = fs.readFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), 'utf-8');
+    assert.match(text, /### Phase 6: New thing[\s\S]*?\*\*Depends on:\*\* Phase 1\b/);
+  });
+
+  test('a prose heading "## Phase [GSD.02] 12 notes" (no colon) is not a phase', () => {
+    setup(['# Roadmap', '', '## Milestone v2.0', '', '### [GSD.02] 01: Real', '', '## Phase [GSD.02] 12 notes', '']);
+    assert.strictEqual(runGsdTools('phase add "New thing" --raw', tmp).output.trim(), '02');
+  });
+
   test('checkbox length boundary: 200 characters still counts, 201 does not (limit/limit+1)', () => {
     setup(['# Roadmap', '', '## Milestone v2.0', '', `- [${'x'.repeat(200)}] **[GSD.02] 05: At the limit**`, '']);
     assert.strictEqual(runGsdTools('phase add "New thing" --raw', tmp).output.trim(), '06');
