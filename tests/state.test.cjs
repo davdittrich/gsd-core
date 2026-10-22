@@ -5761,10 +5761,27 @@ describe('state planned-phase command', () => {
     writeTbdPlanFixture(['Phase: 19', 'Plan: 2 of 4 in current phase', 'Status: Ready']);
     const statePath = path.join(tmpDir, '.planning', 'STATE.md');
     const before = fs.readFileSync(statePath);
-    const r = runGsdTools(['state', 'planned-phase', '--phase', '19', '--name', 'Tbd', '--plans', '1'], tmpDir);
+    const r = runGsdTools(['state', 'planned-phase', '--phase', '19', '--name', 'Tbd', '--plans', '0'], tmpDir);
     assert.strictEqual(r.success, false);
-    assert.match(r.error, /--plans 1 is below the executed plan count 2/);
+    assert.match(r.error, /--plans 0 is below the executed plan count 1/);
     assert.ok(fs.readFileSync(statePath).equals(before));
+  });
+
+  test('#5320: executed count is N-1 of `Plan: N of M` (N is the first plan still to run)', () => {
+    const statePath = path.join(tmpDir, '.planning', 'STATE.md');
+    // Plan: 3 of 5 -> 2 executed: --plans 2 accepted, --plans 1 refused naming 2.
+    writeTbdPlanFixture(['Phase: 19', 'Plan: 3 of 5 in current phase', 'Status: Ready']);
+    assert.ok(runGsdTools(['state', 'planned-phase', '--phase', '19', '--name', 'Tbd', '--plans', '2'], tmpDir).success);
+    writeTbdPlanFixture(['Phase: 19', 'Plan: 3 of 5 in current phase', 'Status: Ready']);
+    const before = fs.readFileSync(statePath);
+    const bad = runGsdTools(['state', 'planned-phase', '--phase', '19', '--name', 'Tbd', '--plans', '1'], tmpDir);
+    assert.strictEqual(bad.success, false);
+    assert.match(bad.error, /--plans 1 is below the executed plan count 2/);
+    assert.ok(fs.readFileSync(statePath).equals(before));
+    // Plan: 1 of 5 (right after begin-phase) -> nothing executed: --plans 0 accepted.
+    writeTbdPlanFixture(['Phase: 19', 'Plan: 1 of 5 in current phase', 'Status: Ready']);
+    const zero = runGsdTools(['state', 'planned-phase', '--phase', '19', '--name', 'Tbd', '--plans', '0'], tmpDir);
+    assert.ok(zero.success, zero.error);
   });
 
   test('#5320: invalid --plans values are rejected before any write', () => {
@@ -5800,7 +5817,7 @@ describe('state planned-phase command', () => {
 
     writeTbdPlanFixture(lines);
     const before = fs.readFileSync(statePath);
-    const bad = runGsdTools(['state', 'planned-phase', '--phase', '19', '--name', 'Tbd', '--plans', '1'], tmpDir);
+    const bad = runGsdTools(['state', 'planned-phase', '--phase', '19', '--name', 'Tbd', '--plans', '0'], tmpDir);
     assert.strictEqual(bad.success, false);
     assert.ok(fs.readFileSync(statePath).equals(before), 'STATE.md must stay byte-identical');
   });
@@ -5823,7 +5840,7 @@ describe('state planned-phase command', () => {
 
   test('#5320: planned-phase refusals carry the typed `usage` reason under --json-errors', () => {
     writeTbdPlanFixture(['Phase: 19', 'Plan: 2 of 4 in current phase', 'Status: Ready']);
-    const r = runGsdTools(['state', 'planned-phase', '--phase', '19', '--name', 'Tbd', '--plans', '1', '--json-errors'], tmpDir);
+    const r = runGsdTools(['state', 'planned-phase', '--phase', '19', '--name', 'Tbd', '--plans', '0', '--json-errors'], tmpDir);
     assert.strictEqual(r.success, false);
     assert.strictEqual(JSON.parse(r.error).reason, 'usage');
   });
@@ -5843,9 +5860,25 @@ describe('state planned-phase command', () => {
 
   test('#5320: --plans equal to the executed plan count is accepted', () => {
     writeTbdPlanFixture(['Phase: 19', 'Plan: 2 of 4 in current phase', 'Status: Ready']);
-    const r = runGsdTools(['state', 'planned-phase', '--phase', '19', '--name', 'Tbd', '--plans', '2'], tmpDir);
+    const r = runGsdTools(['state', 'planned-phase', '--phase', '19', '--name', 'Tbd', '--plans', '1'], tmpDir);
     assert.ok(r.success, r.error);
-    assert.match(fs.readFileSync(path.join(tmpDir, '.planning', 'STATE.md'), 'utf8'), /^Plan: 2 of 2 in current phase$/m);
+    assert.match(fs.readFileSync(path.join(tmpDir, '.planning', 'STATE.md'), 'utf8'), /^Plan: 2 of 1 in current phase$/m);
+  });
+
+  test('#5320: --plans=3 and shell metacharacters are rejected with STATE.md unchanged; a duplicate --plans keeps the first value', () => {
+    writeTbdPlanFixture(TBD_BODY);
+    const statePath = path.join(tmpDir, '.planning', 'STATE.md');
+    const before = fs.readFileSync(statePath);
+    const base = ['state', 'planned-phase', '--phase', '19', '--name', 'Tbd'];
+    for (const extra of [['--plans=3'], ['--plans', '3;ls']]) {
+      const r = runGsdTools([...base, ...extra], tmpDir);
+      assert.strictEqual(r.success, false, `${extra.join(' ')} must fail`);
+      assert.notStrictEqual(r.exitCode, 0);
+      assert.ok(fs.readFileSync(statePath).equals(before), `${extra.join(' ')} must not write`);
+    }
+    const dup = runGsdTools([...base, '--plans', '3', '--plans', '4'], tmpDir);
+    assert.ok(dup.success, dup.error);
+    assert.match(fs.readFileSync(statePath, 'utf8'), /^Plan: 0 of 3 in current phase$/m);
   });
 
   test('#5320: state begin-phase --plans 3.5 is rejected (no silent truncation to 3)', () => {

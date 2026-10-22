@@ -6167,8 +6167,9 @@ function cmdStatePlannedPhase(cwd: string, phaseNumber: string | number | null |
   // sync and this command's `authoritativeFm: {current_phase_name}` override
   // both run INSIDE the transform (via `frontmatterMod.reconstructFrontmatter`
   // over `existingFm`), so an unrecognized-format STATE.md — zero fields the
-  // transition could actually apply, `updated: []`, the "transition was a
-  // no-op" warning above — can still make the raw returned string differ
+  // transition could actually apply, `updated: []`, the "No fields changed"
+  // warning above (without --plans only; with --plans such a document errors
+  // in the callback before any write) — can still make the raw returned string differ
   // from the input (frontmatter gets synthesized: `gsd_state_version`,
   // `last_updated`, a zeroed `progress` block, `current_phase_name`), so the
   // RMW guard does NOT fire and a real write happens. That write is not a

@@ -2596,12 +2596,15 @@ function plannedPhaseCore(
   const fmPhase = existingFm['current_phase'];
   const recordedPhase = bodyPhase ?? (typeof fmPhase === 'string' || typeof fmPhase === 'number' ? String(fmPhase) : null);
   const samePhase = phaseIdMod.phaseKeyFromProse(recordedPhase) === phaseIdMod.phaseKeyFromToken(intent.phaseNumber);
-  const executedAbove: { n?: number } = {};
+  // Same-phase `N of M` / bare `N` of a Current Position plan line; null for a different phase.
+  const planMatch = (name: string): RegExpExecArray | null => {
+    const raw = stateExtractField(posBefore, name) ?? '';
+    return samePhase ? (PLAN_SHAPE_N_OF_M.exec(raw) ?? PLAN_SHAPE_N.exec(raw)) : null;
+  };
   const planValue = (name: string): string | undefined => {
     if (intent.planCount == null) return undefined;
     const raw = stateExtractField(posBefore, name) ?? '';
-    const m = samePhase ? (PLAN_SHAPE_N_OF_M.exec(raw) ?? PLAN_SHAPE_N.exec(raw)) : null;
-    if (m && Number(m[1]) > intent.planCount) executedAbove.n =Number(m[1]);
+    const m = planMatch(name);
     // A bare `N` beside `Total Plans in Phase:` is the legacy pair; the Total line already carries M.
     // Same phase keeps N; a new phase resets it to 0 in the same bare shape.
     if (totalRecorded && PLAN_SHAPE_BARE_N.test(raw)) return samePhase ? undefined : '0';
@@ -2629,8 +2632,17 @@ function plannedPhaseCore(
     && stateExtractField(posBefore, 'Plan') === null && stateExtractField(posBefore, 'Current Plan') === null) {
     return { content, updated: [], data: { planError: 'state planned-phase: --plans has no line to land on. Add `Plan: 0 TBD in current phase` under `## Current Position` (or a `Total Plans in Phase:` line) and retry.' } };
   }
-  if (executedAbove.n !== undefined) {
-    return { content, updated: [], data: { planError: `state planned-phase: --plans ${intent.planCount} is below the executed plan count ${executedAbove.n}.` } };
+  // The recorded N is the plan position (beginPhaseCore writes the first plan still to run), so N - 1 plans are done.
+  if (intent.planCount != null) {
+    let executed = 0;
+    for (const name of ['Plan', 'Current Plan']) {
+      const m = planMatch(name);
+      const n = m ? planNumberFrom(m[1]) : null;
+      if (n !== null) executed = Math.max(executed, n - 1);
+    }
+    if (executed > intent.planCount) {
+      return { content, updated: [], data: { planError: `state planned-phase: --plans ${intent.planCount} is below the executed plan count ${executed}.` } };
+    }
   }
 
   // #2400 Bug B: sync progress.total_plans to the frontmatter when a plan count
