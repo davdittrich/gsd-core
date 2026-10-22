@@ -1,9 +1,9 @@
 /**
  * roadmap-parser.cjs — unit tests
  *
- * Covers the 6 functions extracted from core.cjs per ADR-857 rollout
+ * Covers the 5 functions extracted from core.cjs per ADR-857 rollout
  * phase 2b (#870): stripShippedMilestones, extractCurrentMilestone,
- * replaceInCurrentMilestone, getRoadmapPhaseInternal, getMilestoneInfo,
+ * getRoadmapPhaseInternal, getMilestoneInfo,
  * getMilestonePhaseFilter.
  *
  * Includes:
@@ -30,7 +30,6 @@ const { createTempProject, cleanup, runGsdTools } = require('./helpers.cjs');
 const {
   stripShippedMilestones,
   extractCurrentMilestone,
-  replaceInCurrentMilestone,
   getRoadmapPhaseInternal,
   getMilestoneInfo,
   getMilestonePhaseFilter,
@@ -762,31 +761,6 @@ describe('roadmap-parser: extractCurrentMilestone', () => {
 
       fc.assert(prop, { seed: 20260809, numRuns: 300, verbose: true });
     }
-  });
-});
-
-// ─── replaceInCurrentMilestone ────────────────────────────────────────────────
-
-describe('roadmap-parser: replaceInCurrentMilestone', () => {
-  test('replaces in content after last </details> when present', () => {
-    const content = '<details>\nold\n</details>\n**Plans:** 0/1 plans';
-    const result = replaceInCurrentMilestone(content, /0\/1 plans/, '1/1 plans complete');
-    assert.ok(result.includes('1/1 plans complete'), 'replacement applied after </details>');
-    assert.ok(result.includes('<details>'), 'details block untouched');
-  });
-
-  test('replaces anywhere when no </details> present', () => {
-    const content = '**Plans:** 0/1 plans';
-    const result = replaceInCurrentMilestone(content, /0\/1 plans/, '1/1 plans complete');
-    assert.strictEqual(result, '**Plans:** 1/1 plans complete');
-  });
-
-  test('does not replace in shipped sections', () => {
-    const content = '<details>\n**Plans:** 0/1 plans\n</details>\n## v2.0\n**Plans:** 0/1 plans';
-    const result = replaceInCurrentMilestone(content, /0\/1 plans/, '1/1 plans complete');
-    // Only the SECOND occurrence (after </details>) should be replaced
-    assert.ok(result.includes('<details>\n**Plans:** 0/1 plans\n</details>'), 'shipped section unchanged');
-    assert.ok(result.includes('## v2.0\n**Plans:** 1/1 plans complete'), 'current section updated');
   });
 });
 

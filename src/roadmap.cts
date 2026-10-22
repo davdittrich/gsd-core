@@ -26,7 +26,7 @@ const { SCOPE } = planningScopeMod;
 type Scope = planningScopeMod.Scope;
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import roadmapParserModule = require('./roadmap-parser.cjs');
-const { stripShippedMilestones, extractCurrentMilestone, extractCurrentMilestoneScoped, editCurrentMilestone, activeMilestoneText, checklistBulletExtent, withPhaseSection, listMilestoneHeadings, scanMilestonePhaseIds, collectTablePhaseRows, hasPhaseListingTableHeader } = roadmapParserModule;
+const { stripShippedMilestones, extractCurrentMilestone, extractCurrentMilestoneScoped, editCurrentMilestone, checklistBulletExtent, withPhaseSection, listMilestoneHeadings, scanMilestonePhaseIds, collectTablePhaseRows, hasPhaseListingTableHeader } = roadmapParserModule;
 import { tokenizeHeadings } from './markdown-sectionizer.cjs';
 import { escapeCell, findTableWithColumns, updateTableCell } from './markdown-table.cjs';
 import { clampPercent } from './phase-lifecycle.cjs';
@@ -1088,9 +1088,8 @@ function cmdRoadmapMilestoneScope(cwd: string, raw: boolean): void {
  * Scope a ROADMAP.md content string down to its "Progress table" writable
  * slice, run `edit` against just that slice, then splice the result back into
  * the original content (ADR-2143 §7). Layered scoping:
- *   1. Milestone scope — everything after the LAST `</details>` close tag
- *      (mirrors `replaceInCurrentMilestone`), so a same-numbered phase row in
- *      an archived milestone is never touched.
+ *   1. Milestone scope — everything after the LAST `</details>` close tag, so a
+ *      same-numbered phase row in an archived milestone is never touched.
  *   2. Heading scope — within that milestone slice, the `## Progress` heading
  *      section (up to the next `#`/`##` heading) when present, else the whole
  *      milestone slice (mirrors phase-lifecycle.cjs's `deriveProgressFromRoadmap`
@@ -1281,7 +1280,8 @@ function cmdRoadmapUpdatePlanProgress(cwd: string, phaseNum: string | null | und
     // writable phase representation" rather than "did some regex fire
     // mid-transform". (Slicing after the LAST </details> missed an active
     // phase followed by a non-milestone <details> notes block.)
-    const gateActiveRegion = activeMilestoneText(originalContent, cwd);
+    let gateActiveRegion = '';
+    editCurrentMilestone(originalContent, cwd, (window) => { gateActiveRegion += `${window}\n`; return window; });
     // Heading target: the exact grammar `planSectionPattern` /
     // `insertRowsPatternA|B` anchor on (an ATX phase heading for this phase).
     const headingTargetFound = new RegExp(phaseHeadingAnchor, 'i').test(gateActiveRegion);

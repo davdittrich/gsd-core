@@ -1457,30 +1457,6 @@ function extractCurrentMilestone(content: string, cwd?: string, ws?: string | nu
 }
 
 /**
- * Replace a pattern only in the current milestone section of ROADMAP.md.
- */
-type RoadmapReplacer = (match: string, ...captures: string[]) => string;
-
-function replaceInCurrentMilestone(
-  content: string,
-  pattern: RegExp,
-  replacement: string | RoadmapReplacer,
-): string {
-  const apply = (src: string): string =>
-    typeof replacement === 'function'
-      ? src.replace(pattern, replacement)
-      : src.replace(pattern, replacement);
-  const lastDetailsClose = content.lastIndexOf('</details>');
-  if (lastDetailsClose === -1) {
-    return apply(content);
-  }
-  const offset = lastDetailsClose + '</details>'.length;
-  const before = content.slice(0, offset);
-  const after = content.slice(offset);
-  return before + apply(after);
-}
-
-/**
  * Resolve a single phase's detail-section heading (`### Phase N: …`, any level
  * 1–6, via the #2121 phase-id source) and run `edit` against ONLY that
  * section's body. Delegates to `withSection` (markdown-sectionizer.cjs), so a
@@ -2428,16 +2404,6 @@ function editCurrentMilestone(content: string, cwd: string | undefined, edit: (t
 }
 
 /**
- * The current milestone's window text, as `editCurrentMilestone` hands it to a
- * writer (windows joined by a newline), read without editing.
- */
-function activeMilestoneText(content: string, cwd: string | undefined): string {
-  let text = '';
-  editCurrentMilestone(content, cwd, (window) => { text += `${window}\n`; return window; });
-  return text;
-}
-
-/**
  * [start,end) of the rows nested under a phase's checklist bullet: from the
  * line after `bullet` (a match of the caller's bullet pattern in `text`) up to a
  * blank line, a shallower line, or a line matching `nextPhaseBullet`. Empty when
@@ -2466,7 +2432,6 @@ export = {
   extractCurrentMilestoneScoped,
   isMilestoneShippedInRoadmap,
   isMilestoneBoundedInRoadmap,
-  replaceInCurrentMilestone,
   getRoadmapPhaseInternal,
   getMilestoneInfo,
   classifyMilestoneScalar,
@@ -2475,7 +2440,6 @@ export = {
   withPhaseSection,
   editOutsideShippedBlocks,
   editCurrentMilestone,
-  activeMilestoneText,
   checklistBulletExtent,
   computeMilestoneSectionEnd,
   locateMilestoneHeadings,
