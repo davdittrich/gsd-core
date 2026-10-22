@@ -100,12 +100,7 @@ Code review fix skipped (code-review capability inactive)
 ```
 Remove the spent lane evidence (#5019), then exit workflow:
 ```bash
-LE="${REVIEW_PATH%.md}-lane-evidence.md"
-if [ -f "$LE" ]; then
-  S=$(head -n 1 "$LE"); D="${TMPDIR:-/tmp}/gsd-review-lanes-$S"
-  case "$S" in *[!A-Za-z0-9]*|'') ;; ??????) [ -d "$D" ] && [ ! -L "$D" ] && rm -rf "$D";; esac
-  rm -f "$LE"
-fi
+gsd_run lane-evidence-clear "$REVIEW_PATH"
 ```
 
 
@@ -121,12 +116,7 @@ Verify that REVIEW.md exists:
 if [ ! -f "${REVIEW_PATH}" ]; then
   echo "Error: No REVIEW.md found for Phase ${PHASE_ARG}. Run /gsd:code-review ${PHASE_ARG} first."
   # #5019: spent lane evidence goes before the exit (same fence as cleanup_iteration_backups)
-  LE="${REVIEW_PATH%.md}-lane-evidence.md"
-  if [ -f "$LE" ]; then
-    S=$(head -n 1 "$LE"); D="${TMPDIR:-/tmp}/gsd-review-lanes-$S"
-    case "$S" in *[!A-Za-z0-9]*|'') ;; ??????) [ -d "$D" ] && [ ! -L "$D" ] && rm -rf "$D";; esac
-    rm -f "$LE"
-  fi
+  gsd_run lane-evidence-clear "$REVIEW_PATH"
   exit 1
 fi
 ```
@@ -157,12 +147,7 @@ No issues to fix in Phase ${PHASE_ARG} REVIEW.md (status: ${REVIEW_STATUS}).
 ```
 Remove the spent lane evidence (#5019), then exit workflow:
 ```bash
-LE="${REVIEW_PATH%.md}-lane-evidence.md"
-if [ -f "$LE" ]; then
-  S=$(head -n 1 "$LE"); D="${TMPDIR:-/tmp}/gsd-review-lanes-$S"
-  case "$S" in *[!A-Za-z0-9]*|'') ;; ??????) [ -d "$D" ] && [ ! -L "$D" ] && rm -rf "$D";; esac
-  rm -f "$LE"
-fi
+gsd_run lane-evidence-clear "$REVIEW_PATH"
 ```
 
 
@@ -268,12 +253,7 @@ Error: Code fix agent failed: ${error_message}
 
 Remove the spent lane evidence (#5019):
 ```bash
-LE="${REVIEW_PATH%.md}-lane-evidence.md"
-if [ -f "$LE" ]; then
-  S=$(head -n 1 "$LE"); D="${TMPDIR:-/tmp}/gsd-review-lanes-$S"
-  case "$S" in *[!A-Za-z0-9]*|'') ;; ??????) [ -d "$D" ] && [ ! -L "$D" ] && rm -rf "$D";; esac
-  rm -f "$LE"
-fi
+gsd_run lane-evidence-clear "$REVIEW_PATH"
 ```
 
 Check if FIX_REPORT_PATH exists:
@@ -571,12 +551,7 @@ every exit of this workflow runs this fence (AUTO_MODE or not; with no file it i
 the file is read as data: only a 6-char alphanumeric `mktemp` suffix is accepted, never a path.
 
 ```bash
-LE="${REVIEW_PATH%.md}-lane-evidence.md"
-if [ -f "$LE" ]; then
-  S=$(head -n 1 "$LE"); D="${TMPDIR:-/tmp}/gsd-review-lanes-$S"
-  case "$S" in *[!A-Za-z0-9]*|'') ;; ??????) [ -d "$D" ] && [ ! -L "$D" ] && rm -rf "$D";; esac
-  rm -f "$LE"
-fi
+gsd_run lane-evidence-clear "$REVIEW_PATH"
 ```
 </step>
 

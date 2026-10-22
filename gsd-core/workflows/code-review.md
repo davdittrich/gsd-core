@@ -538,12 +538,7 @@ REVIEW_PATH="${PHASE_DIR}/${PADDED_PHASE}-REVIEW.md"
 # #5019: a previous run's persisted lane evidence (and its kept lane dir) is stale on every route,
 # including the `--fix` recovery below that skips commit_review. Line 1 is data: only a 6-char
 # alphanumeric mktemp suffix is accepted, never a path.
-LE="${REVIEW_PATH%.md}-lane-evidence.md"
-if [ -f "$LE" ]; then
-  S=$(head -n 1 "$LE"); D="${TMPDIR:-/tmp}/gsd-review-lanes-$S"
-  case "$S" in *[!A-Za-z0-9]*|'') ;; ??????) [ -d "$D" ] && [ ! -L "$D" ] && rm -rf "$D";; esac
-  rm -f "$LE"
-fi
+gsd_run lane-evidence-clear "$REVIEW_PATH"
 if [ "${#REVIEW_FILES[@]}" -ne 0 ]; then
   # non-empty scope: no-op
   true

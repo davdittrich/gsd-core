@@ -400,6 +400,8 @@ export default tseslint.config(
       'gsd-core/bin/lib/cli-skew-check.cjs',
       // issue #3146: tsc-generated runtime artifact — lint the src/runtime-identity.cts source.
       'gsd-core/bin/lib/runtime-identity.cjs',
+      // issue #5019: tsc-generated runtime artifact — lint the src/lane-evidence.cts source.
+      'gsd-core/bin/lib/lane-evidence.cjs',
       // issue #1355: tsc-generated runtime artifact — lint the src/teams-status.cts source.
       'gsd-core/bin/lib/teams-status.cjs',
       // ADR-1372: tsc-generated runtime artifact — lint the src/markdown-sectionizer.cts source.

@@ -43,6 +43,7 @@ const { createTempDir, cleanup } = require('./helpers.cjs');
 const { splitLines } = require('../gsd-core/bin/lib/text-lines.cjs');
 
 const ROOT = path.resolve(__dirname, '..');
+const GSD_TOOLS = path.join(ROOT, 'gsd-core', 'bin', 'gsd-tools.cjs');
 const WORKFLOW_PATH = path.join(ROOT, 'gsd-core', 'workflows', 'code-review-fix.md');
 
 // ---------------------------------------------------------------------------
@@ -289,6 +290,7 @@ describe('#5019 — --auto re-review keeps the external reviewer lane evidence',
   // `bash -n` first: a reflow that moves an end marker into a nested construct cuts an unbalanced
   // snippet, which must fail loudly here instead of running a truncated fence.
   const bash = (script, env) => {
+    script = `gsd_run() { node "${GSD_TOOLS}" "$@"; }\n${script}`; // the launcher's resolved gsd_run, pointed at this tree
     const syntax = runHook('-n', ['-c', script], { interpreter: 'bash', timeoutMs: PROBE_TIMEOUT_MS });
     assert.strictEqual(syntax.exitCode, 0, `extracted snippet is not complete shell: ${syntax.stderr}`);
     return runHook('-c', [script], { interpreter: 'bash', timeoutMs: PROBE_TIMEOUT_MS, ...(env && { env: { ...process.env, ...env } }) });
@@ -302,14 +304,15 @@ describe('#5019 — --auto re-review keeps the external reviewer lane evidence',
     fs.writeFileSync(path.join(victim, 'keep'), 'x');
     return fn({ dir, tmp, victim, review: path.join(dir, '01-REVIEW.md'), file: path.join(dir, '01-REVIEW-lane-evidence.md') });
   };
+  const CALL = 'gsd_run lane-evidence-clear "$REVIEW_PATH"';
   const REMOVALS = {
-    'cleanup_iteration_backups': () => lines(stepRegion(FIX, 'cleanup_iteration_backups'), 'LE="${REVIEW_PATH%.md}', 'fi'),
-    'check_empty_scope': () => lines(stepRegion(REVIEW, 'check_empty_scope'), 'LE="${REVIEW_PATH%.md}', 'fi'),
-    // every early exit of code-review-fix inlines the same fence, so each is executed, not grepped
-    'check_config_gate': () => lines(stepRegion(FIX, 'check_config_gate'), 'LE="${REVIEW_PATH%.md}', 'fi'),
-    'check_review_exists': () => lines(stepRegion(FIX, 'check_review_exists'), 'LE="${REVIEW_PATH%.md}', 'fi'),
-    'check_review_status': () => lines(stepRegion(FIX, 'check_review_status'), 'LE="${REVIEW_PATH%.md}', 'fi'),
-    'spawn_fixer': () => lines(stepRegion(FIX, 'spawn_fixer'), 'LE="${REVIEW_PATH%.md}', 'fi'),
+    'cleanup_iteration_backups': () => lines(stepRegion(FIX, 'cleanup_iteration_backups'), CALL, CALL),
+    'check_empty_scope': () => lines(stepRegion(REVIEW, 'check_empty_scope'), CALL, CALL),
+    // every early exit calls the one shared verb; each site's call is executed, not grepped
+    'check_config_gate': () => lines(stepRegion(FIX, 'check_config_gate'), CALL, CALL),
+    'check_review_exists': () => lines(stepRegion(FIX, 'check_review_exists'), CALL, CALL),
+    'check_review_status': () => lines(stepRegion(FIX, 'check_review_status'), CALL, CALL),
+    'spawn_fixer': () => lines(stepRegion(FIX, 'spawn_fixer'), CALL, CALL),
   };
 
   for (const [name, snippet] of Object.entries(REMOVALS)) {
@@ -512,15 +515,22 @@ describe('#5019 — --auto re-review keeps the external reviewer lane evidence',
     });
   });
 
-  test('the removal fence is byte-identical at every exit site; the loop read shares its suffix guard', () => {
-    // Normalised: trimmed, comments dropped, so only the indent and the #5019 comments may differ.
-    const fence = (src) => splitLines(src).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
-    const at = (src, step) => { const l = fence(stepRegion(src, step)); const a = l.indexOf('LE="${REVIEW_PATH%.md}-lane-evidence.md"'); return l.slice(a, a + 6); };
-    const ref = at(REVIEW, 'check_empty_scope');
-    assert.strictEqual(ref.length, 6);
-    for (const step of ['check_config_gate', 'check_review_exists', 'check_review_status', 'spawn_fixer']) assert.deepStrictEqual(at(FIX, step), ref, step);
-    assert.deepStrictEqual(at(FIX, 'cleanup_iteration_backups'), ref);
-    const guard = ref.find((l) => l.startsWith('case "$S"')).split(' ??????')[0];
-    assert.ok(fence(stepRegion(FIX, 'auto_iteration_loop')).some((l) => l.startsWith(guard)), 'loop read uses the same suffix class');
+  test('every exit site makes the one shared verb call; the loop read keeps the same suffix guard', () => {
+    const calls = (src, step) => splitLines(stepRegion(src, step)).map((l) => l.trim()).filter((l) => l === CALL);
+    for (const [src, step] of [[REVIEW, 'check_empty_scope'], ...['check_config_gate', 'check_review_exists', 'check_review_status', 'spawn_fixer', 'cleanup_iteration_backups'].map((n) => [FIX, n])]) {
+      assert.deepStrictEqual(calls(src, step), [CALL], step);
+    }
+    // The verb owns the removal: no inline `rm -rf "$D"` fence may reappear in either workflow.
+    for (const src of [REVIEW, FIX]) assert.ok(!src.includes('rm -rf "$D"'), 'inline removal fence reintroduced');
+    assert.ok(splitLines(stepRegion(FIX, 'auto_iteration_loop')).some((l) => l.trim().startsWith(`case "$S" in *[!A-Za-z0-9]*|'') ;; ??????)`)), 'loop read uses the 6-char alphanumeric guard');
+  });
+
+  test('lane-evidence-clear: no argument is a usage error; an absent file is a quiet no-op', (t) => {
+    const dir = createTempDir('gsd-5019-'); t.after(() => cleanup(dir));
+    const noArg = runNode([GSD_TOOLS, 'lane-evidence-clear'], {});
+    assert.notStrictEqual(noArg.exitCode, 0);
+    assert.match(noArg.stderr, /Usage: lane-evidence-clear/);
+    const none = runNode([GSD_TOOLS, 'lane-evidence-clear', path.join(dir, '01-REVIEW.md')], {});
+    assert.strictEqual(none.exitCode, 0);
   });
 });
