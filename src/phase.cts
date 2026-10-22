@@ -4295,15 +4295,10 @@ function cmdPhaseComplete(cwd: string, phaseNum: string, raw: boolean): void {
               // flips a row — the same pairing rule the counts use.
               if (!coreUtilsMod.summaryPairsWithAnyPlan((phaseInfo['plans'] as string[] | undefined) ?? [], summaryFile)) continue;
               // ADR-5057 §6 (Phase 13, #5217): the per-plan flip is a bullet
-              // mutation, so it goes through `updateBullet` like the phase
+              // mutation (`updateBullet` inside the helper) like the phase
               // checkbox flip above — first matching bullet only, never a
               // fenced line, never a mid-line occurrence.
-              const planCheckboxPattern = coreUtilsMod.planRowPattern(planId, { anchored: true });
-              b = updateBullet(
-                b,
-                (_bulletText, rawLine) => planCheckboxPattern.test(rawLine),
-                (rawLine) => rawLine.replace(planCheckboxPattern, '$1x$2'),
-              );
+              b = coreUtilsMod.tickAnchoredPlanRow(b, planId);
             }
             return b;
           });
