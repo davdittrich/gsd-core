@@ -1287,7 +1287,7 @@ function roadmapDeclaredPhaseNums(rawContent: string, convention: string | null,
 function dirPhaseNum(entry: string, convention: string | null): number | null {
   const bracketDir = convention === 'bracket' ? entry.match(BRACKET_DIR_TOKEN_RE) : null;
   const match = bracketDir ?? entry.match(/^(?:[A-Z][A-Z0-9]*-)?(\d+)-/);
-  if (!match) return null;
+  if (!match || match[1].includes('.')) return null; // a decimal sub-phase (`GSD.02-05.1-x`) is no integer phase
   const num = parseInt(match[1], 10);
   const sentinel = bracketDir ? isSentinelPhaseDir(entry.toUpperCase()) : isSentinelPhaseId(num);
   return sentinel ? null : num;
@@ -1425,7 +1425,7 @@ function assertDescriptionPreservesMilestoneScope(cwd: string, description: stri
  * A sibling that simply lacks the active workstream's directory is the same
  * fail-open case: it contributes nothing. Sentinels reuse the canonical
  * `isSentinelPhaseId` (`isSentinelPhaseDir` for bracket dirs); the dir pattern is the same one the
- * on-disk scan uses, so decimal sub-phases (`411.1-foo`) are correctly not integers.
+ * on-disk scan uses, so decimal sub-phases (`411.1-foo`, `GSD.02-05.1-foo`) are correctly not integers.
  */
 function collectSiblingWorktreePhaseNums(cwd: string, used: Set<number>, convention: string | null): void {
   let porcelain: string;
