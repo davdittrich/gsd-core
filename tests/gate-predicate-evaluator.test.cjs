@@ -230,25 +230,52 @@ describe('evaluatePredicate — message trimming', () => {
     { runBoundedShell: fakeShell(shellResult).run },
   );
 
-  test('non-zero exit keeps the stderr tail and the exit prefix within the cap', () => {
-    const res = run({ exitCode: 3, stderr: 'E'.repeat(COMMAND_MAX_OUTPUT_CHARS + 50) + 'MARKER' });
-    assert.ok(res.message.startsWith('command exited 3: '));
+  const assertCappedTail = (res, prefix) => {
+    assert.ok(res.message.startsWith(prefix));
     assert.ok(res.message.endsWith('MARKER'));
     assert.equal(res.message.length, COMMAND_MAX_OUTPUT_CHARS);
+  };
+
+  test('non-zero exit keeps the stderr tail and the exit prefix within the cap', () => {
+    assertCappedTail(run({ exitCode: 3, stderr: 'E'.repeat(COMMAND_MAX_OUTPUT_CHARS + 50) + 'MARKER' }), 'command exited 3: ');
   });
 
   test('non-zero exit keeps the stdout tail when stderr is empty', () => {
-    const res = run({ exitCode: 2, stderr: '', stdout: 'O'.repeat(COMMAND_MAX_OUTPUT_CHARS + 50) + 'MARKER' });
-    assert.ok(res.message.startsWith('command exited 2: '));
-    assert.ok(res.message.endsWith('MARKER'));
-    assert.equal(res.message.length, COMMAND_MAX_OUTPUT_CHARS);
+    assertCappedTail(
+      run({ exitCode: 2, stderr: '', stdout: 'O'.repeat(COMMAND_MAX_OUTPUT_CHARS + 50) + 'MARKER' }),
+      'command exited 2: ',
+    );
   });
 
   test('timeout keeps the stderr tail and the timeout prefix within the cap', () => {
-    const res = run({ timedOut: true, exitCode: null, stderr: 'E'.repeat(COMMAND_MAX_OUTPUT_CHARS + 50) + 'MARKER' });
+    assertCappedTail(
+      run({ timedOut: true, exitCode: null, stderr: 'E'.repeat(COMMAND_MAX_OUTPUT_CHARS + 50) + 'MARKER' }),
+      'command timed out after ',
+    );
+  });
+
+  test('timeout with empty stderr keeps the HEAD of a long command (program name survives)', () => {
+    const command = 'myprog --flag ' + 'a'.repeat(COMMAND_MAX_OUTPUT_CHARS) + ' TAILEND';
+    const res = evaluatePredicate(
+      { kind: 'command-exit-zero', command },
+      baseCtx,
+      { runBoundedShell: fakeShell({ timedOut: true, exitCode: null, stderr: '' }).run },
+    );
     assert.ok(res.message.startsWith('command timed out after '));
-    assert.ok(res.message.endsWith('MARKER'));
+    assert.ok(res.message.includes(': myprog --flag '));
+    assert.ok(!res.message.includes('TAILEND'));
     assert.equal(res.message.length, COMMAND_MAX_OUTPUT_CHARS);
+  });
+
+  test('tail cut between an emoji surrogate pair drops the orphaned low surrogate', () => {
+    const prefix = 'command exited 3: ';
+    const budget = COMMAND_MAX_OUTPUT_CHARS - prefix.length;
+    // slice(-budget) starts exactly on the emoji's low surrogate.
+    const stderr = 'E'.repeat(10) + '\u{1F600}' + 'T'.repeat(budget - 7) + 'MARKER';
+    const tail = run({ exitCode: 3, stderr }).message.slice(prefix.length);
+    assert.ok(!/^[\uDC00-\uDFFF]/.test(tail));
+    assert.ok(tail.endsWith('MARKER'));
+    assert.ok(prefix.length + tail.length <= COMMAND_MAX_OUTPUT_CHARS);
   });
 
   test('short output is kept whole after the prefix', () => {

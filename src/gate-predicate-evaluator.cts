@@ -92,7 +92,13 @@ function interpolate(command: string, ctx: PredicateContext): string {
 
 /** `prefix` + the TAIL of `output`, capped at COMMAND_MAX_OUTPUT_CHARS in total (errors land last; ADR-2008). */
 function prefixedTail(prefix: string, output: string): string {
-  return prefix + output.slice(-(COMMAND_MAX_OUTPUT_CHARS - prefix.length));
+  const budget = COMMAND_MAX_OUTPUT_CHARS - prefix.length;
+  // slice(-0) returns the whole string, so a non-positive budget must not reach it.
+  if (budget <= 0) return prefix;
+  let tail = output.slice(-budget);
+  // The cut counts UTF-16 units; drop a low surrogate it orphaned (renders as U+FFFD in JSON).
+  if (output.length > budget && /^[\uDC00-\uDFFF]/.test(tail)) tail = tail.slice(1);
+  return prefix + tail;
 }
 
 function isNonEmptyString(v: unknown): v is string {
@@ -127,9 +133,13 @@ function evaluateCommandExitZero(
   const res = deps.runBoundedShell({ command: interpolated, cwd: ctx.cwd, timeoutMs });
 
   if (res.timedOut) {
+    const prefix = `command timed out after ${Math.round(timeoutMs / 1000)}s: `;
     return {
       block: true,
-      message: prefixedTail(`command timed out after ${Math.round(timeoutMs / 1000)}s: `, res.stderr || interpolated),
+      // The command's head (program name, leading args) identifies it; only stderr is tail-capped.
+      message: res.stderr
+        ? prefixedTail(prefix, res.stderr)
+        : prefix + interpolated.slice(0, COMMAND_MAX_OUTPUT_CHARS - prefix.length),
       details: { kind: 'command-exit-zero', timedOut: true, signal: res.signal },
     };
   }
