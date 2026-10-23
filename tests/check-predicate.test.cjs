@@ -19,10 +19,11 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const { evaluatePredicate } = require('../gsd-core/bin/lib/gate-predicate-evaluator.cjs');
+const { evaluatePredicate, INTERPOLATION_VAR_NAMES } = require('../gsd-core/bin/lib/gate-predicate-evaluator.cjs');
 const { buildPredicateDeps, parsePredicateFlags } = require('../gsd-core/bin/lib/check-command-router.cjs');
 const { runGsdTools, createTempProject, cleanup } = require('./helpers.cjs');
 const { PROBE_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
+const { span } = require('./helpers/doc-bash-span.cjs');
 
 /**
  * A real, bounded `sh -c` subprocess spawned via the production
@@ -391,5 +392,54 @@ describe('check predicate --phase-dir — containment boundary (#4354)', () => {
     assert.ok(result.success, `Command failed: ${result.error}`);
     const parsed = JSON.parse(result.output);
     assert.strictEqual(parsed.block, false, 'cwd-fallback evaluation must still pass');
+  });
+});
+
+// ─── #4483: dispatch lines forward every ${PHASE_*} value in scope ─────────────
+// The evaluator interpolates INTERPOLATION_VAR_NAMES; an unforwarded flag
+// silently becomes '' in a shelled command. The flag set is derived from that
+// export, so a fourth variable fails here until each in-scope site forwards it.
+// Out of scope (own tickets): verify:pre #5289, execute:wave:post #5290.
+
+const FLAG_OF = (name) => `--${name.toLowerCase().replace(/_/g, '-')}`;
+const DISPATCH_SITES = [
+  { site: 'execute:post', file: 'gsd-core/workflows/execute-phase/steps/verify-phase-goal.md', marker: '**Execute:post gate hook dispatch.**', bindFrom: 'PHASE_GOAL=$(', bound: ['PHASE_REQ_IDS'], callerBound: ['PHASE_NUMBER', 'PHASE_DIR'] },
+  { site: 'plan:post', file: 'gsd-core/workflows/plan-phase.md', marker: 'GATE_RESULT=$(gsd_run check predicate', bindFrom: 'PLAN_POST_HOOKS_JSON=$(', bound: ['PHASE_NUMBER', 'PHASE_REQ_IDS'], callerBound: ['PHASE_DIR'] },
+];
+
+describe('check predicate dispatch sites forward every PHASE_* value (#4483)', () => {
+  for (const { site, file, marker, bindFrom, bound, callerBound } of DISPATCH_SITES) {
+    test(`${site} forwards ${INTERPOLATION_VAR_NAMES.map(FLAG_OF).join(' ')}`, () => {
+      const lines = span(file, marker, marker);
+      assert.equal(lines.length, 1);
+      for (const name of INTERPOLATION_VAR_NAMES) {
+        assert.ok(
+          lines[0].includes(`${FLAG_OF(name)} "\${${name}}"`),
+          `${site} predicate dispatch in ${file} must pass ${FLAG_OF(name)} "\${${name}}"`,
+        );
+      }
+      assert.deepEqual([...bound, ...callerBound].sort(), [...INTERPOLATION_VAR_NAMES].sort());
+      const bindings = span(file, bindFrom, marker).join('\n');
+      for (const name of bound) {
+        assert.match(bindings, new RegExp(`^\\s*${name}=`, 'm'), `${site} must assign ${name} before its predicate dispatch in ${file}`);
+      }
+    });
+  }
+
+  test('all three flags reach ${PHASE_NUMBER}/${PHASE_DIR}/${PHASE_REQ_IDS} in the shelled command', (t) => {
+    const projDir = createTempProject();
+    t.after(() => cleanup(projDir));
+    fs.mkdirSync(path.join(projDir, '.planning', 'phases', '05-x'), { recursive: true });
+    const predicate = JSON.stringify({
+      kind: 'command-exit-zero',
+      command: 'test "${PHASE_NUMBER}" = "05" && test "${PHASE_REQ_IDS}" = "REQ-1,REQ-2" && test -d "${PHASE_DIR}"',
+    });
+    const result = runGsdTools(
+      ['check', 'predicate', '--predicate', predicate, '--phase-number', '05',
+        '--phase-dir', '.planning/phases/05-x', '--phase-req-ids', 'REQ-1,REQ-2', '--raw'],
+      projDir,
+    );
+    assert.ok(result.success, `Command failed: ${result.error}`);
+    assert.strictEqual(JSON.parse(result.output).block, false);
   });
 });
