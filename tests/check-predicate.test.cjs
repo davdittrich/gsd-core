@@ -403,12 +403,12 @@ describe('check predicate --phase-dir — containment boundary (#4354)', () => {
 
 const FLAG_OF = (name) => `--${name.toLowerCase().replace(/_/g, '-')}`;
 const DISPATCH_SITES = [
-  { site: 'execute:post', file: 'gsd-core/workflows/execute-phase/steps/verify-phase-goal.md', marker: '**Execute:post gate hook dispatch.**' },
-  { site: 'plan:post', file: 'gsd-core/workflows/plan-phase.md', marker: 'GATE_RESULT=$(gsd_run check predicate' },
+  { site: 'execute:post', file: 'gsd-core/workflows/execute-phase/steps/verify-phase-goal.md', marker: '**Execute:post gate hook dispatch.**', bindFrom: 'PHASE_GOAL=$(', bound: ['PHASE_REQ_IDS'], callerBound: ['PHASE_NUMBER', 'PHASE_DIR'] },
+  { site: 'plan:post', file: 'gsd-core/workflows/plan-phase.md', marker: 'GATE_RESULT=$(gsd_run check predicate', bindFrom: 'PLAN_POST_HOOKS_JSON=$(', bound: ['PHASE_NUMBER', 'PHASE_REQ_IDS'], callerBound: ['PHASE_DIR'] },
 ];
 
 describe('check predicate dispatch sites forward every PHASE_* value (#4483)', () => {
-  for (const { site, file, marker } of DISPATCH_SITES) {
+  for (const { site, file, marker, bindFrom, bound, callerBound } of DISPATCH_SITES) {
     test(`${site} forwards ${INTERPOLATION_VAR_NAMES.map(FLAG_OF).join(' ')}`, () => {
       const lines = span(file, marker, marker);
       assert.equal(lines.length, 1);
@@ -417,6 +417,11 @@ describe('check predicate dispatch sites forward every PHASE_* value (#4483)', (
           lines[0].includes(`${FLAG_OF(name)} "\${${name}}"`),
           `${site} predicate dispatch in ${file} must pass ${FLAG_OF(name)} "\${${name}}"`,
         );
+      }
+      assert.deepEqual([...bound, ...callerBound].sort(), [...INTERPOLATION_VAR_NAMES].sort());
+      const bindings = span(file, bindFrom, marker).join('\n');
+      for (const name of bound) {
+        assert.match(bindings, new RegExp(`^\\s*${name}=`, 'm'), `${site} must assign ${name} before its predicate dispatch in ${file}`);
       }
     });
   }
