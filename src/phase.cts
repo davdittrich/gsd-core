@@ -1317,7 +1317,7 @@ function activeBracketMilestone(cwd: string, convention: string | null, content:
   if (!tagged) {
     try {
       const state = fs.readFileSync(path.join(planningDir(cwd), 'STATE.md'), 'utf-8');
-      const declared = state.match(/^milestone:\s*["']?v?(\d+)/im);
+      const declared = String(frontmatterMod.extractFrontmatter(state).milestone ?? '').match(/^v?(\d+)/i);
       if (declared && parseInt(declared[1], 10) === milestone) return milestone;
     } catch { /* no STATE.md: nothing first-hand */ }
   }
