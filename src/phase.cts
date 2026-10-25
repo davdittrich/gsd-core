@@ -1486,7 +1486,7 @@ function collectSiblingWorktreePhaseNums(
       timeout: 10_000,
       windowsHide: true,
       maxBuffer: 4 * 1024 * 1024,
-    });
+    }); // allow-index-refresh: lists worktrees from .git metadata, never opens the index
   } catch {
     return; // not a git repo / git unavailable — unchanged behavior
   }
