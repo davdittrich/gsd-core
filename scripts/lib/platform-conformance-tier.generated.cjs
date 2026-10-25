@@ -3,6 +3,7 @@
 
 module.exports = {
   CONFORMANCE_TIER_FILES: [
+  "tests/5100-win32-bare-bash-sentinel.property.test.cjs",
   "tests/adr-index-gate.test.cjs",
   "tests/adr857-core-without-capabilities.test.cjs",
   "tests/agent-install-check.test.cjs",
@@ -131,6 +132,7 @@ module.exports = {
   "tests/gen-health-docs.test.cjs",
   "tests/gen-section-manifest.test.cjs",
   "tests/git-base-branch.test.cjs",
+  "tests/git-optional-locks-parity.test.cjs",
   "tests/golden-install-tree.test.cjs",
   "tests/graphify-graph-path.test.cjs",
   "tests/graphify-visualization.test.cjs",
@@ -294,6 +296,7 @@ module.exports = {
   "tests/revision-remediation-binding.test.cjs",
   "tests/roadmap-parser.test.cjs",
   "tests/roadmap-upgrade-bracket.test.cjs",
+  "tests/roadmap-upgrade.test.cjs",
   "tests/roadmap.test.cjs",
   "tests/run-tests-accounting.test.cjs",
   "tests/run-tests-harness.test.cjs",
