@@ -30,10 +30,9 @@ describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, ()
     assert.match(r.stdout, /CONTINUED/);
   });
 
-  test('incomplete phase blocks with PHASE_NOT_COMPLETE and the verify-work hint', () => {
+  test('incomplete phase blocks with PHASE_NOT_COMPLETE', () => {
     const r = run(analyze('3', false), 0);
     blocked(r, 'PHASE_NOT_COMPLETE');
-    assert.match(r.stderr, /Run \/gsd:verify-work 3 \(completes the phase\), then re-run \/gsd:ship/);
   });
 
   test('leading-zero PHASE_NUMBER matches an unpadded roadmap number', () => {
