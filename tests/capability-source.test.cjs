@@ -2004,3 +2004,33 @@ describe('#3514 F21b — non-https tarball spec fails with a named reason', () =
     assert.strictEqual(calls, 0, 'the transport is never called for a plaintext URL');
   });
 });
+
+describe('#5298 git install strips clone .git', () => {
+  let gsdHome;
+  beforeEach(() => { gsdHome = createTempDir('gsd-5298-'); });
+  afterEach(() => { cleanup(gsdHome); });
+
+  test('never stages the clone\'s .git', async () => {
+    const cap = featureCap('git-nodotgit-cap');
+    const fakeGit = (args, _opts) => {
+      if (args[0] === 'clone') {
+        const dir = args[args.length - 1];
+        fs.mkdirSync(path.join(dir, '.git'));
+        fs.writeFileSync(path.join(dir, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+        fs.writeFileSync(path.join(dir, 'capability.json'), JSON.stringify(cap), 'utf8');
+      }
+      return { exitCode: 0, stdout: '', stderr: '', signal: null, error: null };
+    };
+
+    // Plain URL and `#ref` (checkout runs before the .git removal).
+    for (const spec of ['git+https://example.com/org/repo.git', 'git+https://example.com/org/repo.git#v1']) {
+      const result = await resolveCapabilitySource(spec, {
+        gsdHome,
+        hostVersion: '1.5.0',
+        execOverrides: { git: fakeGit },
+      });
+      assert.ok(!fs.existsSync(path.join(result.stagedDir, '.git')), `${spec}: staged dir must not contain .git`);
+      assert.ok(fs.existsSync(path.join(result.stagedDir, 'capability.json')), `${spec}: capability.json still staged`);
+    }
+  });
+});
