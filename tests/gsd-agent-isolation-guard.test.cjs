@@ -2024,7 +2024,7 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
   const dispatch = (subagent_type, model, extra = {}) =>
     ({ hook_event_name: 'PreToolUse', tool_name: 'Agent', cwd: project, tool_input: { subagent_type, ...(model ? { model } : {}), ...extra } });
   const escalationFile = (root, agent) => path.join(root, '.gsd', `model-escalation-${agent}.json`);
-  const writeEscalation = (root, agent, rec) => {
+  const plantEscalation = (root, agent, rec) => {
     fs.mkdirSync(path.join(root, '.gsd'), { recursive: true });
     fs.writeFileSync(escalationFile(root, agent), typeof rec === 'string' ? rec : JSON.stringify(rec));
   };
@@ -2071,7 +2071,7 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
     setup(t);
     fs.mkdirSync(path.join(project, '.gsd'), { recursive: true });
     const writtenAt = 1_000_000;
-    writeEscalation(project, 'gsd-executor', { model: 'opus', written_at: writtenAt });
+    plantEscalation(project, 'gsd-executor', { model: 'opus', written_at: writtenAt });
     const at = (ms) => ({ now: () => writtenAt + ms });
     assert.equal(evaluate(dispatch('gsd-executor', 'opus', WORKTREE), at(ESCALATION_WINDOW_MS - 1)).action, 'allow');
     assert.equal(evaluate(dispatch('gsd-executor', 'opus', WORKTREE), at(ESCALATION_WINDOW_MS)).action, 'warn');
@@ -2081,7 +2081,7 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
   test('future-dated record tolerance: allowed above -5000ms, refused at and below', (t) => {
     setup(t);
     const writtenAt = 1_000_000;
-    writeEscalation(project, 'gsd-executor', { model: 'opus', written_at: writtenAt });
+    plantEscalation(project, 'gsd-executor', { model: 'opus', written_at: writtenAt });
     const at = (age) => ({ now: () => writtenAt + age });
     for (const [age, want] of [[-4999, 'allow'], [-5000, 'warn'], [-5001, 'warn']]) {
       assert.equal(evaluate(dispatch('gsd-executor', 'opus', WORKTREE), at(age)).action, want, `age ${age}`);
@@ -2098,7 +2098,7 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
   test('property: an escalation record is honoured iff -5000 < age < ESCALATION_WINDOW_MS', (t) => {
     setup(t);
     const writtenAt = 1_000_000;
-    writeEscalation(project, 'gsd-executor', { model: 'opus', written_at: writtenAt });
+    plantEscalation(project, 'gsd-executor', { model: 'opus', written_at: writtenAt });
     fc.assert(fc.property(fc.integer({ min: -20_000, max: ESCALATION_WINDOW_MS + 20_000 }), (age) => {
       const got = evaluate(dispatch('gsd-executor', 'opus', WORKTREE), { now: () => writtenAt + age }).action;
       return got === (age > -5000 && age < ESCALATION_WINDOW_MS ? 'allow' : 'warn');
@@ -2123,13 +2123,13 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
   test('an escalation record is honoured only in the session that asked for it', (t) => {
     setup(t);
     const now = 1_000_000;
-    writeEscalation(project, 'gsd-executor', { model: 'opus', written_at: now, session: 's1' });
+    plantEscalation(project, 'gsd-executor', { model: 'opus', written_at: now, session: 's1' });
     const at = { now: () => now };
     const as = (session_id) => evaluate({ ...dispatch('gsd-executor', 'opus', WORKTREE), session_id }, at).action;
     assert.equal(as('s1'), 'allow');
     assert.equal(as('s2'), 'warn');
     assert.equal(as(undefined), 'allow', 'unknown dispatching session never narrows');
-    writeEscalation(project, 'gsd-executor', { model: 'opus', written_at: now });
+    plantEscalation(project, 'gsd-executor', { model: 'opus', written_at: now });
     assert.equal(as('s2'), 'allow', 'record without a session is not session-scoped');
   });
 
@@ -2200,9 +2200,9 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
 
   test('corrupt and future-dated records are ignored; Task tool name is guarded', (t) => {
     setup(t);
-    writeEscalation(project, 'gsd-executor', '{not json');
+    plantEscalation(project, 'gsd-executor', '{not json');
     assert.equal(evaluate(dispatch('gsd-executor', 'opus', WORKTREE)).action, 'warn');
-    writeEscalation(project, 'gsd-executor', { model: 'opus', written_at: 10_000_000 });
+    plantEscalation(project, 'gsd-executor', { model: 'opus', written_at: 10_000_000 });
     assert.equal(evaluate(dispatch('gsd-executor', 'opus', WORKTREE), { now: () => 1_000_000 }).action, 'warn');
     assert.equal(evaluate({ ...dispatch('gsd-planner', 'sonnet'), tool_name: 'Task' }).action, 'warn');
   });
@@ -2244,7 +2244,7 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
 
   test('escalation record without a string model never matches', (t) => {
     setup(t);
-    writeEscalation(project, 'gsd-planner', { written_at: Date.now() });
+    plantEscalation(project, 'gsd-planner', { written_at: Date.now() });
     assert.equal(evaluate(dispatch('gsd-planner', 'undefined')).action, 'warn');
   });
 
@@ -2407,7 +2407,7 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
     assert.equal(cap, 64 * 1024);
     const rec = JSON.stringify({ model: 'opus', written_at: Date.now() });
     for (const [delta, ok] of [[-1, true], [0, true], [1, false]]) {
-      writeEscalation(project, 'gsd-executor', rec + ' '.repeat(cap + delta - rec.length));
+      plantEscalation(project, 'gsd-executor', rec + ' '.repeat(cap + delta - rec.length));
       assert.equal(esc.readEscalation(project, 'gsd-executor') !== null, ok, `record cap${delta}`);
       const cfg = JSON.stringify(ISSUE_CONFIG);
       writeConfig(project, cfg + ' '.repeat(cap + delta - cfg.length));
