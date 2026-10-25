@@ -3148,6 +3148,33 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
     assert.match(r, /### Phase 3: Second New[\s\S]*\*\*Depends on:\*\* Phase 2\b/);
   });
 
+  test('a bracket checklist bullet held only by a sibling worktree ROADMAP blocks reuse of its number (gsd-core-xh86)', (t) => {
+    setup(['# Roadmap', '', '## Milestone v2.0', '']);
+    const sibling = addSiblingWorktree(t, 'gsd-5528-sibbl-');
+    fs.writeFileSync(path.join(sibling, '.planning', 'ROADMAP.md'), ['# Roadmap', '', '## Milestone v2.0', '', '- [ ] **[GSD.02] 50: Elsewhere**', ''].join('\n'));
+    assert.strictEqual(runGsdTools('phase add "New thing" --raw', tmp).output.trim(), '51');
+    assertWritten(51);
+  });
+
+  test('a milestone-prefixed repo does not count a bracket-looking heading or bullet (gsd-core-ddu6)', () => {
+    setup(['# Roadmap', '', '## Milestone v2.0', '', '- [ ] **[GSD.02] 05: Existing**', '', '### [GSD.02] 05: Existing', '', '**Goal:** x', ''], { convention: 'milestone-prefixed' });
+    assert.strictEqual(runGsdTools('phase add "New thing" --raw', tmp).output.trim(), '01');
+    assertWritten(1);
+  });
+
+  test('a milestone: line in the STATE.md body is not the STATE milestone (gsd-core-55s4)', () => {
+    const planning = setup(['# Roadmap', '', '## Milestone v2.0', ''], { milestone: null, dirs: ['GSD.01-12-old'] });
+    fs.writeFileSync(path.join(planning, 'STATE.md'), '---\n---\n# State\nmilestone: v2.0\n');
+    assert.strictEqual(runGsdTools('phase add "New thing" --raw', tmp).output.trim(), '13');
+  });
+
+  test('a letter-suffixed bullet and a word-first bullet each reserve their integer (gsd-core-2m7k)', () => {
+    setup(['# Roadmap', '', '## Milestone v2.0', '', '- [ ] [GSD.02] 12A: Lettered', '']);
+    assert.strictEqual(runGsdTools('phase add "New thing" --raw', tmp).output.trim(), '13');
+    setup(['# Roadmap', '', '## Milestone v2.0', '', '- [ ] Phase [GSD.02] 07: Word first', '']);
+    assert.strictEqual(runGsdTools('phase add "Another" --raw', tmp).output.trim(), '08');
+  });
+
   test('non-bracket repo: a bracket-looking heading is still not counted (byte-identical to before)', () => {
     setup(['# Roadmap', '', '## Milestone v2.0', '', '- [ ] **[GSD.02] 01: Existing**', '', '### [GSD.02] 01: Existing', '', '**Goal:** x', ''], { convention: null });
     const result = runGsdTools('phase add "New thing" --raw', tmp);
