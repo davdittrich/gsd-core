@@ -808,7 +808,9 @@ function cmdRoadmapAnalyze(cwd: string, raw: boolean): void {
   // phase-id-owner: uses the [.-] (dot-or-dash) separator variant, not the canonical dot-only token; a swap to PHASE_NUMBER_TOKEN_SOURCE would drop hyphenated phase-id matches.
   // #3036: widen to accept non-numeric-leading ids (same widening as the detail-heading pattern above).
   // phase-id-owner: uses the [.-] (dot-or-dash) separator variant, not the canonical dot-only token; a swap to PHASE_NUMBER_TOKEN_SOURCE would drop hyphenated phase-id matches.
-  const checklistPattern = new RegExp(checklistEntrySrc(convention, true), 'gi');
+  let customIds = false;
+  try { customIds = loadConfigForScope(cwd)['phase_naming'] === 'custom'; } catch { /* unreadable config: numeric ids only */ }
+  const checklistPattern = new RegExp(checklistEntrySrc(convention, true, customIds), 'gi');
   // #2761 M1: an OCCURRENCE list keyed by `occurrenceKey`, not a token->bracket
   // map. The map was first-wins on the bare token, so of two checklist entries
   // sharing a token across brackets the FIRST one's bracket id classified BOTH:
@@ -987,8 +989,6 @@ function cmdRoadmapAnalyze(cwd: string, raw: boolean): void {
   };
   for (const o of checklistOccurrences) if (!isSentinelPhase(o.token, o.bracketId)) fold(o.token, o.checked);
   // phase_naming: custom ids (`- [ ] **Phase AUTH: …**`, as phase add writes them) are records too.
-  let customIds = false;
-  try { customIds = loadConfigForScope(cwd)['phase_naming'] === 'custom'; } catch { /* unreadable config: numeric ids only */ }
   const isCustomId = (t: string): boolean => customIds && !/^[A-Za-z]?\d/.test(t);
   if (customIds) {
     for (const m of effectiveContent.matchAll(new RegExp(checklistEntrySrc(convention, false, true), 'gi'))) {
@@ -1145,7 +1145,8 @@ const CUSTOM_PHASE_ID_SRC = '[A-Za-z][\\w-]{0,63}';
 function checklistEntrySrc(convention: string | null | undefined, capturing = false, custom = false): string {
   // phase-id-owner: uses [.-] (dot-or-dash) separator variant, not the canonical dot-only token; swapping to PHASE_NUMBER_TOKEN_SOURCE would drop hyphenated phase-id matches.
   const numeric = '[A-Za-z]?\\d+[A-Z]?(?:[.-]\\d+)*';
-  const token = custom ? `(?:${numeric}|${CUSTOM_PHASE_ID_SRC}(?=:))` : numeric;
+  // numeric must end at a word edge, else `P1-setup` matches as `P1` before the custom alternative is tried.
+  const token = custom ? `(?:${numeric}(?![\\w-])|${CUSTOM_PHASE_ID_SRC}(?=:))` : numeric;
   return `-\\s*\\[[ x]\\]\\s*\\*\\*${phaseHeadingPrefixSrcFor(PHASE_HEADING_BASELINE.LABEL_ONLY, convention, capturing)}(${token})`;
 }
 

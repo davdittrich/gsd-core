@@ -300,6 +300,19 @@ describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, ()
       });
     }
 
+    test('custom id with a numeric-looking prefix (P1-setup) is recorded under its own key, not folded into P1', (t) => {
+      const tmp = createTempProject();
+      t.after(() => cleanup(tmp));
+      fs.writeFileSync(path.join(tmp, '.planning', 'config.json'), JSON.stringify({ phase_naming: 'custom' }));
+      fs.writeFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), `${HEAD}## Phases\n\n- [x] **Phase SETUP: Setup**\n\n## Phase Details\n\n### Phase SETUP: Setup\n\n**Goal**: g\n`);
+      const c = runGsdTools(['phase', 'add', 'Setup', '--id', 'P1-setup'], tmp);
+      assert.ok(c.success, c.error);
+      const rec = JSON.parse(runGsdTools(['roadmap', 'analyze'], tmp).output).roadmap_record;
+      assert.equal(JSON.parse(c.output).roadmap_entry, 'checklist');
+      assert.equal(rec['P1-setup'], false);
+      assert.ok(!('P1' in rec), 'not folded into P1');
+    });
+
     test('CRLF roadmap: update-plan-progress then phase complete leave no stray CR before "(completed"', (t) => {
       const tmp = createTempProject();
       t.after(() => cleanup(tmp));
