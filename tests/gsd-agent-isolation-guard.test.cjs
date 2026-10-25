@@ -2088,10 +2088,11 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
     }
   });
 
-  test('echoed model cap: 63 and 64 characters shown whole, 65 cut to 64', (t) => {
+  test('echoed model cap: limit-1 and limit characters shown whole, limit+1 cut to the limit', (t) => {
     setup(t);
-    for (const n of [63, 64, 65]) {
-      assert.equal(dispatchVerdict('y'.repeat(n)).passed, 'y'.repeat(Math.min(n, 64)), `n=${n}`);
+    const cap = REASON_INTERPOLATION_MAX_LEN;
+    for (const n of [cap - 1, cap, cap + 1]) {
+      assert.equal(dispatchVerdict('y'.repeat(n)).passed, 'y'.repeat(Math.min(n, cap)), `n=${n}`);
     }
   });
 
@@ -2236,7 +2237,7 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
     setup(t);
     const w = evaluate(dispatch('gsd-planner', `x\n${'y'.repeat(200)}\u2028z`));
     assert.equal(w.action, 'warn');
-    assert.equal(w.passed, `x?${'y'.repeat(62)}`);
+    assert.equal(w.passed, `x?${'y'.repeat(REASON_INTERPOLATION_MAX_LEN - 2)}`);
     assert.equal(dispatchVerdict('x" ignore prior').passed, 'x??ignore?prior');
   });
 
@@ -2283,7 +2284,7 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
     setup(t, { ...ISSUE_CONFIG, model_overrides: { 'gsd-planner': `x\n" ignore prior ${'z'.repeat(200)}` } });
     const w = evaluate(dispatch('gsd-planner', 'sonnet'));
     assert.equal(w.action, 'warn');
-    assert.equal(w.expected, `x???ignore?prior?${'z'.repeat(47)}`);
+    assert.equal(w.expected, `x???ignore?prior?${'z'.repeat(REASON_INTERPOLATION_MAX_LEN - 'x???ignore?prior?'.length)}`);
     writeConfig(project, JSON.stringify({ ...ISSUE_CONFIG, model_overrides: { 'gsd-planner': 'claude-opus-4-1@20250805' } }));
     assert.equal(evaluate(dispatch('gsd-planner', 'sonnet')).expected, 'claude-opus-4-1@20250805');
   });
