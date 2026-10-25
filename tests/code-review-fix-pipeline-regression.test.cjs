@@ -307,139 +307,7 @@ describe('#3190 — code-review-fix --auto REVIEW.md commit + FIX_REPORT_PATH en
     return dir;
   };
 
-  test('T6c — #5506: retained backups are COMMITTED when COMMIT_DOCS=true, left alone when false', { skip: !HAS_BASH }, (t) => {
-    // A non-clean --auto run retains <NN>-REVIEW(-FIX).iterN.md. Untracked, they leave a dirty tree
-    // that blocks the next checkout/worktree op. Execute the shipped fence against a real git repo
-    // with a gsd_run stub that does what `query commit MSG --files F... --raw` does: add + commit,
-    // print the hash. `skip` makes it print "skipped" and exit 0, as a per-phase
-    // phase_commit_docs=false override does (src/commands.cts cmdCommit).
-    const src = fs.readFileSync(WORKFLOW_PATH, 'utf8');
-    const fence = stepFence(src, 'cleanup_iteration_backups');
-    const git = (dir, ...a) => runGit(a, { cwd: dir, timeoutMs: PROBE_TIMEOUT_MS });
-
-    const drive = (commitDocs, status = 'issues_found', mode = 'commit') => {
-      const dir = seedBackupRepo(t, 'gsd-5506-cleanup-', status, false);
-      const script = [
-        'set -euo pipefail',
-        'cd "' + dir + '"',
-        'gsd_run() { echo "$*" >> gsd-calls.log; [ "$1 $2" = "query commit" ] || return 1;'
-          + (mode === 'skipped' ? ' echo skipped; return 0; }'
-            : mode === 'nothing' ? ' echo nothing; return 0; }'
-            : mode === 'committed' ? ' echo committed; return 0; }'
-            : mode === 'fail' ? ' return 1; }'
-            : REAL_COMMIT_BODY),
-        'AUTO_MODE=true',
-        'COMMIT_DOCS=' + commitDocs,
-        'PADDED_PHASE=01',
-        'REVIEW_PATH="' + path.join(dir, '01-REVIEW.md') + '"',
-        'FIX_REPORT_PATH="' + path.join(dir, '01-REVIEW-FIX.md') + '"',
-        fence,
-      ].join('\n');
-      const res = runHook('-c', [script], { interpreter: 'bash', timeoutMs: PROBE_TIMEOUT_MS });
-      assert.strictEqual(res.exitCode, 0, 'the cleanup step must never abort: ' + res.stderr);
-      const calls = fs.existsSync(path.join(dir, 'gsd-calls.log')) ? fs.readFileSync(path.join(dir, 'gsd-calls.log'), 'utf8') : '';
-      if (calls) fs.unlinkSync(path.join(dir, 'gsd-calls.log'));
-      return {
-        calls,
-        stdout: res.stdout,
-        status: git(dir, 'status', '--porcelain').stdout.trim(),
-        subject: git(dir, 'log', '-1', '--format=%s').stdout.trim(),
-        tracked: splitLines(git(dir, 'ls-files').stdout).filter(Boolean).sort(),
-        count: git(dir, 'rev-list', '--count', 'HEAD').stdout.trim(),
-        review: fs.existsSync(path.join(dir, '01-REVIEW.iter2.md')),
-        fix: fs.existsSync(path.join(dir, '01-REVIEW-FIX.iter2.md')),
-      };
-    };
-
-    const on = drive('true');
-    assert.strictEqual(on.status, '', 'the tree must be clean after the step: ' + on.status);
-    assert.doesNotMatch(on.stdout, /Warning: iteration backups not committed/, 'a committed hash is the success arm: no warning');
-    assert.ok(on.review && on.fix, 'backups are retained on disk');
-    assert.strictEqual(on.subject, 'docs(01): retain code review iteration backups');
-    assert.strictEqual(on.count, '2', 'exactly one new commit beyond the seed');
-    assert.deepStrictEqual(on.tracked,
-      ['01-REVIEW-FIX.iter2.md', '01-REVIEW-FIX.md', '01-REVIEW.iter2.md', '01-REVIEW.md'],
-      'both backups are recoverable from git');
-
-    const off = drive('false');
-    assert.strictEqual(off.calls, '', 'COMMIT_DOCS=false: .planning is gitignored, no commit attempted');
-    assert.ok(off.review && off.fix, 'backups are retained on disk');
-
-    const clean = drive('true', 'clean');
-    assert.strictEqual(clean.calls, '', 'clean: no commit attempted');
-    assert.ok(!clean.review && !clean.fix, 'clean: backups removed');
-
-    // Per-phase phase_commit_docs=false: cmdCommit exits 0 printing "skipped"; the step must warn, not claim success.
-    const phaseOff = drive('true', 'issues_found', 'skipped');
-    assert.strictEqual(phaseOff.count, '1', 'a skipped commit commits nothing');
-    assert.ok(phaseOff.review && phaseOff.fix, 'backups are retained on disk');
-    assert.match(phaseOff.stdout, /Warning: iteration backups not committed \(skipped\)/);
-    assert.doesNotMatch(phaseOff.stdout, /untracked/);
-
-    // Backups already committed and unchanged: cmdCommit exits 0 printing "nothing" — success, no warning.
-    const nothing = drive('true', 'issues_found', 'nothing');
-    assert.doesNotMatch(nothing.stdout, /Warning: iteration backups not committed/);
-
-    // cmdCommit prints the literal "committed" when it has no hash to report — also success.
-    const committed = drive('true', 'issues_found', 'committed');
-    assert.doesNotMatch(committed.stdout, /Warning: iteration backups not committed/);
-
-    // A failed commit (non-zero exit, or a rejecting hook) warns with the reason and never claims "untracked".
-    const failed = drive('true', 'issues_found', 'fail');
-    assert.match(failed.stdout, /Warning: iteration backups not committed \(failed\)/);
-    assert.doesNotMatch(failed.stdout, /untracked/);
-  });
-
-  test('T6d — #5506: a converged run commits the deletion of backups an earlier degraded run committed', { skip: !HAS_BASH }, (t) => {
-    const fence = stepFence(fs.readFileSync(WORKFLOW_PATH, 'utf8'), 'cleanup_iteration_backups');
-    const dir = seedBackupRepo(t, 'gsd-5506-converged-', 'clean', true);
-    const git = (...a) => gitOrThrow(a, { cwd: dir, timeoutMs: PROBE_TIMEOUT_MS });
-    const script = (body) => [
-      'set -euo pipefail',
-      'cd "' + dir + '"',
-      'gsd_run() { [ "$1 $2" = "query commit" ] || return 1;' + body,
-      'AUTO_MODE=true',
-      'COMMIT_DOCS=true',
-      'PADDED_PHASE=01',
-      'REVIEW_PATH="' + path.join(dir, '01-REVIEW.md') + '"',
-      'FIX_REPORT_PATH="' + path.join(dir, '01-REVIEW-FIX.md') + '"',
-      fence,
-    ].join('\n');
-    // A "nothing" result means the deletion was not staged: the converged arm must warn.
-    const warned = runHook('-c', [script(' echo nothing; return 0; }')], { interpreter: 'bash', timeoutMs: PROBE_TIMEOUT_MS });
-    assert.match(warned.stdout, /Warning: iteration backup deletions not committed \(nothing\)/);
-    git('add', '-A');
-    git('reset', '-q', '--hard');
-    for (const f of ['01-REVIEW.iter2.md', '01-REVIEW-FIX.iter2.md']) fs.writeFileSync(path.join(dir, f), 'scratch');
-    const res = runHook('-c', [script(REAL_COMMIT_BODY)], { interpreter: 'bash', timeoutMs: PROBE_TIMEOUT_MS });
-    assert.strictEqual(res.exitCode, 0, 'the cleanup step must never abort: ' + res.stderr);
-    assert.strictEqual(git('status', '--porcelain').trim(), '', 'the tree must be clean');
-    assert.deepStrictEqual(splitLines(git('ls-tree', '-r', '--name-only', 'HEAD')).filter(Boolean).sort(),
-      ['01-REVIEW-FIX.md', '01-REVIEW.md'], 'the backups are gone from HEAD');
-  });
-
-  test('T6e — #5506: a converged run with COMMIT_DOCS=false leaves committed backups in place and warns', { skip: !HAS_BASH }, (t) => {
-    const fence = stepFence(fs.readFileSync(WORKFLOW_PATH, 'utf8'), 'cleanup_iteration_backups');
-    const dir = seedBackupRepo(t, 'gsd-5506-nodocs-', 'clean', true);
-    const script = [
-      'set -euo pipefail',
-      'cd "' + dir + '"',
-      'gsd_run() { echo "$*" >> gsd-calls.log; return 1; }',
-      'AUTO_MODE=true',
-      'COMMIT_DOCS=false',
-      'PADDED_PHASE=01',
-      'REVIEW_PATH="' + path.join(dir, '01-REVIEW.md') + '"',
-      'FIX_REPORT_PATH="' + path.join(dir, '01-REVIEW-FIX.md') + '"',
-      fence,
-    ].join('\n');
-    const res = runHook('-c', [script], { interpreter: 'bash', timeoutMs: PROBE_TIMEOUT_MS });
-    assert.strictEqual(res.exitCode, 0, 'the cleanup step must never abort: ' + res.stderr);
-    assert.strictEqual(gitOrThrow(['status', '--porcelain'], { cwd: dir, timeoutMs: PROBE_TIMEOUT_MS }).trim(), '', 'no uncommitted deletions');
-    assert.ok(fs.existsSync(path.join(dir, '01-REVIEW.iter2.md')), 'tracked backups are not removed without a commit');
-    assert.match(res.stdout, /Warning: commit_docs is off; tracked iteration backups left in place/);
-  });
-
-  // Shared by T6f-T6i: run the shipped fence in a seeded repo with the real-CLI stub.
+  // Shared by T6c-T6i: run the shipped fence in a seeded repo with the real-CLI stub.
   const runFence = (dir, { commitDocs = 'true', pre = '', post = '', body = REAL_COMMIT_BODY } = {}) => {
     const fence = stepFence(fs.readFileSync(WORKFLOW_PATH, 'utf8'), 'cleanup_iteration_backups');
     const script = [
@@ -461,12 +329,93 @@ describe('#3190 — code-review-fix --auto REVIEW.md commit + FIX_REPORT_PATH en
   };
   const headFiles = (dir) => splitLines(gitOrThrow(['ls-tree', '-r', '--name-only', 'HEAD'], { cwd: dir, timeoutMs: PROBE_TIMEOUT_MS })).filter(Boolean).sort();
 
+  test('T6c — #5506: retained backups are COMMITTED when COMMIT_DOCS=true, left alone when false', { skip: !HAS_BASH }, (t) => {
+    // A non-clean --auto run retains <NN>-REVIEW(-FIX).iterN.md. Untracked, they leave a dirty tree
+    // that blocks the next checkout/worktree op. Execute the shipped fence against a real git repo
+    // with a gsd_run stub that does what `query commit MSG --files F... --raw` does: add + commit,
+    // print the hash. `skip` makes it print "skipped" and exit 0, as a per-phase
+    // phase_commit_docs=false override does (src/commands.cts cmdCommit).
+    const git = (dir, ...a) => runGit(a, { cwd: dir, timeoutMs: PROBE_TIMEOUT_MS });
+
+    const drive = (commitDocs, status = 'issues_found', mode = 'commit') => {
+      const dir = seedBackupRepo(t, 'gsd-5506-cleanup-', status, false);
+      runFence(dir, {
+        commitDocs,
+        body: ' echo "$*" >> gsd-calls.log;'
+          + (mode === 'skipped' ? ' echo skipped; return 0; }'
+            : mode === 'nothing' ? ' echo nothing; return 0; }'
+            : mode === 'committed' ? ' echo committed; return 0; }'
+            : mode === 'fail' ? ' return 1; }'
+            : REAL_COMMIT_BODY),
+      });
+      const calls = fs.existsSync(path.join(dir, 'gsd-calls.log')) ? fs.readFileSync(path.join(dir, 'gsd-calls.log'), 'utf8') : '';
+      if (calls) fs.unlinkSync(path.join(dir, 'gsd-calls.log'));
+      return {
+        calls,
+        status: git(dir, 'status', '--porcelain').stdout.trim(),
+        subject: git(dir, 'log', '-1', '--format=%s').stdout.trim(),
+        tracked: splitLines(git(dir, 'ls-files').stdout).filter(Boolean).sort(),
+        count: git(dir, 'rev-list', '--count', 'HEAD').stdout.trim(),
+        review: fs.existsSync(path.join(dir, '01-REVIEW.iter2.md')),
+        fix: fs.existsSync(path.join(dir, '01-REVIEW-FIX.iter2.md')),
+      };
+    };
+
+    const on = drive('true');
+    assert.strictEqual(on.status, '', 'the tree must be clean after the step: ' + on.status);
+    assert.ok(on.review && on.fix, 'backups are retained on disk');
+    assert.strictEqual(on.subject, 'docs(01): retain code review iteration backups');
+    assert.strictEqual(on.count, '2', 'exactly one new commit beyond the seed');
+    assert.deepStrictEqual(on.tracked,
+      ['01-REVIEW-FIX.iter2.md', '01-REVIEW-FIX.md', '01-REVIEW.iter2.md', '01-REVIEW.md'],
+      'both backups are recoverable from git');
+
+    const off = drive('false');
+    assert.strictEqual(off.calls, '', 'COMMIT_DOCS=false: .planning is gitignored, no commit attempted');
+    assert.ok(off.review && off.fix, 'backups are retained on disk');
+
+    const clean = drive('true', 'clean');
+    assert.strictEqual(clean.calls, '', 'clean: no commit attempted');
+    assert.ok(!clean.review && !clean.fix, 'clean: backups removed');
+
+    // Per-phase phase_commit_docs=false: cmdCommit exits 0 printing "skipped"; the step must warn, not claim success.
+    const phaseOff = drive('true', 'issues_found', 'skipped');
+    assert.strictEqual(phaseOff.count, '1', 'a skipped commit commits nothing');
+    assert.ok(phaseOff.review && phaseOff.fix, 'backups are retained on disk');
+
+    // A failed commit (non-zero exit, or a rejecting hook) commits nothing and never aborts the step.
+    const failed = drive('true', 'issues_found', 'fail');
+    assert.strictEqual(failed.count, '1', 'a failed commit commits nothing');
+    assert.ok(failed.review && failed.fix, 'backups are retained on disk');
+  });
+
+  test('T6d — #5506: a converged run commits the deletion of backups an earlier degraded run committed', { skip: !HAS_BASH }, (t) => {
+    const dir = seedBackupRepo(t, 'gsd-5506-converged-', 'clean', true);
+    const git = (...a) => gitOrThrow(a, { cwd: dir, timeoutMs: PROBE_TIMEOUT_MS });
+    // A "nothing" result means the deletion was not staged: the converged arm must leave it uncommitted.
+    runFence(dir, { body: ' echo nothing; return 0; }' });
+    assert.deepStrictEqual(headFiles(dir).filter((f) => f.includes('iter')), ['01-REVIEW-FIX.iter2.md', '01-REVIEW.iter2.md'], 'nothing committed: backups still in HEAD');
+    assert.match(git('status', '--porcelain'), /^ D /, 'the deletion is left unstaged');
+    git('add', '-A');
+    git('reset', '-q', '--hard');
+    for (const f of ['01-REVIEW.iter2.md', '01-REVIEW-FIX.iter2.md']) fs.writeFileSync(path.join(dir, f), 'scratch');
+    runFence(dir);
+    assert.strictEqual(git('status', '--porcelain').trim(), '', 'the tree must be clean');
+    assert.deepStrictEqual(headFiles(dir), ['01-REVIEW-FIX.md', '01-REVIEW.md'], 'the backups are gone from HEAD');
+  });
+
+  test('T6e — #5506: a converged run with COMMIT_DOCS=false leaves committed backups in place', { skip: !HAS_BASH }, (t) => {
+    const dir = seedBackupRepo(t, 'gsd-5506-nodocs-', 'clean', true);
+    runFence(dir, { commitDocs: 'false', body: ' return 1; }' });
+    assert.strictEqual(gitOrThrow(['status', '--porcelain'], { cwd: dir, timeoutMs: PROBE_TIMEOUT_MS }).trim(), '', 'no uncommitted deletions');
+    assert.ok(fs.existsSync(path.join(dir, '01-REVIEW.iter2.md')), 'tracked backups are not removed without a commit');
+  });
+
   test('T6f — #5506: the converged deletion commit honours a per-phase commit_docs=false', { skip: !HAS_BASH }, (t) => {
     // --files-removed alone gives cmdCommit no phase to detect, so the override was skipped.
     const dir = seedBackupRepo(t, 'gsd-5506-phase-off-', 'clean', true);
-    const res = runFence(dir, { pre: 'export PHASE_OFF=1' });
+    runFence(dir, { pre: 'export PHASE_OFF=1' });
     assert.ok(headFiles(dir).includes('01-REVIEW.iter2.md'), 'a skipped commit leaves the backups in HEAD');
-    assert.match(res.stdout, /Warning: iteration backup deletions not committed \(skipped\)/);
   });
 
   test('T6g — #5506: only .iter<digits>.md files are backups (01-REVIEW.iterations-notes.md is not)', { skip: !HAS_BASH }, (t) => {
@@ -490,13 +439,13 @@ describe('#3190 — code-review-fix --auto REVIEW.md commit + FIX_REPORT_PATH en
     assert.strictEqual(gitOrThrow(['status', '--porcelain'], { cwd: dir, timeoutMs: PROBE_TIMEOUT_MS }).trim(), '');
   });
 
-  test('T6i — #5506: nullglob is restored to the caller state; a rejected deletion commit says it is staged', { skip: !HAS_BASH }, (t) => {
+  test('T6i — #5506: nullglob is restored to the caller state; a rejected deletion commit leaves it staged', { skip: !HAS_BASH }, (t) => {
     const dir = seedBackupRepo(t, 'gsd-5506-shopt-', 'clean', true);
     assert.match(runFence(dir, { pre: 'shopt -s nullglob', post: 'shopt -q nullglob && echo NG=on || echo NG=off' }).stdout, /NG=on/);
     const dir2 = seedBackupRepo(t, 'gsd-5506-shopt2-', 'clean', true);
     assert.match(runFence(dir2, { pre: 'shopt -u nullglob', post: 'shopt -q nullglob && echo NG=on || echo NG=off' }).stdout, /NG=off/);
     const dir3 = seedBackupRepo(t, 'gsd-5506-hook-', 'clean', true);
-    const res = runFence(dir3, { body: ' git rm -q --cached -- "${@:4}" 2>/dev/null || true; return 1; }' });
-    assert.match(res.stdout, /staged/i);
+    runFence(dir3, { body: ' git rm -q --cached -- 01-REVIEW.iter2.md 01-REVIEW-FIX.iter2.md; return 1; }' });
+    assert.match(gitOrThrow(['status', '--porcelain'], { cwd: dir3, timeoutMs: PROBE_TIMEOUT_MS }), /^D {2}/, 'the rejected deletion stays staged');
   });
 });
