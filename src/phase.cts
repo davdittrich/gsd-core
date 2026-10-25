@@ -1289,12 +1289,14 @@ function dirPhaseNum(entry: string, convention: string | null, onlyMilestone: nu
 
 /**
  * The milestone integer bracket numbering is scoped to: the active milestone's `vN`, or null when it
- * cannot be trusted — numbering then counts every milestone, which can only skip a number. Bracket ids
- * restart per milestone, so a finished milestone's leftover `GSD.01-12-x` must not push milestone 2's
- * next phase to 13. `getMilestoneInfo` falls back to the first `vN.M` in roadmap prose ("requires Node
- * v18.0") when STATE.md names none, so the version is trusted only when `content`
- * (the current milestone's text) carries a `[CODE.N]` id for it, or STATE.md names it and no id there says otherwise; a wrong milestone would otherwise drop the
- * real one's directories and let their numbers be reused.
+ * cannot be trusted. Null counts every milestone, which can only skip a number, never reuse one.
+ * Bracket ids restart per milestone, so a finished milestone's `GSD.01-12-x` must not push milestone 2
+ * to 13. `getMilestoneInfo` may return a prose `vN.M` ("requires Node v18.0"), so the version is:
+ * - trusted when an id in the current milestone's text (`content`) carries that number;
+ * - else trusted only if STATE.md's frontmatter names it and no id in `content` carries another;
+ * - else null.
+ * Known gap: a stale STATE `v1.0` over a section with no tagged ids is trusted, so `GSD.02-05-x` is
+ * dropped (unreachable in normal flow).
  */
 function activeBracketMilestone(cwd: string, convention: string | null, content: string): number | null {
   if (convention !== 'bracket') return null;
