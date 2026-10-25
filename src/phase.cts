@@ -1351,6 +1351,11 @@ function dependsOnLine(newPhaseId: number | string, declared: readonly number[])
   return `\n**Depends on:** ${nearest === null ? 'Nothing' : `Phase ${nearest}`}`;
 }
 
+/** `dependsOnLine` over the phases `scopedText` declares (one place for `phase add` and `add-batch`). */
+function dependsOnFor(newPhaseId: number | string, scopedText: string, convention: string | null): string {
+  return dependsOnLine(newPhaseId, roadmapDeclaredPhaseNums(scopedText, { convention, milestone: null }));
+}
+
 /**
  * Splice a phase entry into `rawContent` at `at`, changing nothing else: the blank lines around the
  * block and its line endings are the block's own, so the surrounding document is published byte for
@@ -1565,7 +1570,7 @@ function cmdPhaseAdd(cwd: string, description: string, raw: boolean, customId?: 
     platformWriteSync(path.join(dirPath, '.gitkeep'), '');
 
     const dependsOn =
-      config.phase_naming === 'custom' ? '' : dependsOnLine(_newPhaseId, roadmapDeclaredPhaseNums(scope.milestone === null ? rawContent : content, { convention, milestone: null }));
+      config.phase_naming === 'custom' ? '' : dependsOnFor(_newPhaseId, scope.milestone === null ? rawContent : content, convention);
     const phaseEntry =
       `\n### Phase ${_newPhaseId}: ${description}\n\n**Goal:** [To be planned]\n**Requirements**: TBD${dependsOn}\n**Plans:** 0 plans\n\nPlans:\n- [ ] TBD (run ${formatGsdSlash('plan-phase', resolveRuntime(cwd)) as string} ${_newPhaseId} to break down)\n`;
 
@@ -1652,7 +1657,7 @@ function cmdPhaseAddBatch(cwd: string, descriptions: string[], raw: boolean): vo
       platformEnsureDir(dirPath);
       platformWriteSync(path.join(dirPath, '.gitkeep'), '');
       const dependsOn =
-        config.phase_naming === 'custom' ? '' : dependsOnLine(newPhaseId, roadmapDeclaredPhaseNums(scope.milestone === null ? rawContent : extractCurrentMilestone(rawContent, cwd), { convention, milestone: null }));
+        config.phase_naming === 'custom' ? '' : dependsOnFor(newPhaseId, scope.milestone === null ? rawContent : extractCurrentMilestone(rawContent, cwd), convention);
       const phaseEntry =
         `\n### Phase ${newPhaseId}: ${description}\n\n**Goal:** [To be planned]\n**Requirements**: TBD${dependsOn}\n**Plans:** 0 plans\n\nPlans:\n- [ ] TBD (run ${formatGsdSlash('plan-phase', resolveRuntime(cwd)) as string} ${newPhaseId} to break down)\n`;
       const insertAt = phaseEntryInsertOffset(rawContent, cwd);
