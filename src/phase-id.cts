@@ -419,8 +419,9 @@ function buildPhaseDeclarationScans(convention?: string | null, withBullets = tr
   const heading = buildPhaseHeadingScanRegex(PHASE_HEADING_BASELINE.LABEL_ONLY, convention);
   const scans: PhaseScan[] = [{ regex: heading.regex, idGroup: heading.bracketGroup, numGroup: heading.phaseNumGroup }];
   const bullet = '^[ \\t]*-[ \\t]*';
-  const tail = '(\\d+)(?=[:.\\s*]|$)';
   const bracket = convention === 'bracket';
+  // Bracket ids may carry a letter suffix (`12A`), as the heading scan's phase token does.
+  const tail = bracket ? '(\\d+)(?=[A-Za-z]?(?:[:.\\s*]|$))' : '(\\d+)(?=[:.\\s*]|$)';
   const checkbox = `\\[${bracket ? `(?!${BRACKET_ID_SRC}\\])` : ''}[^\\]]{0,200}\\][ \\t]*`;
   if (!bracket) {
     if (withBullets) scans.push({ regex: new RegExp(`${bullet}${checkbox}\\*{0,2}Phase[ \\t]+${tail}`, 'gim'), idGroup: null, numGroup: 1 });
@@ -430,8 +431,12 @@ function buildPhaseDeclarationScans(convention?: string | null, withBullets = tr
   if (withBullets) {
     const label = `(?:\\[(${BRACKET_ID_SRC})\\][ \\t]*(?:Phase[ \\t]+|(?=\\d))|Phase[ \\t]+)`;
     scans.push({ regex: new RegExp(`${bullet}${checkbox}\\*{0,2}${label}${tail}`, 'gim'), idGroup: 1, numGroup: 2 });
-    // No checkbox to vouch for it: the number needs a `:` or end of line, or `- [GSD.02] 2026 notes` is phase 2026.
-    scans.push({ regex: new RegExp(`${bullet}\\*{0,2}\\[(${BRACKET_ID_SRC})\\][ \\t]*(?:Phase[ \\t]+|(?=\\d))(\\d+)(?=:|[ \\t]*$)`, 'gim'), idGroup: 1, numGroup: 2 });
+    // The word-first heading's bullet twin: `- [ ] Phase [GSD.02] 07:`.
+    scans.push({ regex: new RegExp(`${bullet}${checkbox}\\*{0,2}Phase[ \\t]+\\[(${BRACKET_ID_SRC})\\][ \\t]*${tail}`, 'gim'), idGroup: 1, numGroup: 2 });
+    // The checkbox forms above deliberately over-count a colon-less `- [ ] [GSD.02] 2026 notes` as phase 2026: a
+    // skipped number is harmless, a reused one is not, so do not "fix" them with a colon requirement.
+    // With no checkbox to vouch for it the number needs a `:` or end of line, or `- [GSD.02] 2026 notes` is phase 2026.
+    scans.push({ regex: new RegExp(`${bullet}\\*{0,2}\\[(${BRACKET_ID_SRC})\\][ \\t]*(?:Phase[ \\t]+|(?=\\d))(\\d+)(?=[A-Za-z]?(?::|[ \\t]*$))`, 'gim'), idGroup: 1, numGroup: 2 });
   }
   return scans;
 }
