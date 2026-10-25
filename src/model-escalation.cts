@@ -121,7 +121,7 @@ export function escalationAllows(
   passedModel: string,
   { now, session }: { now: number; session?: string },
 ): boolean {
-  if (!rec || typeof rec.model !== 'string') return false;
+  if (!rec || typeof rec.model !== 'string' || !Number.isFinite(rec.written_at)) return false;
   const age = now - rec.written_at;
   if (!(age > -ESCALATION_SKEW_MS && age < ESCALATION_WINDOW_MS)) return false;
   if (typeof rec.session === 'string' && session !== undefined && rec.session !== session) return false;

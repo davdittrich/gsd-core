@@ -2249,6 +2249,15 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
     assert.equal(evaluate(dispatch('gsd-planner', 'undefined')).action, 'warn');
   });
 
+  test('escalation record whose written_at is not a finite number never matches', (t) => {
+    setup(t);
+    const now = 1_000_000;
+    for (const written_at of [String(now), null, 'x']) {
+      plantEscalation(project, 'gsd-planner', `{"model":"sonnet","written_at":${JSON.stringify(written_at)}}`);
+      assert.equal(evaluate(dispatch('gsd-planner', 'sonnet'), { now: () => now }).action, 'warn', String(written_at));
+    }
+  });
+
   test('a plain resolve-execution leaves an escalation record alone', (t) => {
     setup(t);
     assert.ok(runGsdTools(['resolve-execution', 'gsd-executor', '--attempt', '1'], project).success);
