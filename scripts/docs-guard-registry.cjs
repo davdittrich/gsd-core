@@ -55,7 +55,7 @@
  * narrow subset of guards that read it, instead of always running the
  * entire registry. Each value is a non-empty array of PATTERNS:
  *
- *   - a plain path (e.g. `'docs/AGENTS.md'`) matches that exact file only;
+ *   - a plain path (e.g. `'docs/reference/agents.md'`) matches that exact file only;
  *   - a trailing-slash path (e.g. `'docs/adr/'`) matches any changed path
  *     under that directory prefix — use this for a test that walks or
  *     `readdirSync`s a whole docs/ subdirectory;
@@ -158,6 +158,7 @@ function assertNoSuiteCollision(tests) {
  */
 const DOCS_GUARD_TESTS = {
   'tests/pi-unsupported-skill-docs.test.cjs': ['docs/how-to/start-a-gsd-workflow-from-pi.md'],
+  'tests/pi-parity-matrix.test.cjs': ['docs/reference/pi-parity-matrix.md'],
   'tests/adr-15-progress-converge.test.cjs': [
     'docs/COMMANDS.md',
     'docs/how-to/run-phases-autonomously.md',
@@ -169,7 +170,7 @@ const DOCS_GUARD_TESTS = {
   // Walks docs/features/ as a directory (the fragment corpus) and asserts the
   // committed docs/FEATURES.md equals the generated projection of it (#3840).
   'tests/features-index-gate.test.cjs': ['docs/features/', 'docs/FEATURES.md'],
-  'tests/agent-classification-parity.test.cjs': ['docs/AGENTS.md', 'docs/INVENTORY.md'],
+  'tests/agent-classification-parity.test.cjs': ['docs/reference/agents.md', 'docs/INVENTORY.md'],
   // #3683: pins the learnings feature section's agreement with the canonical
   // artifact registry (reads docs/FEATURES.md around the extract-learnings
   // entry).
@@ -246,7 +247,7 @@ const DOCS_GUARD_TESTS = {
     'docs/ko-KR/reference/state-md.md',
     'docs/pt-BR/reference/state-md.md',
   ],
-  'tests/drift-detection.test.cjs': ['docs/CONFIGURATION.md', 'docs/AGENTS.md'],
+  'tests/drift-detection.test.cjs': ['docs/CONFIGURATION.md', 'docs/reference/agents.md'],
   'tests/edge-probe-docs-fixtures.test.cjs': ['docs/adr/550-spec-phase-probe-contract.md'],
   'tests/edit-phase.test.cjs': [
     'docs/INVENTORY.md',
@@ -314,7 +315,7 @@ const DOCS_GUARD_TESTS = {
   'tests/host-integration-descriptors.test.cjs': [
     'docs/reference/host-integration-capability-matrix.md',
   ],
-  'tests/install.test.cjs': ['docs/AGENTS.md', 'docs/INVENTORY.md', 'docs/INVENTORY-MANIFEST.json'],
+  'tests/install.test.cjs': ['docs/reference/agents.md', 'docs/INVENTORY.md', 'docs/INVENTORY-MANIFEST.json'],
   // SOURCE_DIRS includes 'docs' and walks it recursively for every .md file
   // (intel.test.cjs:1223-1228) — a generic tree walk.
   'tests/intel.test.cjs': ['*'],
@@ -322,6 +323,13 @@ const DOCS_GUARD_TESTS = {
   'tests/inventory-manifest-sync.test.cjs': ['docs/INVENTORY.md', 'docs/INVENTORY-MANIFEST.json'],
   'tests/kilo-upgrades.test.cjs': ['docs/how-to/connect-gsd-mcp-server.md'],
   'tests/live-config-guard.test.cjs': ['docs/TESTING-SUITES.md'],
+  // #5601: localized INVENTORY coverage notes must state no agent counts.
+  'tests/localized-inventory-agent-counts.test.cjs': [
+    'docs/ja-JP/',
+    'docs/ko-KR/',
+    'docs/pt-BR/',
+    'docs/zh-CN/',
+  ],
   // #3726: pins the `milestone complete` synopsis (English + four localized
   // mirrors), the `--confirm` flag row and the guard-override instructions —
   // `type: Fixed` exempts that PR from the docs-required lint, so this is the
@@ -347,7 +355,7 @@ const DOCS_GUARD_TESTS = {
     'docs/README.md',
   ],
   'tests/plan-authoring-verification-gaps.test.cjs': ['docs/reference/plan-md.md'],
-  'tests/plan-checker-coupling.test.cjs': ['docs/AGENTS.md'],
+  'tests/plan-checker-coupling.test.cjs': ['docs/reference/agents.md'],
   'tests/plan-phase-drift-guard.test.cjs': [
     'docs/CONFIGURATION.md',
     'docs/COMMANDS.md',
@@ -407,7 +415,7 @@ const DOCS_GUARD_TESTS = {
     'docs/COMMANDS.md',
     'docs/reference/plan-md.md',
     'docs/how-to/plan-a-phase.md',
-    'docs/AGENTS.md',
+    'docs/reference/agents.md',
   ],
   'tests/ui-interaction-capture.test.cjs': ['docs/CONFIGURATION.md'],
   'tests/ui-spec-inventory-provenance.test.cjs': [
@@ -422,7 +430,7 @@ const DOCS_GUARD_TESTS = {
     'docs/pt-BR/how-to/design-a-ui-phase.md',
   ],
   'tests/verifier-behavior-unverified.test.cjs': ['docs/reference/planning-artifacts.md'],
-  'tests/verifier-coincidental-reliance.test.cjs': ['docs/AGENTS.md'],
+  'tests/verifier-coincidental-reliance.test.cjs': ['docs/reference/agents.md'],
   'tests/verify.test.cjs': ['docs/reference/plan-md.md'],
   // #5118 V43: asserts the deleted execute-phase/steps/stale-reverification.md
   // is absent from the generated inventory manifest.

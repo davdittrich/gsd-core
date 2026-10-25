@@ -2644,16 +2644,18 @@ const claudeToCopilotTools = {
 // being dropped — dropping would silently remove a restriction). The old
 // values were Gemini CLI dialect names, which Antigravity's tool validation
 // does not document and may hang the subagent on.
+// #5447: Write/Glob/WebSearch/WebFetch use the names agy 1.3.5 registers
+// (write_to_file, find_by_name, search_web, read_url_content); agy refuses to
+// start an agent whose tools list holds any name it does not register.
 const claudeToAntigravityTools = {
   Read: 'view_file',
-  Write: 'write_file',
+  Write: 'write_to_file',
   Edit: 'replace_file_content',
   Bash: 'run_command',
-  Glob: 'glob',
+  Glob: 'find_by_name',
   Grep: 'grep_search',
-  WebSearch: 'google_web_search',
-  WebFetch: 'web_fetch',
-  TodoWrite: 'write_todos',
+  WebSearch: 'search_web',
+  WebFetch: 'read_url_content',
 };
 
 /**
@@ -2675,13 +2677,16 @@ function convertAntigravityToolName(claudeTool) {
   // built-in tool; the lowercase fallback would emit an invalid
   // 'skill'/'slashcommand' name that fails frontmatter validation
   // (tools.N: Invalid tool name) and aborts the entire agent load (#1394).
+  // TodoWrite: exclude — agy 1.3.5 registers no todo tool, and an unknown name
+  // stops the agent from starting (#5447).
   if (
     claudeTool === 'Task' ||
     claudeTool === 'Agent' ||
     claudeTool === 'AskUserQuestion' ||
     claudeTool === 'ask_user' ||
     claudeTool === 'Skill' ||
-    claudeTool === 'SlashCommand'
+    claudeTool === 'SlashCommand' ||
+    claudeTool === 'TodoWrite'
   ) {
     return null;
   }
@@ -2758,10 +2763,11 @@ function convertClaudeAgentToAntigravityAgent(content, isGlobal = false) {
   const name = extractFrontmatterField(frontmatter, 'name') || 'unknown';
   const description = extractFrontmatterField(frontmatter, 'description') || '';
   const color = extractFrontmatterField(frontmatter, 'color');
-  const toolsRaw = extractFrontmatterField(frontmatter, 'tools') || '';
 
-  // Map tools to Antigravity equivalents (reuse existing convertAntigravityToolName)
-  const claudeTools = toolsRaw.split(',').map(t => t.trim()).filter(Boolean);
+  // Map tools to Antigravity equivalents (reuse existing convertAntigravityToolName).
+  // parseFrontmatterTools reads both the inline comma list and the YAML block
+  // list (e.g. agents/gsd-security-auditor.md) (#5447).
+  const claudeTools = parseFrontmatterTools(frontmatter);
   const mappedTools = claudeTools.map(t => convertAntigravityToolName(t)).filter(Boolean);
 
   // #2876: quote description for the same reason as the skill variant.
@@ -3568,10 +3574,15 @@ function _stampNonClaudeRuntimeDefaults(content: string, runtime: string): strin
  * @private — exported as `_restoreClaudeGlobalAtRefTilde` for tests and for
  * bin/install.js's `copyWithPathReplacement`.
  */
-function restoreClaudeGlobalAtRefTilde(content, pathPrefix) {
+function restoreClaudeGlobalAtRefTilde(content, pathPrefix, options: { anchorBare?: boolean } = {}) {
   if (typeof pathPrefix !== 'string' || !pathPrefix.startsWith('$HOME')) return content;
   const tildeEquivalent = '~' + pathPrefix.slice('$HOME'.length);
-  const atRefRe = new RegExp(`(?<!["'])@${escapeRegExp(pathPrefix)}`, 'g');
+  // #5501: a caller that hands over the NORMALIZED prefix (no trailing slash) and
+  // opts in must not match the start of a look-alike such as
+  // `@$HOME/.claude-plugin/x`. Opt-in, because the agents pipeline passes the same
+  // shape and its output must not change.
+  const boundary = options.anchorBare && !pathPrefix.endsWith('/') ? CLAUDE_HOME_BARE_BOUNDARY : '';
+  const atRefRe = new RegExp(`(?<!["'])@${escapeRegExp(pathPrefix)}${boundary}`, 'g');
   // Function replacement, not a string. A string replacement treats `$&` and the
   // backtick-dollar form in the SUBSTITUTION as special patterns, so a --config-dir
   // containing either corrupts output: `$HOME/.cl$&ude/` yielded
@@ -3696,6 +3707,28 @@ function _applyRuntimeRewrites(content, runtime, pathPrefix, isGlobal = false, a
     );
   }
   return _applyRuntimeRewritesInner(content, runtime, pathPrefix, isGlobal, attribution);
+}
+
+/**
+ * #5501: rewrite `~/.claude` and `$HOME/.claude` in one pass. `pathPrefix` (with
+ * its trailing slash) replaces the slash form; `normalizedPathPrefix` replaces the
+ * bare form, guarded so `.claude-plugin`, `.claudeignore` and `.claude.json` keep
+ * their bytes. A function replacement, never a string: a string replacement
+ * interprets `$&` in a config dir, and a single pass never rescans text it emitted.
+ */
+// The bare form ends at anything but a word character, `-`, or `.` + word character,
+// so `.claude-plugin`, `.claudeignore`, `.claude.json` and `.claude.d` are not home forms.
+const CLAUDE_HOME_BARE_BOUNDARY = '(?![\\w-]|\\.\\w)';
+const CLAUDE_HOME_FORM_RE = new RegExp('(?:~|\\$HOME)\\/\\.claude(\\/|' + CLAUDE_HOME_BARE_BOUNDARY + ')', 'g');
+
+function rewriteClaudeHomeForms(content: string, pathPrefix: string, normalizedPathPrefix: string): string {
+  return content.replace(CLAUDE_HOME_FORM_RE, (match: string, tail: string) => {
+    if (tail === '/') return pathPrefix;
+    // A default install: the bare form already names the target. Keep the source
+    // spelling (`~/.claude` stays `~/.claude`) so default installs stay byte-identical.
+    if (normalizedPathPrefix === '$HOME/.claude') return match;
+    return normalizedPathPrefix;
+  });
 }
 
 function _applyRuntimeRewritesInner(content, runtime, pathPrefix, isGlobal = false, attribution = undefined) {
@@ -3823,13 +3856,20 @@ function _applyRuntimeRewritesInner(content, runtime, pathPrefix, isGlobal = fal
     // paths) whose commands install with `converter: null` — this pass is their
     // only chance to receive runtime-correct paths, including the tilde restore.
     case 'slash-tilde-restore':
-      content = content.replace(/~\/\.claude\//g, pathPrefix);
-      content = content.replace(/\$HOME\/\.claude\//g, pathPrefix);
+      // #5501: the slash AND bare forms in ONE pass. The launcher default
+      // `${CLAUDE_CONFIG_DIR:-$HOME/.claude}` has no trailing slash, so a slash-only
+      // rewrite left a --config-dir install probing `~/.claude/gsd-core`. One
+      // combined pass (not slash then bare) so a prefix the pass emits is never
+      // rescanned: a config dir nested under `~/.claude` or named `.claude.d` would
+      // otherwise be rewritten again.
+      content = rewriteClaudeHomeForms(content, pathPrefix, normalizedPathPrefix);
       content = content.replace(/\.\/\.claude\//g, `./${dirName}/`);
       // #3133 / #3544: restore @-file-reference lines to the tilde form
       // Claude actually expands — see restoreClaudeGlobalAtRefTilde's doc
-      // comment above for why this must be a separate, @-anchored pass.
-      content = restoreClaudeGlobalAtRefTilde(content, pathPrefix);
+      // comment above for why this must be a separate, @-anchored pass. Handed
+      // the normalized prefix (as the agents pipeline is, #3719) so a bare
+      // `@~/.claude` rewritten above is restored as well.
+      content = restoreClaudeGlobalAtRefTilde(content, normalizedPathPrefix, { anchorBare: true });
       content = processAttribution(content, attribution);
       break;
 
@@ -4381,6 +4421,7 @@ export = {
   convertClaudeCommandToKimiSkill,
   convertClaudeCommandToKimiCodeSkill,
   convertClaudeCommandToPiSkill,
+  PI_UNSUPPORTED_SKILLS,
   buildKimiAgentArtifacts,
   convertClaudeToCursorMarkdown,
   convertClaudeCommandToCursorSkill,
@@ -4430,6 +4471,7 @@ export = {
   convertAntigravityToolName,
   convertClaudeAgentToCopilotAgent,
   convertClaudeAgentToAntigravityAgent,
+  parseFrontmatterTools,
   convertClaudeAgentToCursorAgent,
   convertClaudeAgentToWindsurfAgent,
   convertClaudeAgentToAugmentAgent,
