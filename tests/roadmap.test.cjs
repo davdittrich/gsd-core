@@ -6576,6 +6576,17 @@ describe('#5221: roadmap update-plan-progress — active milestone scope and pha
     }), { numRuns: 16, seed: 5221 });
   });
 
+  test('activeScopeStart without a resolvable heading ignores a backlog <details> between the active phases and a later backlog entry', () => {
+    const { activeScopeStart } = require('../gsd-core/bin/lib/roadmap-parser.cjs');
+    const content = ['# Roadmap', '<details>', '<summary>shipped</summary>', '- [x] **Phase 1: Old**', '</details>', '',
+      '- [ ] **Phase 2: Active**', '- [ ] **Phase 3: Active**', '',
+      '<details>', '<summary>Backlog A</summary>', '- [ ] **Phase 999.1: A**', '</details>',
+      '<details>', '<summary>Backlog B</summary>', '- [ ] **Phase 999.2: B**', '</details>'].join('\n');
+    const scope = content.slice(activeScopeStart(content, tmpDir));
+    assert.ok(scope.includes('Phase 2: Active'), 'active phases stay in scope');
+    assert.ok(!scope.includes('Phase 1: Old'), 'shipped block stays out');
+  });
+
   test('a Plans-headed Progress table directly above a shipped <details> does not leak into the shipped table', () => {
     const active = ACTIVE.map((l) => l.replace('| Phase | Plans Complete |', '| Phase | Plans |'));
     seed([...active, ...SHIPPED], { complete: true });

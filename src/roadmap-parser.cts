@@ -2403,13 +2403,15 @@ function currentMilestoneRawRanges(
  * `</details>` AFTER it no longer hides it (#5221) while phase/Progress content
  * above the heading (#2947 preamble layout) stays in scope. No resolved heading,
  * or one that is itself closed (stale STATE), uses the last `</details>` before the
- * last phase entry, so a backlog `</details>` below the active phases does not hide them.
+ * first phase entry outside any open <details>, so a backlog `</details>` below the active phases does not hide them.
  * The scope runs to EOF either way, so a bottom `## Progress` stays in scope.
  */
 function activeScopeStart(content: string, cwd?: string): number {
   const start = currentMilestoneRawRanges(content, cwd)?.primary.start;
   const open = start !== undefined && !isClosedMilestoneHeading(content.slice(start).split('\n', 1)[0]);
-  const upTo = open ? content.slice(0, start) : content.slice(0, [...content.matchAll(/^(?:#{2,4}[ \t]+Phase\b|[ \t]*-[ \t]*\[[ x]\][ \t]*\*\*Phase\b)/gim)].pop()?.index ?? content.length);
+  const firstActive = [...content.matchAll(/^(?:#{2,4}[ \t]+Phase\b|[ \t]*-[ \t]*\[[ x]\][ \t]*\*\*Phase\b)/gim)]
+    .find((m) => { const prior = content.slice(0, m.index); return prior.lastIndexOf('<details>') <= prior.lastIndexOf('</details>'); });
+  const upTo = open ? content.slice(0, start) : content.slice(0, firstActive?.index ?? content.length);
   const lastDetailsClose = upTo.lastIndexOf('</details>');
   return lastDetailsClose === -1 ? 0 : lastDetailsClose + '</details>'.length;
 }
