@@ -1351,9 +1351,12 @@ function dependsOnLine(newPhaseId: number | string, declared: readonly number[])
   return `\n**Depends on:** ${nearest === null ? 'Nothing' : `Phase ${nearest}`}`;
 }
 
-/** `dependsOnLine` over the phases `scopedText` declares (one place for `phase add` and `add-batch`). */
-function dependsOnFor(newPhaseId: number | string, scopedText: string, convention: string | null): string {
-  return dependsOnLine(newPhaseId, roadmapDeclaredPhaseNums(scopedText, { convention, milestone: null }));
+/**
+ * `dependsOnLine` over the phases `milestoneText` (the active milestone's roadmap text) declares, so
+ * an archived milestone's phase is never named, whether or not the bracket milestone number resolved.
+ */
+function dependsOnFor(newPhaseId: number | string, milestoneText: string, convention: string | null): string {
+  return dependsOnLine(newPhaseId, roadmapDeclaredPhaseNums(milestoneText, { convention, milestone: null }));
 }
 
 /**
@@ -1570,7 +1573,7 @@ function cmdPhaseAdd(cwd: string, description: string, raw: boolean, customId?: 
     platformWriteSync(path.join(dirPath, '.gitkeep'), '');
 
     const dependsOn =
-      config.phase_naming === 'custom' ? '' : dependsOnFor(_newPhaseId, scope.milestone === null ? rawContent : content, convention);
+      config.phase_naming === 'custom' ? '' : dependsOnFor(_newPhaseId, content, convention);
     const phaseEntry =
       `\n### Phase ${_newPhaseId}: ${description}\n\n**Goal:** [To be planned]\n**Requirements**: TBD${dependsOn}\n**Plans:** 0 plans\n\nPlans:\n- [ ] TBD (run ${formatGsdSlash('plan-phase', resolveRuntime(cwd)) as string} ${_newPhaseId} to break down)\n`;
 
@@ -1657,7 +1660,7 @@ function cmdPhaseAddBatch(cwd: string, descriptions: string[], raw: boolean): vo
       platformEnsureDir(dirPath);
       platformWriteSync(path.join(dirPath, '.gitkeep'), '');
       const dependsOn =
-        config.phase_naming === 'custom' ? '' : dependsOnFor(newPhaseId, scope.milestone === null ? rawContent : extractCurrentMilestone(rawContent, cwd), convention);
+        config.phase_naming === 'custom' ? '' : dependsOnFor(newPhaseId, extractCurrentMilestone(rawContent, cwd), convention);
       const phaseEntry =
         `\n### Phase ${newPhaseId}: ${description}\n\n**Goal:** [To be planned]\n**Requirements**: TBD${dependsOn}\n**Plans:** 0 plans\n\nPlans:\n- [ ] TBD (run ${formatGsdSlash('plan-phase', resolveRuntime(cwd)) as string} ${newPhaseId} to break down)\n`;
       const insertAt = phaseEntryInsertOffset(rawContent, cwd);

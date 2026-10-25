@@ -2893,6 +2893,7 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
     return sibling;
   }
   const roadmap = (planning) => fs.readFileSync(path.join(planning, 'ROADMAP.md'), 'utf-8');
+  const roadmapText = () => roadmap(path.join(tmp, '.planning'));
 
   test('issue repro: bracket phase blocks reuse; Depends on names the bracket predecessor', () => {
     const planning = setup([
@@ -3094,6 +3095,16 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
     setup(['# Roadmap', '', '### [GSD.02] 01: Current', ''], { milestone: 'v1.0', dirs: ['GSD.02-05-held'] });
     const batch = runGsdTools(['phase', 'add-batch', '--descriptions', '["A","B"]'], tmp);
     assert.deepStrictEqual(JSON.parse(batch.output).phases.map((p) => p.phase_number), [6, 7]);
+  });
+
+  test('Depends on names the active milestone section, not an archived one, when the bracket milestone is unresolved (STATE v1.0, [GSD.02] ids)', () => {
+    const rm = ['# Roadmap', '', '## Milestone v1.0', '', '### [GSD.02] 01: Current', '', '## Milestone v0.9 (shipped)', '', '### [GSD.01] 04: Old', ''];
+    setup(rm, { milestone: 'v1.0', dirs: ['GSD.02-05-held'] });
+    assert.strictEqual(runGsdTools('phase add "New thing" --raw', tmp).output.trim(), '06');
+    assert.match(roadmapText(), /### Phase 6: New thing[\s\S]*?\*\*Depends on:\*\* Phase 1\b/);
+    setup(rm, { milestone: 'v1.0', dirs: ['GSD.02-05-held'] });
+    runGsdTools(['phase', 'add-batch', '--descriptions', '["A","B"]'], tmp);
+    assert.match(roadmapText(), /### Phase 6: A[\s\S]*?\*\*Depends on:\*\* Phase 1\b[\s\S]*### Phase 7: B[\s\S]*?\*\*Depends on:\*\* Phase 6\b/);
   });
 
   test('a no-checkbox prose bullet "- [GSD.02] 2026 release notes" is not a phase', () => {
