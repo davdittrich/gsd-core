@@ -12,6 +12,10 @@ const { REASON_INTERPOLATION_MAX_LEN } = require('./isolation-deny-reason.js');
 
 const ALLOW = { action: 'allow' };
 
+// Literal copy of model-escalation's GUARDED_AGENT_TYPES so every other subagent dispatch is
+// allowed before the runtime build seam and the built artifact load; a test pins the two equal.
+const GUARDED_TYPES = new Set(['gsd-executor', 'gsd-verifier', 'gsd-plan-checker', 'gsd-planner']);
+
 // Size bound for the .planning/config.json read (64 KiB; same value as the escalation-record bound).
 const CONFIG_MAX_READ_BYTES = 64 * 1024;
 
@@ -66,13 +70,12 @@ function checkAgentModel(data, { clock = Date } = {}) {
     if (!data || (data.tool_name !== 'Agent' && data.tool_name !== 'Task')) return ALLOW;
     const toolInput = data.tool_input;
     const type = toolInput && toolInput.subagent_type;
-    if (typeof type !== 'string') return ALLOW;
+    if (typeof type !== 'string' || !GUARDED_TYPES.has(type)) return ALLOW;
 
     // #3582 seam (lint-hooks-runtime-build-seam), but never compile here: on a cold tree
     // tscScript null throws (caught below: allow) instead of running tsc inside the hook.
     require('../../gsd-core/bin/ensure-runtime-build.cjs').ensureRuntimeBuild({ tscScript: null });
     const esc = require('../../gsd-core/bin/lib/model-escalation.cjs');
-    if (!esc.GUARDED_AGENT_TYPES.has(type)) return ALLOW;
 
     const root = resolveSentinelRoot(data.cwd || process.cwd());
     const { mode, skip } = readGuardMode(root);
@@ -92,4 +95,4 @@ function checkAgentModel(data, { clock = Date } = {}) {
   }
 }
 
-module.exports = { checkAgentModel };
+module.exports = { checkAgentModel, GUARDED_TYPES };

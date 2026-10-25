@@ -2489,6 +2489,19 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
     assert.ok(spy.mock.calls.every((c) => c.arguments[0] && c.arguments[0].tscScript === null), 'a cold tree is skipped, never built inside the hook');
   });
 
+  test('an unguarded subagent type is allowed before any build seam or built-artifact load', (t) => {
+    setup(t);
+    const seam = require('../gsd-core/bin/ensure-runtime-build.cjs');
+    const spy = t.mock.method(seam, 'ensureRuntimeBuild');
+    assert.equal(evaluate(dispatch('gsd-codebase-mapper', 'opus')).action, 'allow');
+    assert.equal(spy.mock.callCount(), 0);
+  });
+
+  test('the hook\'s literal guarded-type pre-filter matches GUARDED_AGENT_TYPES', () => {
+    const { GUARDED_TYPES } = require('../hooks/lib/agent-model-check.js');
+    assert.deepEqual([...GUARDED_TYPES].sort(), [...require('../gsd-core/bin/lib/model-escalation.cjs').GUARDED_AGENT_TYPES].sort());
+  });
+
   test('hook process: warn exits 0 with additionalContext; deny exits 2', (t) => {
     setup(t);
     const w = runHook(dispatch('gsd-planner', 'sonnet'), project);
