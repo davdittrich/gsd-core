@@ -2387,15 +2387,17 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
     assert.equal(fs.existsSync(tmp), false);
   });
 
-  test('writeEscalation still writes the record when .gsd/.gitignore is over the read cap', (t) => {
+  test('writeEscalation reads .gsd/.gitignore up to the cap (limit-1, limit) and leaves limit+1 untouched; the record is written either way', (t) => {
     setup(t);
     const esc = require('../gsd-core/bin/lib/model-escalation.cjs');
     const ignore = path.join(project, '.gsd', '.gitignore');
     fs.mkdirSync(path.join(project, '.gsd'), { recursive: true });
-    fs.writeFileSync(ignore, '#'.repeat(esc.MAX_READ_BYTES + 1));
-    esc.writeEscalation(project, 'gsd-executor', 'opus', undefined, { now: () => 42 });
-    assert.equal(fs.statSync(ignore).size, esc.MAX_READ_BYTES + 1, 'left untouched');
-    assert.equal(esc.readEscalation(project, 'gsd-executor').model, 'opus');
+    for (const [delta, ok] of [[-1, true], [0, true], [1, false]]) {
+      fs.writeFileSync(ignore, '#'.repeat(esc.MAX_READ_BYTES + delta));
+      esc.writeEscalation(project, 'gsd-executor', 'opus', undefined, { now: () => 42 });
+      assert.equal(fs.readFileSync(ignore, 'utf8').endsWith('\n/model-escalation-*\n'), ok, `ignore cap${delta}`);
+      assert.equal(esc.readEscalation(project, 'gsd-executor').model, 'opus', `record cap${delta}`);
+    }
   });
 
   test('64 KiB read caps: limit-1 and limit are read, limit+1 is not (escalation record, config)', (t) => {
