@@ -87,11 +87,13 @@ function stepRegion(src, name) {
 
 // Mirrors `query commit MSG [--files F...] [--files-removed F...] --raw` (src/commands.cts cmdCommit):
 // --files paths missing on disk are SKIPPED (#2014), only --files-removed stages a deletion, and an
-// empty index prints "nothing". A stub that `git add`s everything would mask a deletion routed
+// empty index prints "nothing". PHASE_OFF models a per-phase commit_docs=false: the phase is detected
+// only from --files, so any --files path makes the call print "skipped" (detectPhaseNumberFromFiles). A stub that `git add`s everything would mask a deletion routed
 // through --files.
 const REAL_COMMIT_BODY = ' local msg="$3"; shift 3; local m="" a=() r=();'
   + ' while [ $# -gt 0 ]; do case "$1" in --files) m=a;; --files-removed) m=r;; --raw) m="";;'
   + ' *) if [ "$m" = a ] && [ -e "$1" ]; then a+=("$1"); elif [ "$m" = r ] && [ ! -e "$1" ]; then r+=("$1"); fi;; esac; shift; done;'
+  + ' if [ -n "${PHASE_OFF:-}" ] && [ ${#a[@]} -gt 0 ]; then echo skipped; return 0; fi;'
   + ' if [ ${#a[@]} -gt 0 ]; then git add -- "${a[@]}"; fi;'
   + ' if [ ${#r[@]} -gt 0 ]; then git rm -q --cached --ignore-unmatch -- "${r[@]}"; fi;'
   + ' if git diff --cached --quiet; then echo nothing; return 0; fi;'
@@ -224,8 +226,8 @@ describe('#3190 — code-review-fix --auto REVIEW.md commit + FIX_REPORT_PATH en
     );
     // Removal lives in its own step, still gated on convergence.
     assert.ok(
-      /rm -f[\s\S]*?\.iter[\s\S]*?\*[\s\S]*?\.md/.test(cleanup),
-      'cleanup_iteration_backups must remove spent .iterN.md backups (rm -f … .iter*.md)',
+      /\.iter\[0-9\]\*\.md[\s\S]*rm -f "\$_f"/.test(cleanup),
+      'cleanup_iteration_backups must remove spent .iterN.md backups (rm -f over .iter[0-9]*.md)',
     );
     // The token greps that stood here PASSED with the branch INVERTED — the round's own review drove
     // it by flipping `= "clean"` to `!=` and watching the test stay green. Checking that FINAL_STATUS,
@@ -435,5 +437,66 @@ describe('#3190 — code-review-fix --auto REVIEW.md commit + FIX_REPORT_PATH en
     assert.strictEqual(gitOrThrow(['status', '--porcelain'], { cwd: dir, timeoutMs: PROBE_TIMEOUT_MS }).trim(), '', 'no uncommitted deletions');
     assert.ok(fs.existsSync(path.join(dir, '01-REVIEW.iter2.md')), 'tracked backups are not removed without a commit');
     assert.match(res.stdout, /Warning: commit_docs is off; tracked iteration backups left in place/);
+  });
+
+  // Shared by T6f-T6i: run the shipped fence in a seeded repo with the real-CLI stub.
+  const runFence = (dir, { commitDocs = 'true', pre = '', post = '', body = REAL_COMMIT_BODY } = {}) => {
+    const fence = stepFence(fs.readFileSync(WORKFLOW_PATH, 'utf8'), 'cleanup_iteration_backups');
+    const script = [
+      'set -euo pipefail',
+      'cd "' + dir + '"',
+      'gsd_run() { [ "$1 $2" = "query commit" ] || return 1;' + body,
+      'AUTO_MODE=true',
+      'COMMIT_DOCS=' + commitDocs,
+      'PADDED_PHASE=01',
+      'REVIEW_PATH="' + path.join(dir, '01-REVIEW.md') + '"',
+      'FIX_REPORT_PATH="' + path.join(dir, '01-REVIEW-FIX.md') + '"',
+      pre,
+      fence,
+      post,
+    ].join('\n');
+    const res = runHook('-c', [script], { interpreter: 'bash', timeoutMs: PROBE_TIMEOUT_MS });
+    assert.strictEqual(res.exitCode, 0, 'the cleanup step must never abort: ' + res.stderr);
+    return res;
+  };
+  const headFiles = (dir) => splitLines(gitOrThrow(['ls-tree', '-r', '--name-only', 'HEAD'], { cwd: dir, timeoutMs: PROBE_TIMEOUT_MS })).filter(Boolean).sort();
+
+  test('T6f — #5506: the converged deletion commit honours a per-phase commit_docs=false', { skip: !HAS_BASH }, (t) => {
+    // --files-removed alone gives cmdCommit no phase to detect, so the override was skipped.
+    const dir = seedBackupRepo(t, 'gsd-5506-phase-off-', 'clean', true);
+    const res = runFence(dir, { pre: 'export PHASE_OFF=1' });
+    assert.ok(headFiles(dir).includes('01-REVIEW.iter2.md'), 'a skipped commit leaves the backups in HEAD');
+    assert.match(res.stdout, /Warning: iteration backup deletions not committed \(skipped\)/);
+  });
+
+  test('T6g — #5506: only .iter<digits>.md files are backups (01-REVIEW.iterations-notes.md is not)', { skip: !HAS_BASH }, (t) => {
+    const notes = '01-REVIEW.iterations-notes.md';
+    const degraded = seedBackupRepo(t, 'gsd-5506-glob-d-', 'issues_found', false);
+    fs.writeFileSync(path.join(degraded, notes), 'mine');
+    runFence(degraded);
+    assert.ok(!headFiles(degraded).includes(notes), 'a degraded run must not commit an unrelated file');
+    const converged = seedBackupRepo(t, 'gsd-5506-glob-c-', 'clean', false);
+    fs.writeFileSync(path.join(converged, notes), 'mine');
+    runFence(converged);
+    assert.ok(fs.existsSync(path.join(converged, notes)), 'a converged run must not delete an unrelated file');
+  });
+
+  test('T6h — #5506: a converged run with COMMIT_DOCS=false still removes UNTRACKED backups', { skip: !HAS_BASH }, (t) => {
+    const dir = seedBackupRepo(t, 'gsd-5506-untracked-', 'clean', true);
+    fs.writeFileSync(path.join(dir, '01-REVIEW.iter3.md'), 'scratch');
+    runFence(dir, { commitDocs: 'false' });
+    assert.ok(!fs.existsSync(path.join(dir, '01-REVIEW.iter3.md')), 'untracked backup removed');
+    assert.ok(fs.existsSync(path.join(dir, '01-REVIEW.iter2.md')), 'tracked backup kept');
+    assert.strictEqual(gitOrThrow(['status', '--porcelain'], { cwd: dir, timeoutMs: PROBE_TIMEOUT_MS }).trim(), '');
+  });
+
+  test('T6i — #5506: nullglob is restored to the caller state; a rejected deletion commit says it is staged', { skip: !HAS_BASH }, (t) => {
+    const dir = seedBackupRepo(t, 'gsd-5506-shopt-', 'clean', true);
+    assert.match(runFence(dir, { pre: 'shopt -s nullglob', post: 'shopt -q nullglob && echo NG=on || echo NG=off' }).stdout, /NG=on/);
+    const dir2 = seedBackupRepo(t, 'gsd-5506-shopt2-', 'clean', true);
+    assert.match(runFence(dir2, { pre: 'shopt -u nullglob', post: 'shopt -q nullglob && echo NG=on || echo NG=off' }).stdout, /NG=off/);
+    const dir3 = seedBackupRepo(t, 'gsd-5506-hook-', 'clean', true);
+    const res = runFence(dir3, { body: ' git rm -q --cached -- "${@:4}" 2>/dev/null || true; return 1; }' });
+    assert.match(res.stdout, /staged/i);
   });
 });

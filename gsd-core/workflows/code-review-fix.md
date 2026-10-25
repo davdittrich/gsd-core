@@ -509,34 +509,42 @@ if [ "$AUTO_MODE" = "true" ]; then
   # Anything but a proven-clean final review RETAINS the backups. An unreadable or unparseable
   # review is not evidence of convergence, and retaining costs a few scratch files where deleting
   # costs the post-mortem trail the retention rule exists for.
+  NG_WAS_SET=false; shopt -q nullglob && NG_WAS_SET=true
   shopt -s nullglob
-  BACKUP_FILES=("${REVIEW_PATH%.md}".iter*.md "${FIX_REPORT_PATH%.md}".iter*.md)
-  shopt -u nullglob
+  BACKUP_FILES=("${REVIEW_PATH%.md}".iter[0-9]*.md "${FIX_REPORT_PATH%.md}".iter[0-9]*.md)
+  [ "$NG_WAS_SET" = true ] || shopt -u nullglob
   if [ "$FINAL_STATUS" = "clean" ]; then
     # #5506: an earlier degraded run may have committed backups; commit their deletion too.
+    # Without commit_docs only TRACKED backups are kept (deleting them would leave an uncommitted
+    # deletion); untracked ones are spent scratch and always go.
     TRACKED_BACKUPS=()
     if [ "${#BACKUP_FILES[@]}" -gt 0 ]; then
       while IFS= read -r _f; do TRACKED_BACKUPS+=("$_f"); done < <(git ls-files -- "${BACKUP_FILES[@]}" 2>/dev/null)
+      for _f in "${BACKUP_FILES[@]}"; do
+        if [ "$COMMIT_DOCS" = "true" ] || ! git ls-files --error-unmatch -- "$_f" >/dev/null 2>&1; then
+          rm -f "$_f" 2>/dev/null || true
+        fi
+      done
     fi
-    if [ "${#TRACKED_BACKUPS[@]}" -gt 0 ] && [ "$COMMIT_DOCS" != "true" ]; then
-      # Removing tracked files with no commit would leave uncommitted deletions: keep them.
-      echo "Warning: commit_docs is off; tracked iteration backups left in place:" \
-        "${TRACKED_BACKUPS[*]}"
-    else
-      rm -f "${REVIEW_PATH%.md}.iter"*.md "${FIX_REPORT_PATH%.md}.iter"*.md 2>/dev/null || true
-      if [ "${#TRACKED_BACKUPS[@]}" -gt 0 ]; then
-        # --files-removed accepts tracked paths only (cmdCommit rejects the rest), so the
-        # retained-backup commit below cannot share this call.
+    if [ "${#TRACKED_BACKUPS[@]}" -gt 0 ]; then
+      if [ "$COMMIT_DOCS" != "true" ]; then
+        echo "Warning: commit_docs is off; tracked iteration backups left in place:" \
+          "${TRACKED_BACKUPS[*]}"
+      else
+        # --files-removed alone gives cmdCommit no phase to detect, so a per-phase
+        # phase_commit_docs=false would be ignored: --files names the (unchanged) REVIEW.md to scope it.
+        # Untracked paths in --files-removed are skipped silently ("nothing"), hence the ls-files filter.
         BACKUP_COMMIT=$(gsd_run query commit \
           "docs(${PADDED_PHASE}): remove converged code review iteration backups" \
-          --files-removed "${TRACKED_BACKUPS[@]}" --raw) || BACKUP_COMMIT=failed
+          --files "${REVIEW_PATH}" --files-removed "${TRACKED_BACKUPS[@]}" --raw) || BACKUP_COMMIT=failed
         # --files skips paths missing on disk (#2014); only --files-removed stages a deletion.
         # "nothing" here means the tracked backups' deletion was not staged: warn, do not pass silently.
         case "$BACKUP_COMMIT" in
           committed) ;;
           ''|*[!0-9a-f]*)
             echo "Warning: iteration backup deletions not committed" \
-              "(${BACKUP_COMMIT:-no output}): ${TRACKED_BACKUPS[*]}" ;;
+              "(${BACKUP_COMMIT:-no output}); a rejected commit can leave them staged" \
+              "(git restore --staged): ${TRACKED_BACKUPS[*]}" ;;
         esac
       fi
     fi
