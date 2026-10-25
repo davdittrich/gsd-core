@@ -319,7 +319,9 @@ unauthenticated, so any orchestrator that passes the same model within its
 10-minute window in the same session is allowed (when the runtime exposes a
 session id); it is a single slot per agent type, and nothing clears it before
 it expires. The check fails open on any inability to verify, so it is not a
-security boundary.
+security boundary. A failed record write (a symlinked `.gsd`, an unwritable
+directory) is reported only as a stderr line from `resolve-execution`, so
+under `"deny"` it blocks the legitimately escalated model.
 
 ---
 
