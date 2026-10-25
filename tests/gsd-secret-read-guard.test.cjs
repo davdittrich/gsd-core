@@ -1077,4 +1077,137 @@ describe('gsd-secret-read-guard: gsd-debugger CLI spawn (#5214)', () => {
   test('a non-Bash tool with the same text is never inspected', () => {
     assertAllowed(runHook({ hook_event_name: 'PreToolUse', tool_name: 'Read', tool_input: { file_path: 'notes-claude-agent-gsd-debugger.md' } }), 'read');
   });
+
+  // #5628: the `timeout DURATION` unwrap used to copy the remaining word list
+  // twice per wrapper, so cost grew with the square of the wrapper count.
+  const MAX_COMMAND_BYTES = 1024 * 1024;
+  const TAIL = 'claude --agent gsd-debugger';
+  const padded = (bytes) => 'timeout 1 '.repeat(Math.floor((bytes - TAIL.length) / 10)) + TAIL;
+  // A kill bound, not an elapsed-time assertion: a linear walk finishes in
+  // ~0.2 s at 1 MiB, the quadratic one took 6 s on a fast machine (triage) and
+  // ~20 s on a slower one, and OpenCode/Kilo kill a hook at 8 s. This bound sits
+  // below every quadratic measurement and ~20x above the linear one, so a fast
+  // host cannot pass pre-fix; the shared probe norm is too loose for that.
+  const LINEAR_WALK_KILL_BOUND_MS = 4000;
+
+  test('blocks: 1 MiB of leading timeout wrappers finishes inside the hook budget', () => {
+    const r = runHookSeam(HOOK_PATH, [], {
+      input: JSON.stringify(bash(padded(MAX_COMMAND_BYTES - 1))),
+      env: { ...process.env },
+      timeoutMs: LINEAR_WALK_KILL_BOUND_MS,
+    });
+    assertBlocked({ status: r.exitCode, stdout: r.stdout, stderr: r.stderr }, '1 MiB padded', { code: 'debugger-cli-spawn', tool: 'Bash' });
+  });
+
+  // limit: still scanned (debugger verdict); limit+1: denied unscanned by the cap.
+  for (const [bytes, code] of [[MAX_COMMAND_BYTES, 'debugger-cli-spawn'], [MAX_COMMAND_BYTES + 1, 'command-too-large']]) {
+    test(`a ${bytes}-byte command is denied as ${code}`, () => {
+      const base = padded(bytes);
+      const r = runHookSeam(HOOK_PATH, [], {
+        input: JSON.stringify(bash(base + ' '.repeat(bytes - base.length))),
+        env: { ...process.env },
+        timeoutMs: LINEAR_WALK_KILL_BOUND_MS,
+      });
+      assertBlocked({ status: r.exitCode, stdout: r.stdout, stderr: r.stderr }, `${bytes} bytes`, { code });
+    });
+  }
+
+  test('blocks: stacked timeouts', () => {
+    assertBlocked(runHook(bash('timeout 1 timeout 1 claude --agent gsd-debugger')), 'stacked', { code: 'debugger-cli-spawn' });
+  });
+
+  test('blocks: timeout interleaved with prefix wrappers and flags', () => {
+    assertBlocked(
+      runHook(bash('sudo timeout 1 env X=1 timeout --foreground 2 claude --agent=gsd-debugger')),
+      'interleaved',
+      { code: 'debugger-cli-spawn' },
+    );
+  });
+
+  for (const command of ['timeout 1 timeout', 'timeout', 'timeout 1', 'timeout -s', 'timeout 1 timeout 1 claude --agent gsd-executor']) {
+    test(`allows: timeout wrappers that never reach the debugger (${command})`, () => {
+      assertAllowed(runHook(bash(command)), command);
+    });
+  }
+
+  test('property: stacked timeout wrappers only change the verdict through the final agent', () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 0, max: 40 }), fc.boolean(), (depth, isDebugger) => {
+        const agent = isDebugger ? 'gsd-debugger' : 'gsd-executor';
+        const r = runHook(bash(`${'timeout 1 '.repeat(depth)}claude --agent ${agent}`));
+        return isDebugger ? r.status === 2 : r.status === 0;
+      }),
+      { numRuns: 12 },
+    );
+  });
+});
+
+describe('gsd-secret-read-guard: nested shell behind a wrapper with flags (#5627)', () => {
+  // Oracle: the wrappers' own man pages (timeout(1), nice(1), env(1),
+  // command(1p), stdbuf(1), setsid(1), exec, sudo(8), doas(1)) say each runs
+  // the trailing command; a read inside `bash -c` behind them must get the
+  // same verdict as the flagless `nice bash -c 'cat .env'` (already blocked).
+  const S = "bash -c 'cat .env'";
+  const wrappers = [
+    'timeout 5', 'timeout -s KILL 5', 'timeout --signal=KILL --kill-after=2 5', 'timeout --foreground 5',
+    'nice -n 5', 'nice -5', 'nice -n5', 'nice --adjustment=5', 'nice --adjustment 5',
+    'timeout 5 --', 'timeout -- 5', 'env -P /usr/bin', 'env -i', 'env -u HOME', 'env -C /tmp', 'env -i A=1', 'env --', 'env -0',
+    'command -p', 'command --', 'time -p', 'time -f %e',
+    'stdbuf -oL', 'stdbuf -i0 -oL -eL', 'stdbuf --output=L', 'setsid', 'setsid -w', 'exec', 'exec -a name',
+    'nohup', 'sudo -u root', 'sudo -E', 'sudo --', 'sudo -u root -g wheel', 'doas -u root',
+    'nice -n 5 timeout -s KILL 5 env -i', 'sudo -n timeout 5 nohup',
+  ];
+  for (const w of wrappers) {
+    test(`blocks ${w} bash -c`, () => {
+      assertBlocked(runHook(bash(`${w} ${S}`)), w, { tool: 'Bash', path: '.env' });
+    });
+  }
+
+  const otherRoutes = [
+    "timeout 5 bash <<'EOF'\ncat .env\nEOF",
+    "nice -n 5 bash <<< 'cat .env'",
+    'echo cat .env | nice -n 5 bash',
+    "timeout 5 eval 'cat .env'",
+    'echo .env | timeout 5 xargs cat',
+    "nice -n 5 git -c alias.x='!cat .env' x",
+  ];
+  for (const cmd of otherRoutes) {
+    test(`blocks ${JSON.stringify(cmd)}`, () => {
+      assertBlocked(runHook(bash(cmd)), cmd, { tool: 'Bash', path: '.env' });
+    });
+  }
+
+  const allows = [
+    "timeout 5 bash -c 'echo hi'",
+    "nice -n 5 bash -c 'cat README.md'",
+    "env -i bash -c 'cat .env.example'",
+    'timeout 5 ls',
+    'timeout 5',
+    'nice -n 5',
+    'env -i',
+    'time -p cat README.md',
+  ];
+  for (const cmd of allows) {
+    test(`allows ${JSON.stringify(cmd)}`, () => {
+      assertAllowed(runHook(bash(cmd)), cmd);
+    });
+  }
+
+  test('the debugger-spawn check still sees through timeout flags', () => {
+    assertBlocked(
+      runHook(bash('timeout -s KILL 600 claude --agent gsd-debugger -p hi')),
+      'timeout flags', { code: 'debugger-cli-spawn', tool: 'Bash' },
+    );
+  });
+
+  test('property: any wrapper stack in front of bash -c "cat .env" is blocked', () => {
+    const wrapper = fc.constantFrom(...wrappers.filter((w) => !w.includes(' timeout ') && !w.includes(' env ')));
+    fc.assert(
+      fc.property(fc.array(wrapper, { minLength: 1, maxLength: 3 }), (stack) => {
+        const r = runHook(bash(`${stack.join(' ')} ${S}`));
+        return r.status === 2;
+      }),
+      { numRuns: 25 },
+    );
+  });
 });
