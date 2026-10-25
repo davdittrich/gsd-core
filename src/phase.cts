@@ -1496,8 +1496,9 @@ function collectSiblingWorktreePhaseNums(
     }
     try {
       const content = fs.readFileSync(path.join(siblingPlanningDir(wt), 'ROADMAP.md'), 'utf-8');
-      // Headers only, as before #5528 — a sibling's checklist bullets never fed the horizon.
-      for (const num of roadmapDeclaredPhaseNums(content, convention, false, activeMilestone)) used.add(num);
+      // Headers only for non-bracket repos, as before #5528 (#3849); under bracket the checklist bullet
+      // is a declaration too, so a sibling's bullet-only phase still blocks reuse.
+      for (const num of roadmapDeclaredPhaseNums(content, convention, convention === 'bracket', activeMilestone)) used.add(num);
     } catch {
       /* no roadmap in that worktree (or scope) — normal, contributes nothing */
     }
