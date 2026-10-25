@@ -1,6 +1,6 @@
 # GSD Shipped Surface Inventory
 
-> Authoritative roster of every shipped GSD surface: commands, agents, workflows, references, CLI modules, and hooks. Where the broad docs (AGENTS.md, COMMANDS.md, ARCHITECTURE.md, CLI-TOOLS.md) diverge from the filesystem, treat this file and the repository tree itself as the source of truth.
+> Authoritative roster of every shipped GSD surface: commands, agents, workflows, references, CLI modules, and hooks. Where the broad docs (reference/agents.md, COMMANDS.md, ARCHITECTURE.md, CLI-TOOLS.md) diverge from the filesystem, treat this file and the repository tree itself as the source of truth.
 
 ## How To Use This File
 
@@ -14,7 +14,7 @@ This is the authoritative roster of every shipped GSD Core surface. See the [doc
 
 ## Agents
 
-Full roster at `agents/gsd-*.md`. The "Primary doc" column flags whether [`docs/AGENTS.md`](AGENTS.md) carries a full role card (*primary*), a short stub in the "Advanced and Specialized Agents" section (*advanced stub*), or no coverage (*inventory only*).
+Full roster at `agents/gsd-*.md`. The "Primary doc" column flags whether [`docs/reference/agents.md`](reference/agents.md) carries a full role card (*primary*), a short stub in the "Advanced and Specialized Agents" section (*advanced stub*), or no coverage (*inventory only*).
 
 | Agent | Role (one line) | Spawned by | Primary doc |
 |-------|-----------------|------------|-------------|
@@ -90,7 +90,7 @@ One `.compact.md` sibling per agent above, same directory, same stem — ADR-413
 | gsd-doc-synthesizer.compact | Token-minimized rewrite of `gsd-doc-synthesizer`'s persona, served instead of the canonical file by the seam described above. | `gsd_run query agent-skills` CLI seam (non-Claude persona fallback only) | inventory only |
 | gsd-mempalace-curator.compact | Token-minimized rewrite of `gsd-mempalace-curator`'s persona, served instead of the canonical file by the seam described above. | `gsd_run query agent-skills` CLI seam (non-Claude persona fallback only) | inventory only |
 
-**Coverage note.** `docs/AGENTS.md` gives full role cards for the primary agents plus concise stubs for the advanced agents. The Agent Tool Permissions Summary in that file covers only the primary agents; the advanced agents' tool lists are captured in their per-agent frontmatter in `agents/gsd-*.md`.
+**Coverage note.** `docs/reference/agents.md` gives full role cards for the primary agents plus concise stubs for the advanced agents. The Agent Tool Permissions Summary in that file covers only the primary agents; the advanced agents' tool lists are captured in their per-agent frontmatter in `agents/gsd-*.md`.
 
 ---
 
@@ -738,6 +738,7 @@ Full listing: `gsd-core/bin/lib/*.cjs`.
 | `state.cjs` | STATE.md parsing, updating, progression, metrics |
 | `state-document.cjs` | Pure STATE.md field extraction, replacement, status normalization, and progress calculation transforms |
 | `milestone-lock.cjs` | Milestone lock (compiled from `src/milestone-lock.cts`, gitignored) — advisory (phase, session id) claim over STATE.md's single Current Position slot: `.planning/milestone.lock` claim IO, liveness (TTL + heartbeat), conflict detection, and the shared stderr warning; consumed by `state.begin-phase` / `state.advance-plan` / `phase.complete` so parallel phases in one working tree get a visible conflict instead of silently overwriting each other (#3311) |
+| `git-info-exclude.cjs` | Git info/exclude helper (compiled from `src/git-info-exclude.cts`, gitignored) — `excludeFromGit(dir, filename)` appends an anchored, escaped, idempotent entry to the enclosing repo's `info/exclude` so a machine-local file GSD writes under `.planning/` does not dirty `git status`; best-effort, never throws, leaves a tracked copy alone; used by the milestone claim write (#5551) |
 | `surface.cjs` | Runtime surface module — manages the runtime enable/disable surface state independently of the install-time profile marker (ADR-0011 Phase 2) |
 | `task-command-router.cjs` | Thin CJS subcommand router adapter for `gsd-tools task`; `resolve-content` subcommand resolves a task's `tracker-id` via `task-content-resolution.cjs` (ADR-3646, #3970) |
 | `task-content-resolution.cjs` | Resolves a task's `tracker-id` to external-tracker content via a capability-declared `taskContentResolver` and a bounded subprocess call; hard-halts on ambiguous/failed/timeout/malformed/unsafe-id resolution; `loadResolverCapabilities` loads the installed resolver capabilities for callers such as the decision-coverage gates (compiled from `src/task-content-resolution.cts`, gitignored) (ADR-3646, #3970) |
@@ -833,7 +834,7 @@ Shared modules a hook `require()`s relative to its own `__dirname`; not separate
 
 - When a new command, agent, workflow, reference, CLI module, or hook ships, update the corresponding section here before the release is cut.
 - The drift-guard tests under `tests/` (see "How To Use This File" above) assert that every shipped file in the six flat families — agents, commands, workflows, references, CLI modules, hooks — is enumerated in this inventory. A new file in one of those without a matching row here will fail CI. Workflow `steps/` and `modes/` sub-files are the deliberate exception; see "Workflow Sub-Files" above.
-- When the filesystem diverges from `docs/ARCHITECTURE.md` counts or from curated-subset docs (e.g. `docs/AGENTS.md`'s primary roster), this file is the source of truth.
+- When the filesystem diverges from `docs/ARCHITECTURE.md` counts or from curated-subset docs (e.g. `docs/reference/agents.md`'s primary roster), this file is the source of truth.
 
 ## Related
 
