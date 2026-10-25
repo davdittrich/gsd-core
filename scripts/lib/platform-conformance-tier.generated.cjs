@@ -27,6 +27,7 @@ module.exports = {
   "tests/capability-lock-lazy-self-probe-5327.test.cjs",
   "tests/capability-lock-mkdir-failure-3987.test.cjs",
   "tests/capability-probe-fallback.test.cjs",
+  "tests/capability-source-git-ref.test.cjs",
   "tests/capability-source.test.cjs",
   "tests/capability-state.test.cjs",
   "tests/changeset-new.test.cjs",
