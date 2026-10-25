@@ -520,11 +520,8 @@ if [ "$AUTO_MODE" = "true" ]; then
     TRACKED_BACKUPS=()
     if [ "${#BACKUP_FILES[@]}" -gt 0 ]; then
       while IFS= read -r _f; do TRACKED_BACKUPS+=("$_f"); done < <(git ls-files -- "${BACKUP_FILES[@]}" 2>/dev/null)
-      for _f in "${BACKUP_FILES[@]}"; do
-        if [ "$COMMIT_DOCS" = "true" ] || ! git ls-files --error-unmatch -- "$_f" >/dev/null 2>&1; then
-          rm -f "$_f" 2>/dev/null || true
-        fi
-      done
+      if [ "$COMMIT_DOCS" = "true" ] || [ "${#TRACKED_BACKUPS[@]}" -eq 0 ]; then rm -f "${BACKUP_FILES[@]}" 2>/dev/null || true
+      else while IFS= read -r _f; do rm -f "$_f" 2>/dev/null || true; done < <(git ls-files --others -- "${BACKUP_FILES[@]}" 2>/dev/null); fi
     fi
     if [ "${#TRACKED_BACKUPS[@]}" -gt 0 ]; then
       if [ "$COMMIT_DOCS" != "true" ]; then
