@@ -1339,10 +1339,13 @@ function recordNewPhase(raw: string, cwd: string, id: string | number, descripti
   if (last) return { content: spliceAfter(raw, start + last.index + last[0].length, eol, entry), entry: kind };
   let wrote = false;
   const content = editProgressTableSlice(raw, (scoped: string) => {
-    if (!/^\|.*\bPhase\b.*\bPlans Complete\b/m.test(scoped)) return scoped;
-    const cell: Record<string, string> = { Phase: `${id}. ${description}`, 'Plans Complete': '0/0', Status: 'Not started' };
-    const r = insertTableRow(scoped, (col) => cell[col]);
-    if (!r.ok) return scoped;
+    // `scoped` starts at the phase table (editFromPhaseTable's pick). A Milestone column is filled with the
+    // active milestone, the only rows analyze reads; with none to name no row is written.
+    const milestone = roadmapParserMod.getMilestoneInfo(cwd).value?.version;
+    const cell: Record<string, string | undefined> = { Phase: `${id}. ${description}`, Milestone: milestone, 'Plans Complete': '0/0', Status: 'Not started' };
+    let milestoneColumn = false;
+    const r = insertTableRow(scoped, (col) => { milestoneColumn ||= col === 'Milestone'; return cell[col]; });
+    if (!r.ok || (milestoneColumn && !normalizeMilestoneToken(milestone))) return scoped;
     wrote = true;
     return r.value;
   }, cwd);

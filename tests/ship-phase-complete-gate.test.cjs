@@ -372,6 +372,32 @@ describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, ()
       shipped(l);
     });
 
+    const addedRecord = (roadmap, milestone) => {
+      const tmp = createTempProject();
+      try {
+        fs.writeFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), roadmap);
+        if (milestone) fs.writeFileSync(path.join(tmp, '.planning', 'STATE.md'), `---\nmilestone: ${milestone}\n---\n`);
+        const c = runGsdTools(['phase', 'add', 'Second thing'], tmp);
+        assert.ok(c.success, c.error);
+        const a = runGsdTools('roadmap analyze', tmp);
+        assert.ok(a.success, a.error);
+        return { entry: JSON.parse(c.output).roadmap_entry, record: JSON.parse(a.output).roadmap_record };
+      } finally { cleanup(tmp); }
+    };
+    const MS_TABLE = '## Progress\n\n| Phase | Milestone | Plans Complete | Status | Completed |\n|---|---|---|---|---|\n| 1. A | v1.0 | 1/1 | Complete | 2026-01-01 |\n';
+
+    test('phase add into a Milestone-column progress table writes the active milestone, so analyze reads the new row', () => {
+      const out = addedRecord(`${HEAD}### Phase 1: A\n\n**Goal**: g\n\n${MS_TABLE}`, 'v1.0');
+      assert.equal(out.entry, 'progress_table');
+      assert.deepEqual(out.record, { 1: true, 2: false });
+    });
+
+    test('phase add into a Phase/Status table without a Plans Complete column writes its row', () => {
+      const out = addedRecord(`${HEAD}### Phase 1: A\n\n**Goal**: g\n\n## Progress\n\n| Phase | Plans | Status | Completed |\n|---|---|---|---|\n| 1. A | 1/1 | Complete | 2026-01-01 |\n`);
+      assert.equal(out.entry, 'progress_table');
+      assert.deepEqual(out.record, { 1: true, 2: false });
+    });
+
     test('no checklist and no progress table: phase add still succeeds, says roadmap_entry none, and ship blocks PHASE_NOT_RECORDED', () => {
       const l = lifecycle(`${HEAD}### Phase 1: A\n\n**Goal**: g\n`, ['phase', 'add', 'Second thing']);
       assert.equal(l.out.roadmap_entry, 'none');
