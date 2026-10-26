@@ -3135,6 +3135,14 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
     assert.deepStrictEqual(JSON.parse(batch.output).phases.map((p) => p.phase_number), [998, 1000]);
   });
 
+  test('legacy (non-bracket) roadmaps step past the 999 sentinel too', () => {
+    setup(['# Roadmap', '', '## Milestone v2.0', '', '### Phase 998: Near the sentinel', ''], { convention: null });
+    assert.strictEqual(runGsdTools('phase add "New thing" --raw', tmp).output.trim(), '1000');
+    setup(['# Roadmap', '', '## Milestone v2.0', '', '### Phase 997: Near the sentinel', ''], { convention: null });
+    const batch = runGsdTools(['phase', 'add-batch', '--descriptions', '["A","B"]'], tmp);
+    assert.deepStrictEqual(JSON.parse(batch.output).phases.map((p) => p.phase_number), [998, 1000]);
+  });
+
   for (const line of ['- **[GSD.02] 05**', '- [GSD.02] 05 - Name', '### [GSD.02] 05 - Name', '1. [ ] **[GSD.02] 05: Name**']) {
     test(`the spelling "${line}" reserves its number (Postel)`, () => {
       setup(['# Roadmap', '', '## Milestone v2.0', '', line, '']);
