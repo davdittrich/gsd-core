@@ -1140,6 +1140,7 @@ function insideOpenDetails(text: string, idx: number): boolean {
   return prior.lastIndexOf('<details>') > prior.lastIndexOf('</details>');
 }
 
+// phase-id-owner: uses [.-] (dot-or-dash) separator variant, not the canonical dot-only token; swapping to PHASE_NUMBER_TOKEN_SOURCE would drop hyphenated phase-id matches.
 const NUMERIC_PHASE_ID_SRC = '[A-Za-z]?\\d+[A-Z]?(?:[.-]\\d+)*';
 
 /** #5221: a `phase_naming: custom` id (`Phase AUTH:`). */
@@ -1150,7 +1151,6 @@ const CUSTOM_PHASE_ID_SRC = '[A-Za-z][\\w-]{0,63}';
  * phase add/insert anchor on. Token is the last group; `custom` also admits a custom id before `:`.
  */
 function checklistEntrySrc(convention: string | null | undefined, capturing = false, custom = false): string {
-  // phase-id-owner: uses [.-] (dot-or-dash) separator variant, not the canonical dot-only token; swapping to PHASE_NUMBER_TOKEN_SOURCE would drop hyphenated phase-id matches.
   const numeric = NUMERIC_PHASE_ID_SRC;
   // numeric must end at a word edge, else `P1-setup` matches as `P1` before the custom alternative is tried.
   const token = custom ? `(?:${numeric}(?![\\w-])|${CUSTOM_PHASE_ID_SRC}(?=:))` : numeric;
