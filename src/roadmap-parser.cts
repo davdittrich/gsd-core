@@ -1470,7 +1470,8 @@ function replaceInCurrentMilestone(
     typeof replacement === 'function'
       ? src.replace(pattern, replacement)
       : src.replace(pattern, replacement);
-  return content.slice(0, offset) + apply(content.slice(offset));
+  // #5221: bare <details> blocks below the active milestone are shipped: never written.
+  return content.slice(0, offset) + editOutsideShippedBlocks(content.slice(offset), apply);
 }
 
 /**

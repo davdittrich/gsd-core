@@ -6561,6 +6561,13 @@ describe('#5221: roadmap update-plan-progress — active milestone scope and pha
     assertShippedUntouched(out);
   });
 
+  test('active milestone first, shipped <details> below it: a second run never ticks the archived phase', () => {
+    seed([...ACTIVE, ...SHIPPED], { complete: true });
+    run();
+    run();
+    assertShippedUntouched(fs.readFileSync(roadmapPath, 'utf-8'));
+  });
+
   test('property: activeScopeStart ignores backlog </details> after the active heading and excludes every shipped block before it', () => {
     const fc = require('fast-check');
     const { activeScopeStart } = require('../gsd-core/bin/lib/roadmap-parser.cjs');

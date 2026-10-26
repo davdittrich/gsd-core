@@ -26,7 +26,7 @@ const { SCOPE } = planningScopeMod;
 type Scope = planningScopeMod.Scope;
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import roadmapParserModule = require('./roadmap-parser.cjs');
-const { stripShippedMilestones, extractCurrentMilestone, extractCurrentMilestoneScoped, replaceInCurrentMilestone, activeScopeStart, listMilestoneHeadings, scanMilestonePhaseIds, collectTablePhaseRows, hasPhaseListingTableHeader } = roadmapParserModule;
+const { stripShippedMilestones, extractCurrentMilestone, extractCurrentMilestoneScoped, replaceInCurrentMilestone, activeScopeStart, editOutsideShippedBlocks, listMilestoneHeadings, scanMilestonePhaseIds, collectTablePhaseRows, hasPhaseListingTableHeader } = roadmapParserModule;
 import { tokenizeHeadings } from './markdown-sectionizer.cjs';
 import { escapeCell, findTableWithColumns, parseMarkdownTable, updateTableCell } from './markdown-table.cjs';
 import { clampPercent, normalizeMilestoneToken } from './phase-lifecycle.cjs';
@@ -1360,7 +1360,7 @@ function cmdRoadmapUpdatePlanProgress(cwd: string, phaseNum: string | null | und
     // (post-</details>) region — the same milestone scoping every writer
     // below applies — so the gate asks "does the file carry a writable phase
     // representation" rather than "did some regex fire mid-transform".
-    const gateActiveRegion = originalContent.slice(activeScopeStart(originalContent, cwd));
+    const gateActiveRegion = stripShippedMilestones(originalContent.slice(activeScopeStart(originalContent, cwd)));
     // Heading target: the exact grammar `planSectionPattern` /
     // `insertRowsPatternA|B` anchor on (an ATX phase heading for this phase).
     const headingTargetFound = new RegExp(phaseHeadingAnchor, 'i').test(gateActiveRegion);
@@ -1697,7 +1697,9 @@ function cmdRoadmapUpdatePlanProgress(cwd: string, phaseNum: string | null | und
     // (Finding 1 code-review: detection was previously running against the full
     //  roadmapContent, causing archived rows to suppress active-section inserts.)
     const activeStart = activeScopeStart(roadmapContent, cwd);
-    const activeRegion = roadmapContent.slice(activeStart);
+    // #5221: a bare <details> block below the active milestone is shipped: read and write outside it.
+    const activeFull = roadmapContent.slice(activeStart);
+    const activeRegion = stripShippedMilestones(activeFull);
 
     // Compute which plan files are MISSING a checkbox row in the ACTIVE region.
     // This handles three cases:
@@ -1758,8 +1760,10 @@ function cmdRoadmapUpdatePlanProgress(cwd: string, phaseNum: string | null | und
       // replaceInCurrentMilestone only accepts a string replacement, so we
       // perform the scoped replace manually here (same strategy as that helper).
       const scopedReplace = (src: string, pat: RegExp) => src.replace(pat, inserter);
-      const regionA = scopedReplace(activeRegion, insertRowsPatternA);
-      const afterWithRows = regionA !== activeRegion ? regionA : scopedReplace(activeRegion, insertRowsPatternB);
+      const afterWithRows = editOutsideShippedBlocks(activeFull, (outside) => {
+        const regionA = scopedReplace(outside, insertRowsPatternA);
+        return regionA !== outside ? regionA : scopedReplace(outside, insertRowsPatternB);
+      });
       const withRows = roadmapContent.slice(0, activeStart) + afterWithRows;
       if (withRows !== roadmapContent) {
         roadmapContent = withRows;
