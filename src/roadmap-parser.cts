@@ -2410,11 +2410,19 @@ function currentMilestoneRawRanges(
 function activeScopeStart(content: string, cwd?: string): number {
   const start = currentMilestoneRawRanges(content, cwd)?.primary.start;
   const open = start !== undefined && !isClosedMilestoneHeading(content.slice(start).split('\n', 1)[0]);
-  const firstActive = [...content.matchAll(/^(?:#{2,4}[ \t]+Phase\b|[ \t]*-[ \t]*\[[ x]\][ \t]*\*\*Phase\b)/gim)]
-    .find((m) => { const prior = content.slice(0, m.index); return prior.lastIndexOf('<details>') <= prior.lastIndexOf('</details>'); });
-  const upTo = open ? content.slice(0, start) : content.slice(0, firstActive?.index ?? content.length);
-  const lastDetailsClose = upTo.lastIndexOf('</details>');
-  return lastDetailsClose === -1 ? 0 : lastDetailsClose + '</details>'.length;
+  const tags = [...content.matchAll(/<(\/?)details>/gi)];
+  let upTo = start ?? 0;
+  if (!open) {
+    // First phase entry outside any open <details>: the last tag before it must be a close (or there is none).
+    upTo = content.length;
+    let seen = 0;
+    for (const m of content.matchAll(/^(?:#{2,4}[ \t]+Phase\b|[ \t]*-[ \t]*\[[ x]\][ \t]*\*\*Phase\b)/gim)) {
+      while (seen < tags.length && (tags[seen].index ?? 0) < (m.index ?? 0)) seen += 1;
+      if (seen === 0 || tags[seen - 1][1] === '/') { upTo = m.index ?? 0; break; }
+    }
+  }
+  const lastClose = tags.filter((t) => t[1] === '/' && (t.index ?? 0) + t[0].length <= upTo).at(-1);
+  return lastClose ? (lastClose.index ?? 0) + lastClose[0].length : 0;
 }
 
 export = {
