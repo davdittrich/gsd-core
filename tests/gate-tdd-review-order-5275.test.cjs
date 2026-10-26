@@ -75,7 +75,7 @@ describe('#5275 RED must precede GREEN by ancestry', () => {
       assert.equal(row.reason, 'green_before_red');
       assert.deepEqual(row.missing, [], 'both commits exist: nothing is missing, the order is wrong');
       assert.ok(
-        out.table.includes('Plan 01-01 GREEN precedes RED: no feat(...) commit descends from a test(...) commit.'),
+        out.table.includes('Plan 01-01 GREEN precedes RED: no feat(...) or fix(...) commit descends from a test(...) commit.'),
         out.table,
       );
       assert.ok(!out.table.includes('missing:'), 'an order violation is not reported as a missing commit');
