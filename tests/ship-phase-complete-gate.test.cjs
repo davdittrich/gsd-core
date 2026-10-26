@@ -46,12 +46,19 @@ describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, ()
   test('property: PHASE_NUMBER matches a record key iff its segments agree after stripping leading zeros', () => {
     const segs = fc.array(fc.nat({ max: 12 }), { minLength: 1, maxLength: 3 });
     const pad = fc.array(fc.nat({ max: 2 }), { minLength: 3, maxLength: 3 });
-    fc.assert(fc.property(segs, segs, pad, (key, phase, zeros) => {
+    const arms = { PHASE_NOT_COMPLETE: 0, PHASE_NOT_RECORDED: 0 };
+    // Half the draws reuse the key as the phase (zero-padded), so the matching arm is reached about as often as the other.
+    fc.assert(fc.property(segs, segs, fc.boolean(), pad, (key, other, reuseKey, zeros) => {
+      const phase = reuseKey ? key : other;
       const padded = phase.map((s, i) => '0'.repeat(zeros[i]) + s).join('.');
       const r = run(analyze(key.join('.'), false), 0, padded);
       const same = key.join('.') === phase.join('.');
-      blocked(r, same ? 'PHASE_NOT_COMPLETE' : 'PHASE_NOT_RECORDED');
-    }), { numRuns: 25 });
+      const code = same ? 'PHASE_NOT_COMPLETE' : 'PHASE_NOT_RECORDED';
+      blocked(r, code);
+      arms[code]++;
+    }), { numRuns: 40, seed: 5221 });
+    assert.ok(arms.PHASE_NOT_COMPLETE >= 10, `matching arm reached ${arms.PHASE_NOT_COMPLETE} times`);
+    assert.ok(arms.PHASE_NOT_RECORDED >= 10, `non-matching arm reached ${arms.PHASE_NOT_RECORDED} times`);
   });
 
   test('a phase with no ROADMAP record (heading only, absent from roadmap_record) blocks PHASE_NOT_RECORDED', () => {

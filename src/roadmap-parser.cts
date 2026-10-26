@@ -1465,12 +1465,12 @@ function replaceInCurrentMilestone(
   replacement: string | RoadmapReplacer,
   cwd?: string,
 ): string {
-  const offset = activeScopeStart(content, cwd);
+  const { start, end } = activeScope(content, cwd);
   const apply = (src: string): string =>
     typeof replacement === 'function'
       ? src.replace(pattern, replacement)
       : src.replace(pattern, replacement);
-  return content.slice(0, offset) + apply(content.slice(offset));
+  return content.slice(0, start) + apply(content.slice(start, end)) + content.slice(end);
 }
 
 /**
@@ -2397,26 +2397,74 @@ function currentMilestoneRawRanges(
   return { primary: { start: sectionStart, end: sectionEnd }, details };
 }
 
+/** `<details>` / `</details>` tags of `content` in document order (bare opener only: `<details open>` wraps the active milestone, it is not an archive). */
+function bareDetailsTags(content: string): { at: number; close: boolean }[] {
+  return [...content.matchAll(/<(\/?)details>/gi)].map((m) => ({ at: m.index, close: m[1] === '/' }));
+}
+
+/** Whether offset `idx` sits inside a bare `<details>` block that has not closed yet (`tags` from `bareDetailsTags`). */
+function insideBareDetails(tags: { at: number; close: boolean }[], idx: number): boolean {
+  let lo = 0;
+  let hi = tags.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (tags[mid].at < idx) lo = mid + 1; else hi = mid;
+  }
+  return lo > 0 && !tags[lo - 1].close;
+}
+
 /**
- * Offset where the active milestone's writable scope starts: just past the last
- * `</details>` that closes BEFORE the selected milestone heading, so a backlog
- * `</details>` AFTER it no longer hides it (#5221) while phase/Progress content
- * above the heading (#2947 preamble layout) stays in scope. No resolved heading,
- * or one that is itself closed (stale STATE), uses the last `</details>` before the
- * first phase entry outside any open <details>, so a backlog `</details>` below the active phases does not hide them.
- * The scope runs to EOF either way, so a bottom `## Progress` stays in scope.
+ * The active milestone's writable scope as offsets into `content`.
+ *
+ * `start` is just past the last `</details>` that closes BEFORE the selected
+ * milestone heading, so a backlog `</details>` AFTER it no longer hides it
+ * (#5221) while phase/Progress content above the heading (#2947 preamble layout)
+ * stays in scope. No resolved heading, or one that is itself closed (stale
+ * STATE), uses the last `</details>` before the first phase entry outside any
+ * open <details>, so a backlog `</details>` below the active phases does not
+ * hide them.
+ *
+ * `end` is the first line-leading bare `<details>` AFTER that heading (or first
+ * phase entry): a shipped block placed below the active milestone is never
+ * writable, so a second run cannot tick the archived phase once the active one
+ * is done. Writers that must reach a bottom `## Progress` past a backlog block
+ * (`editProgressTableSlice`) use `start` alone. Tags match case-insensitively.
+ * An archive whose `</details>` is missing cannot be told from a wrapper, so
+ * `start` stays 0 for it (documented fail-open).
  */
+function activeScope(content: string, cwd?: string): { start: number; end: number } {
+  const tags = bareDetailsTags(content);
+  const headingAt = currentMilestoneRawRanges(content, cwd)?.primary.start;
+  const open = headingAt !== undefined && !isClosedMilestoneHeading(content.slice(headingAt).split('\n', 1)[0]);
+  let anchor: number;
+  if (open) {
+    anchor = headingAt;
+  } else {
+    const firstActive = [...content.matchAll(/^(?:#{2,4}[ \t]+Phase\b|[ \t]*-[ \t]*\[[ x]\][ \t]*\*\*Phase\b)/gim)]
+      .find((m) => !insideBareDetails(tags, m.index));
+    anchor = firstActive?.index ?? content.length;
+  }
+  let start = 0;
+  for (const t of tags) {
+    if (t.at >= anchor) break;
+    if (t.close) start = t.at + '</details>'.length;
+  }
+  // Only a block that carries phase entries is a shipped/backlog milestone; a collapsible note inside the active milestone stays writable.
+  const phaseEntry = /^(?:#{2,4}[ \t]+Phase\b|[ \t]*-[ \t]*\[[ x]\][ \t]*\*\*Phase\b)/im;
+  const below = tags.find((t, i) => {
+    if (t.close || t.at <= anchor || !/^[ \t]*$/.test(content.slice(content.lastIndexOf('\n', t.at - 1) + 1, t.at))) return false;
+    const close = tags.slice(i + 1).find((c) => c.close);
+    return phaseEntry.test(content.slice(t.at, close ? close.at : content.length));
+  });
+  return { start, end: below ? below.at : content.length };
+}
+
 function activeScopeStart(content: string, cwd?: string): number {
-  const start = currentMilestoneRawRanges(content, cwd)?.primary.start;
-  const open = start !== undefined && !isClosedMilestoneHeading(content.slice(start).split('\n', 1)[0]);
-  const firstActive = [...content.matchAll(/^(?:#{2,4}[ \t]+Phase\b|[ \t]*-[ \t]*\[[ x]\][ \t]*\*\*Phase\b)/gim)]
-    .find((m) => { const prior = content.slice(0, m.index); return prior.lastIndexOf('<details>') <= prior.lastIndexOf('</details>'); });
-  const upTo = open ? content.slice(0, start) : content.slice(0, firstActive?.index ?? content.length);
-  const lastDetailsClose = upTo.lastIndexOf('</details>');
-  return lastDetailsClose === -1 ? 0 : lastDetailsClose + '</details>'.length;
+  return activeScope(content, cwd).start;
 }
 
 export = {
+  activeScope,
   activeScopeStart,
   stripShippedMilestones,
   extractCurrentMilestone,

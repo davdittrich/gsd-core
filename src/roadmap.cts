@@ -26,7 +26,7 @@ const { SCOPE } = planningScopeMod;
 type Scope = planningScopeMod.Scope;
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import roadmapParserModule = require('./roadmap-parser.cjs');
-const { stripShippedMilestones, extractCurrentMilestone, extractCurrentMilestoneScoped, replaceInCurrentMilestone, activeScopeStart, listMilestoneHeadings, scanMilestonePhaseIds, collectTablePhaseRows, hasPhaseListingTableHeader } = roadmapParserModule;
+const { stripShippedMilestones, extractCurrentMilestone, extractCurrentMilestoneScoped, replaceInCurrentMilestone, activeScope, activeScopeStart, listMilestoneHeadings, scanMilestonePhaseIds, collectTablePhaseRows, hasPhaseListingTableHeader } = roadmapParserModule;
 import { tokenizeHeadings } from './markdown-sectionizer.cjs';
 import { escapeCell, findTableWithColumns, parseMarkdownTable, updateTableCell } from './markdown-table.cjs';
 import { clampPercent, normalizeMilestoneToken } from './phase-lifecycle.cjs';
@@ -998,11 +998,13 @@ function cmdRoadmapAnalyze(cwd: string, raw: boolean): void {
   // A phase table that does not parse (e.g. a ragged row) makes the record unknown: null, so ship stops.
   let tableUnreadable = false;
   editProgressTableSlice(rawContent, (scoped) => {
-    const header = scoped.search(/^[ \t]*(?=.*\|[ \t]*Phase[ \t]*\|)(?=.*\|[ \t]*Status[ \t]*\|)\|.*$/m);
-    // A phase table (Phase + Plans Complete, any case) whose Phase/Status headers are not recognised is unknown too.
-    if (header === -1) { tableUnreadable = /^[ \t]*(?=\|.*\|[ \t]*Plans Complete[ \t]*\|)\|[ \t]*phase[ \t]*\|/im.test(scoped); return scoped; }
+    // Same table the writer picks (findPhaseTableHeader); a slice without a Plans column keeps the whole-slice Phase + Status scan.
+    const planned = findPhaseTableHeader(scoped);
+    const header = planned !== -1 ? planned : scoped.search(/^[ \t]*(?=.*\|[ \t]*Phase[ \t]*\|)(?=.*\|[ \t]*Status[ \t]*\|)\|.*$/m);
+    if (header === -1) return scoped;
     const table = parseMarkdownTable(scoped.slice(header));
-    if (!table.ok) { tableUnreadable = true; return scoped; }
+    // A phase table whose Phase/Status headers are not recognised (other case or wording) is unknown: null, so ship stops.
+    if (!table.ok || !table.value.columns.includes('Phase') || !table.value.columns.includes('Status')) { tableUnreadable = true; return scoped; }
     const wantMilestone = table.value.columns.includes('Milestone')
       ? normalizeMilestoneToken(roadmapParserModule.getMilestoneInfo(cwd).value?.version)
       : null;
@@ -1131,7 +1133,7 @@ function foldPhaseId(token: string): string {
 
 /** #5221: whether offset `idx` of `text` sits inside a bare <details> block (an open-attribute wrapper is the active milestone, not shipped) that has not closed. */
 function insideOpenDetails(text: string, idx: number): boolean {
-  const prior = text.slice(0, idx);
+  const prior = text.slice(0, idx).toLowerCase();
   return prior.lastIndexOf('<details>') > prior.lastIndexOf('</details>');
 }
 
@@ -1150,11 +1152,25 @@ function checklistEntrySrc(convention: string | null | undefined, capturing = fa
   return `-\\s*\\[[ x]\\]\\s*\\*\\*${phaseHeadingPrefixSrcFor(PHASE_HEADING_BASELINE.LABEL_ONLY, convention, capturing)}(${token})`;
 }
 
+/**
+ * #5221: offset of the phase table's header row — the first table row whose cells
+ * name `Phase` and `Plans Complete` (or `Plans`), compared case-insensitively. The one
+ * predicate `editFromPhaseTable` (writer) and `roadmap analyze`'s `roadmap_record` (reader)
+ * both pick the table by, so they never disagree on which table is the phase table. -1: none.
+ */
+function findPhaseTableHeader(text: string): number {
+  for (const m of text.matchAll(/^[ \t]*\|.*$/gm)) {
+    const cells = m[0].split('|').map((c) => c.trim().toLowerCase());
+    if (cells.includes('phase') && (cells.includes('plans complete') || cells.includes('plans'))) return m.index;
+  }
+  return -1;
+}
+
 function editFromPhaseTable(scoped: string, edit: (scoped: string) => string): string {
   // #5221: Status/Completed bind to the first table carrying that column; start
-  // at the phase table so an earlier versions table is never the target.
-  const header = scoped.match(/^\|.*\bPhase\b.*\bPlans Complete\b.*$/m);
-  const at = header?.index ?? 0;
+  // at the phase table so an earlier versions table is never the target. A Progress
+  // slice with no Plans column at all keeps the whole-slice scan.
+  const at = Math.max(findPhaseTableHeader(scoped), 0);
   return scoped.slice(0, at) + edit(scoped.slice(at));
 }
 
@@ -1187,7 +1203,7 @@ function editProgressTableSlice(content: string, edit: (scoped: string) => strin
   const progressMatch = [...milestoneSlice.matchAll(/^##[ \t]+Progress\b/gim)].find((m) => !insideOpenDetails(milestoneSlice, m.index));
   if (!progressMatch || progressMatch.index === undefined) {
     // #5221: no Progress heading — stop at the next <details> so a shipped block below the active milestone is never the target.
-    const details = milestoneSlice.search(/^[ \t]*<details>/m);
+    const details = milestoneSlice.search(/^[ \t]*<details>/im);
     const end = details === -1 ? milestoneSlice.length : details;
     return before + editFromPhaseTable(milestoneSlice.slice(0, end), edit) + milestoneSlice.slice(end);
   }
@@ -1195,7 +1211,7 @@ function editProgressTableSlice(content: string, edit: (scoped: string) => strin
   const headingOffset = progressMatch.index;
   const beforeHeading = milestoneSlice.slice(0, headingOffset);
   const fromHeading = milestoneSlice.slice(headingOffset);
-  const nextHeading = fromHeading.search(/\n(?:#{1,2}[ \t]|[ \t]*<details>)/);
+  const nextHeading = fromHeading.search(/\n(?:#{1,2}[ \t]|[ \t]*<details>)/i);
   const scoped = nextHeading >= 0 ? fromHeading.slice(0, nextHeading) : fromHeading;
   const after = nextHeading >= 0 ? fromHeading.slice(nextHeading) : '';
 
@@ -1360,7 +1376,8 @@ function cmdRoadmapUpdatePlanProgress(cwd: string, phaseNum: string | null | und
     // (post-</details>) region — the same milestone scoping every writer
     // below applies — so the gate asks "does the file carry a writable phase
     // representation" rather than "did some regex fire mid-transform".
-    const gateActiveRegion = originalContent.slice(activeScopeStart(originalContent, cwd));
+    const gateScope = activeScope(originalContent, cwd);
+    const gateActiveRegion = originalContent.slice(gateScope.start, gateScope.end);
     // Heading target: the exact grammar `planSectionPattern` /
     // `insertRowsPatternA|B` anchor on (an ATX phase heading for this phase).
     const headingTargetFound = new RegExp(phaseHeadingAnchor, 'i').test(gateActiveRegion);
@@ -1686,9 +1703,14 @@ function cmdRoadmapUpdatePlanProgress(cwd: string, phaseNum: string | null | und
       .map((summaryFile) => ({ summaryFile, planId: summaryFile.replace('-SUMMARY.md', '').replace('SUMMARY.md', '') }))
       .filter(({ summaryFile, planId }) => planId !== ''
         && coreUtils.summaryPairsWithAnyPlan(phaseInfo!.plans, summaryFile));
-    for (const { planId } of tickableSummaries) {
-      roadmapContent = roadmapContent.replace(coreUtils.planRowPattern(planId), '$1x$2');
-    }
+    // #5221: scoped like every other writer here — a same-named row in a shipped block below the active milestone is never ticked.
+    const tickPlanRows = (): void => {
+      const { start, end } = activeScope(roadmapContent, cwd);
+      let region = roadmapContent.slice(start, end);
+      for (const { planId } of tickableSummaries) region = region.replace(coreUtils.planRowPattern(planId), '$1x$2');
+      roadmapContent = roadmapContent.slice(0, start) + region + roadmapContent.slice(end);
+    };
+    tickPlanRows();
 
     // Compute the active (post-</details>) region offset ONCE.  Both the
     // missing-plan DETECTION and the row INSERTION must use the same active
@@ -1696,8 +1718,8 @@ function cmdRoadmapUpdatePlanProgress(cwd: string, phaseNum: string | null | und
     // block is not counted as "already present" in the active milestone section.
     // (Finding 1 code-review: detection was previously running against the full
     //  roadmapContent, causing archived rows to suppress active-section inserts.)
-    const activeStart = activeScopeStart(roadmapContent, cwd);
-    const activeRegion = roadmapContent.slice(activeStart);
+    const { start: activeStart, end: activeEnd } = activeScope(roadmapContent, cwd);
+    const activeRegion = roadmapContent.slice(activeStart, activeEnd);
 
     // Compute which plan files are MISSING a checkbox row in the ACTIVE region.
     // This handles three cases:
@@ -1760,15 +1782,13 @@ function cmdRoadmapUpdatePlanProgress(cwd: string, phaseNum: string | null | und
       const scopedReplace = (src: string, pat: RegExp) => src.replace(pat, inserter);
       const regionA = scopedReplace(activeRegion, insertRowsPatternA);
       const afterWithRows = regionA !== activeRegion ? regionA : scopedReplace(activeRegion, insertRowsPatternB);
-      const withRows = roadmapContent.slice(0, activeStart) + afterWithRows;
+      const withRows = roadmapContent.slice(0, activeStart) + afterWithRows + roadmapContent.slice(activeEnd);
       if (withRows !== roadmapContent) {
         roadmapContent = withRows;
         // Mark any newly-inserted rows that already have summaries as complete
         // (#4741: same superseded-filtered tick list as the loop above — a
         // pre-existing superseded row must stay unchecked on this path too).
-        for (const { planId } of tickableSummaries) {
-          roadmapContent = roadmapContent.replace(coreUtils.planRowPattern(planId), '$1x$2');
-        }
+        tickPlanRows();
       }
     }
 
@@ -2103,6 +2123,7 @@ export = {
   cmdRoadmapAnnotateDependencies,
   buildPhaseHeadingRegex,
   editFromPhaseTable,
+  findPhaseTableHeader,
   editProgressTableSlice,
   foldPhaseId,
   insideOpenDetails,
