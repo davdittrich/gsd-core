@@ -6716,6 +6716,28 @@ describe('#5221: roadmap update-plan-progress — active milestone scope and pha
     assert.strictEqual(JSON.parse(a.output).roadmap_record['68'], true, 'the shipped Planned row is not the record');
   });
 
+  test('a ## Progress inside an upper-case <DETAILS> shipped block is neither written nor read', () => {
+    const shippedRow = '| 68. Old | 3/3 | Planned | - |';
+    seed([
+      ...ACTIVE.slice(0, 8),
+      '<DETAILS>',
+      '<summary>✅ v1.0 Shipped</summary>',
+      '',
+      '## Progress',
+      '',
+      '| Phase | Plans Complete | Status | Completed |',
+      '|-------|----------------|--------|-----------|',
+      shippedRow,
+      '</DETAILS>',
+      '',
+    ], { complete: true });
+    run();
+    assert.ok(fs.readFileSync(roadmapPath, 'utf-8').split('\n').includes(shippedRow), 'shipped Progress row untouched');
+    const a = runGsdTools('roadmap analyze', tmpDir);
+    assert.ok(a.success, a.error);
+    assert.strictEqual(JSON.parse(a.output).roadmap_record['68'], true, 'the shipped Planned row is not the record');
+  });
+
   test('versions table above the phase table: execute -> verify -> phase complete -> analyze reads the phase row Complete', () => {
     const versions = [
       '| Jira version | Phases | Status | Completed |',

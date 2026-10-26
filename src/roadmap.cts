@@ -1135,7 +1135,7 @@ function foldPhaseId(token: string): string {
 
 /** #5221: whether offset `idx` of `text` sits inside a bare <details> block (an open-attribute wrapper is the active milestone, not shipped) that has not closed. */
 function insideOpenDetails(text: string, idx: number): boolean {
-  const prior = text.slice(0, idx);
+  const prior = text.slice(0, idx).toLowerCase();
   return prior.lastIndexOf('<details>') > prior.lastIndexOf('</details>');
 }
 
@@ -1201,7 +1201,7 @@ function editProgressSlice(milestoneSlice: string, edit: (scoped: string) => str
   const progressMatch = [...milestoneSlice.matchAll(/^##[ \t]+Progress\b/gim)].find((m) => !insideOpenDetails(milestoneSlice, m.index));
   if (!progressMatch || progressMatch.index === undefined) {
     // #5221: no Progress heading — stop at the next <details> so a shipped block below the active milestone is never the target.
-    const details = milestoneSlice.search(/^[ \t]*<details>/m);
+    const details = milestoneSlice.search(/^[ \t]*<details>/im);
     const end = details === -1 ? milestoneSlice.length : details;
     return editFromPhaseTable(milestoneSlice.slice(0, end), edit) + milestoneSlice.slice(end);
   }
@@ -1209,7 +1209,7 @@ function editProgressSlice(milestoneSlice: string, edit: (scoped: string) => str
   const headingOffset = progressMatch.index;
   const beforeHeading = milestoneSlice.slice(0, headingOffset);
   const fromHeading = milestoneSlice.slice(headingOffset);
-  const nextHeading = fromHeading.search(/\n(?:#{1,2}[ \t]|[ \t]*<details>)/);
+  const nextHeading = fromHeading.search(/\n(?:#{1,2}[ \t]|[ \t]*<details>)/i);
   const scoped = nextHeading >= 0 ? fromHeading.slice(0, nextHeading) : fromHeading;
   const after = nextHeading >= 0 ? fromHeading.slice(nextHeading) : '';
 
