@@ -173,6 +173,7 @@ build/
 /gsd-core/bin/lib/schema-detect.cjs
 /gsd-core/bin/lib/runtime-name-policy.cjs
 /gsd-core/bin/lib/runtime-identity.cjs
+/gsd-core/bin/lib/lane-evidence.cjs
 /gsd-core/bin/lib/runtime-slash.cjs
 /gsd-core/bin/lib/observability/event.cjs
 /gsd-core/bin/lib/workstream-inventory-builder.cjs
@@ -412,3 +413,6 @@ qa-report.json
 
 # Scratch PR body files (gh pr create --body-file); never committed
 .pr-body-*.md
+
+# External-reviewer lane evidence persisted beside REVIEW.md (#5019); never committed
+*-REVIEW-lane-evidence.md
