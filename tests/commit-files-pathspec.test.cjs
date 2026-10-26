@@ -3498,18 +3498,18 @@ describe('shipped prompts scope raw git commit with a pathspec (#5211)', () => {
     const rest = lines.slice(at);
     const blk = scanFencedBlocks(rest).find((b) => b.infoString === 'bash');
     const fence = rest.slice(blk.openLineIdx + 1, blk.closeLineIdx).join('\n')
-      .replace('{step-2 paths}', 'src/a.ts src/b.ts');
+      .replace('":(literal){step-2 path}" ...', '":(literal)src/a.ts" ":(literal)src/[b].ts"');
     const { dir, git } = initFixtureRepo((f) => t.after(f), 'gsd-5489e-');
     fs.mkdirSync(path.join(dir, 'src'));
     fs.writeFileSync(path.join(dir, 'src/a.ts'), 'a'); fs.writeFileSync(path.join(dir, 'stray'), 's');
     git('add', '-A'); git('commit', '-q', '-m', 'seed');
-    fs.writeFileSync(path.join(dir, 'src/a.ts'), 'a2'); fs.writeFileSync(path.join(dir, 'src/b.ts'), 'b');
+    fs.writeFileSync(path.join(dir, 'src/a.ts'), 'a2'); fs.writeFileSync(path.join(dir, 'src/[b].ts'), 'b'); fs.writeFileSync(path.join(dir, 'src/b.ts'), 'b');
     fs.writeFileSync(path.join(dir, 'stray'), 's2');
-    git('add', 'src/a.ts', 'src/b.ts', 'stray');
+    git('add', 'src/a.ts', 'src/[b].ts', 'src/b.ts', 'stray');
     const r = runFence(dir, fence);
     assert.equal(r.exitCode, 0, r.stderr);
-    assert.deepStrictEqual(git('show', '--name-only', '--format=', 'HEAD').trim().split('\n').sort(), ['src/a.ts', 'src/b.ts']);
-    assert.equal(git('diff', '--cached', '--name-only').trim(), 'stray');
+    assert.deepStrictEqual(git('show', '--name-only', '--format=', 'HEAD').trim().split('\n').sort(), ['src/[b].ts', 'src/a.ts']);
+    assert.equal(git('diff', '--cached', '--name-only').trim(), 'src/b.ts\nstray');
   });
   describe('complete-milestone git_commit_milestone fence (scratch repo)', () => {
     // Read lazily so a missing step fails one test, not the whole file at collection.
