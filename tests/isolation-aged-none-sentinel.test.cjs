@@ -197,7 +197,7 @@ describe('the per-plan worktree gate records the isolation sentinel per dispatch
   before(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-5516-'));
     project = createFixture({ prefix: 'gsd-5516-', planning: true, git: true, projectDoc: false });
-    fs.writeFileSync(path.join(project, '.planning', 'config.json'), JSON.stringify({ runtime: 'claude', workflow: { use_worktrees: true } }));
+    fs.writeFileSync(path.join(project, '.planning', 'config.json'), JSON.stringify({ runtime: 'claude', workflow: { use_worktrees: true }, hooks: { agent_model_guard: false } }));
   });
   after(() => { cleanup(root); cleanup(project); });
 
