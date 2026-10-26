@@ -46,7 +46,9 @@ describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, ()
   test('property: PHASE_NUMBER matches a record key iff its segments agree after stripping leading zeros', () => {
     const segs = fc.array(fc.nat({ max: 12 }), { minLength: 1, maxLength: 3 });
     const pad = fc.array(fc.nat({ max: 2 }), { minLength: 3, maxLength: 3 });
-    fc.assert(fc.property(segs, segs, pad, (key, phase, zeros) => {
+    // Half the draws reuse the key, so the matching arm (PHASE_NOT_COMPLETE) is reached as often as the other.
+    fc.assert(fc.property(segs, segs, fc.boolean(), pad, (key, other, reuse, zeros) => {
+      const phase = reuse ? key : other;
       const padded = phase.map((s, i) => '0'.repeat(zeros[i]) + s).join('.');
       const r = run(analyze(key.join('.'), false), 0, padded);
       const same = key.join('.') === phase.join('.');
