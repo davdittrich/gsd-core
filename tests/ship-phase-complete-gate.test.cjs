@@ -13,11 +13,13 @@ const { runGsdTools, createTempProject, cleanup } = require('./helpers.cjs');
 
 const SKIP = skipUnless('bash', 'node');
 const SHIP = 'gsd-core/workflows/ship.md';
+// A scratch dir per run, removed when the bash run exits.
+const IN_TMP = 'D=$(mktemp -d); trap \'rm -rf "$D"\' EXIT; cd "$D"';
 const analyze = (number, complete) => JSON.stringify({ phases: [{ number }], roadmap_record: { [number]: complete } });
 
 describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, () => {
   const lines = () => span(SHIP, 'ANALYZE=$(gsd_run query roadmap.analyze', '[ "$VERDICT" != incomplete ]');
-  const run = (stdout, rc, phase = '3') => runBash(lines(), { stdout, rc }, { preamble: [`PHASE_NUMBER=${phase}`, 'cd "$(mktemp -d)"; mkdir .planning; : > .planning/ROADMAP.md'], probe: 'echo CONTINUED' });
+  const run = (stdout, rc, phase = '3') => runBash(lines(), { stdout, rc }, { preamble: [`PHASE_NUMBER=${phase}`, IN_TMP + '; mkdir .planning; : > .planning/ROADMAP.md'], probe: 'echo CONTINUED' });
   const blocked = (r, code) => {
     assert.equal(r.status, 1, r.stdout);
     assert.match(r.stderr, new RegExp(code));
@@ -31,7 +33,7 @@ describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, ()
   });
 
   test('needs no jq (a jq that always fails changes neither verdict)', () => {
-    const noJq = (stdout) => runBash(lines(), { stdout, rc: 0 }, { preamble: ['PHASE_NUMBER=3', 'jq() { return 127; }', 'cd "$(mktemp -d)"; mkdir .planning; : > .planning/ROADMAP.md'], probe: 'echo CONTINUED' });
+    const noJq = (stdout) => runBash(lines(), { stdout, rc: 0 }, { preamble: ['PHASE_NUMBER=3', 'jq() { return 127; }', IN_TMP + '; mkdir .planning; : > .planning/ROADMAP.md'], probe: 'echo CONTINUED' });
     assert.match(noJq(analyze('3', true)).stdout, /CONTINUED/);
     blocked(noJq(analyze('3', false)), 'PHASE_NOT_COMPLETE');
   });
@@ -87,19 +89,19 @@ describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, ()
   });
 
   test('missing ROADMAP.md (analyze reports not found, exit 0) skips the check', () => {
-    const r = runBash(lines(), { stdout: JSON.stringify({ error: 'ROADMAP.md not found', phases: [] }), rc: 0 }, { preamble: ['PHASE_NUMBER=3', 'cd "$(mktemp -d)"'], probe: 'echo CONTINUED' });
+    const r = runBash(lines(), { stdout: JSON.stringify({ error: 'ROADMAP.md not found', phases: [] }), rc: 0 }, { preamble: ['PHASE_NUMBER=3', IN_TMP], probe: 'echo CONTINUED' });
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /CONTINUED/);
   });
 
   test('workstream layout (no root .planning/ROADMAP.md) still runs the gate', () => {
-    const r = runBash(lines(), { stdout: analyze('3', false), rc: 0 }, { preamble: ['PHASE_NUMBER=3', 'cd "$(mktemp -d)"; mkdir -p .planning/workstreams/alpha; : > .planning/workstreams/alpha/ROADMAP.md'], probe: 'echo CONTINUED' });
+    const r = runBash(lines(), { stdout: analyze('3', false), rc: 0 }, { preamble: ['PHASE_NUMBER=3', IN_TMP + '; mkdir -p .planning/workstreams/alpha; : > .planning/workstreams/alpha/ROADMAP.md'], probe: 'echo CONTINUED' });
     blocked(r, 'PHASE_NOT_COMPLETE');
   });
 
   test('--ws reaches roadmap.analyze so the workstream roadmap is the one read', () => {
     const r = runBash(lines(), { stdout: analyze('3', true), rc: 0 }, { preamble: [
-      'PHASE_NUMBER=3; GSD_WS="--ws alpha"', 'cd "$(mktemp -d)"; mkdir .planning; : > .planning/ROADMAP.md',
+      'PHASE_NUMBER=3; GSD_WS="--ws alpha"', IN_TMP + '; mkdir .planning; : > .planning/ROADMAP.md',
       'gsd_run() { [ "$*" = "query roadmap.analyze --ws=alpha" ] || { echo "unexpected args: $*" >&2; return 2; }; printf %s "$STUB_OUT"; }',
     ], probe: 'echo CONTINUED' });
     assert.equal(r.status, 0, r.stderr);
