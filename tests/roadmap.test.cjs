@@ -6910,6 +6910,43 @@ describe('#5221: roadmap update-plan-progress — active milestone scope and pha
     assert.ok(out.includes('| 68 | 0/9 | Planned | - |'), 'second table untouched');
   });
 
+  test('an upper-case <DETAILS> shipped block below the active milestone is read-only, like <details>', () => {
+    const shipped = SHIPPED_PROGRESS.map((l) => l.replace(/details>/g, 'DETAILS>'));
+    seed([...ACTIVE.filter((l) => l !== '## Progress'), ...shipped], { complete: true });
+    assert.strictEqual(run().updated, true);
+    const out = fs.readFileSync(roadmapPath, 'utf-8');
+    assertShippedUntouched(out);
+    assert.match(out, DONE_ROW);
+  });
+
+  test('insideOpenDetails and editProgressSlice treat the tag case-insensitively', () => {
+    const { insideOpenDetails, editProgressSlice } = require('../gsd-core/bin/lib/roadmap.cjs');
+    const open = '<DETAILS>\nx';
+    assert.strictEqual(insideOpenDetails(open, open.length - 1), true);
+    assert.strictEqual(insideOpenDetails('<Details>\n</DETAILS>\nx', 20), false);
+    let seen = '';
+    editProgressSlice('## Progress\n\n| Phase | Status |\n|---|---|\n| 1 | Planned |\n<DETAILS>\nshipped\n</DETAILS>\n', (scoped) => { seen = scoped; return scoped; });
+    assert.ok(!seen.includes('shipped'), seen);
+  });
+
+  test('a versions table whose Phase column is not the first never receives the phase writes', () => {
+    const versions = [
+      '| Version | Phase | Status | Completed |',
+      '|---------|-------|--------|-----------|',
+      '| 2.0 | 68 | Open | - |',
+      '',
+    ];
+    seed([...ACTIVE.slice(0, 10), ...versions, ...ACTIVE.slice(10)], { state: false, complete: true });
+    assert.strictEqual(run().updated, true);
+    const out = fs.readFileSync(roadmapPath, 'utf-8');
+    assert.ok(out.includes(versions.join('\n')), 'versions table untouched');
+    assert.match(out, DONE_ROW);
+    const a = runGsdTools('roadmap analyze', tmpDir);
+    assert.ok(a.success, a.error);
+    const rec = JSON.parse(a.output).roadmap_record;
+    assert.ok(!('2.0' in rec) && rec['68'] === true, JSON.stringify(rec));
+  });
+
   test('activeScopeStart without a resolvable heading also finds bracket-convention entries', () => {
     const { activeScopeStart } = require('../gsd-core/bin/lib/roadmap-parser.cjs');
     for (const [entry, heading] of [['- [ ] **[GSD.02] 01: A**', '### [GSD.02] 01: A'], ['- [ ] [GSD.02] 01: A', '## [GSD.02] 01: A']]) {

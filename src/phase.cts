@@ -91,7 +91,7 @@ import { PHASE_STATUS, WIRE_STATUS, parseRoadmapStatusCell, toRoadmapStatusCell,
 import { deleteSection, updateBullet, tokenizeHeadings } from './markdown-sectionizer.cjs';
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- roadmap.cjs is an export= CommonJS module
 import roadmapMod = require('./roadmap.cjs');
-const { buildPhaseHeadingRegex, editProgressSlice, editProgressTableSlice, foldPhaseId, insideOpenDetails, checklistEntrySrc } = roadmapMod;
+const { buildPhaseHeadingRegex, editProgressSlice, editProgressTableSlice, foldPhaseId, insideOpenDetails, checklistEntrySrc, PLANS_COMPLETE_HEADER_RE } = roadmapMod;
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- uat-predicate.cjs is an export= CommonJS module
 import uatPredicate = require('./uat-predicate.cjs');
 const { evaluateUatPassed } = uatPredicate;
@@ -1341,7 +1341,7 @@ function recordNewPhase(raw: string, cwd: string, id: string | number, descripti
   if (last) return { content: spliceAfter(raw, start + last.index + last[0].length, eol, entry), entry: kind };
   let wrote = false;
   const content = editProgressTableSlice(raw, (scoped: string) => {
-    if (!/^\|.*\bPhase\b.*\bPlans Complete\b/m.test(scoped)) return scoped;
+    if (!PLANS_COMPLETE_HEADER_RE.test(scoped)) return scoped;
     // analyze reads only rows of the active milestone: with no milestone to name, a Milestone-column row would be unreadable.
     const milestone = roadmapParserMod.getMilestoneInfo(cwd).value?.version;
     if (/^\|.*\bMilestone\b/m.test(scoped) && !normalizeMilestoneToken(milestone)) return scoped;
