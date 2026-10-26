@@ -6806,7 +6806,7 @@ describe('#5221: roadmap update-plan-progress — active milestone scope and pha
     assert.match(out, DONE_ROW);
   });
 
-  test('R2c: Progress table without a "Plans Complete" header is not a phase table: refused, never written', () => {
+  test('R2c: a Phase/Status table without a "Plans Complete" column is still the phase table', () => {
     seed([
       ...ACTIVE.slice(0, 9),
       '| Phase | Plans | Status | Completed |',
@@ -6815,9 +6815,19 @@ describe('#5221: roadmap update-plan-progress — active milestone scope and pha
       '',
     ], { state: false, complete: true });
     run();
-    const out = fs.readFileSync(roadmapPath, 'utf-8');
-    assert.ok(out.includes('| 68 | 0/5 | Planned | - |'), 'headerless-of-Plans-Complete table untouched');
-    assert.match(out, /- \[x\] \*\*Phase 68: Scheduler\*\*/, 'checklist target still written');
+    assert.match(fs.readFileSync(roadmapPath, 'utf-8'), /\| 68 \| 0\/5 \| Complete\s+\| \d{4}-\d{2}-\d{2} \|/);
+  });
+
+  test('R2c1: with no phase table at all, a versions Status table is never the target', () => {
+    seed([
+      ...ACTIVE.slice(0, 9),
+      '| Version | Status |',
+      '|---------|--------|',
+      '| 68 | Planned |',
+      '',
+    ], { state: false, complete: true });
+    run();
+    assert.ok(fs.readFileSync(roadmapPath, 'utf-8').includes('| 68 | Planned |'));
   });
 
   test('R2c2: a differently-cased "plans complete" header is the phase table, so an earlier Status table is not the target', () => {
