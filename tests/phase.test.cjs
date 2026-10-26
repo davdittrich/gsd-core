@@ -2871,12 +2871,15 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
     for (const d of dirs) fs.mkdirSync(path.join(planning, 'phases', d));
     return planning;
   }
+  // Typed read-back through the CLI (roadmap get-phase), not a pattern match on ROADMAP.md.
+  const roadmapPhase = (num) => JSON.parse(runGsdTools(['roadmap', 'get-phase', String(num)], tmp).output);
+  const dependsOn = (num) => roadmapPhase(num).section.match(/\*\*Depends on:\*\* ([^\n]+)/)?.[1];
   // The command's job is to WRITE the phase, not only to echo a number: its directory and heading.
   function assertWritten(num, slug = 'new-thing', title = 'New thing') {
     const nn = String(num).padStart(2, '0');
     assert.ok(fs.existsSync(path.join(tmp, '.planning', 'phases', `${nn}-${slug}`)), `phases/${nn}-${slug} created`);
-    const text = fs.readFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), 'utf-8');
-    assert.ok(text.includes(`### Phase ${num}: ${title}`), `ROADMAP.md gains "### Phase ${num}: ${title}"`);
+    const found = roadmapPhase(num);
+    assert.ok(found.found && found.phase_name === title, `ROADMAP.md gains "### Phase ${num}: ${title}"`);
   }
   // A git repo at tmp plus one detached sibling worktree of it (removed with the test).
   function addSiblingWorktree(t, prefix) {
@@ -2892,11 +2895,9 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
     git(['worktree', 'add', '--detach', sibling, 'HEAD'], tmp);
     return sibling;
   }
-  const roadmap = (planning) => fs.readFileSync(path.join(planning, 'ROADMAP.md'), 'utf-8');
-  const roadmapText = () => roadmap(path.join(tmp, '.planning'));
 
   test('issue repro: bracket phase blocks reuse; Depends on names the bracket predecessor', () => {
-    const planning = setup([
+    setup([
       '# Roadmap', '', '## Milestone v2.0', '', '- [ ] **[GSD.02] 01: Existing**', '',
       '### [GSD.02] 01: Existing', '', '**Goal:** x', '',
     ]);
@@ -2904,7 +2905,7 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
     assert.ok(result.success, result.error);
     assert.strictEqual(result.output.trim(), '02');
     assertWritten(2);
-    assert.match(roadmap(planning), /### Phase 2: New thing[\s\S]*\*\*Depends on:\*\* Phase 1\b/);
+    assert.strictEqual(dependsOn(2), 'Phase 1');
   });
 
   test('a bracket phase found only as a canonical heading blocks reuse of its number', () => {
@@ -3061,8 +3062,7 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
   test('Depends on names a phase of the active milestone, not an archived one (the number came from a directory)', () => {
     setup(['# Roadmap', '', '## Milestone v1.0 (shipped)', '', '### [GSD.01] 04: Old', '', '## Milestone v2.0', '', '### [GSD.02] 01: Current', ''], { dirs: ['GSD.02-05-held'] });
     assert.strictEqual(runGsdTools('phase add "New thing" --raw', tmp).output.trim(), '06');
-    const text = fs.readFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), 'utf-8');
-    assert.match(text, /### Phase 6: New thing[\s\S]*?\*\*Depends on:\*\* Phase 1\b/);
+    assert.strictEqual(dependsOn(6), 'Phase 1');
   });
 
   test('a prose heading "## Phase [GSD.02] 12 notes" (no colon) is not a phase', () => {
@@ -3085,8 +3085,7 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
   test('Depends on skips a plain heading in a shipped milestone block', () => {
     setup(['# Roadmap', '', '## Milestone v1.0 (shipped)', '', '### Phase 4: Old', '', '## Milestone v2.0', '', '### [GSD.02] 01: Current', ''], { dirs: ['GSD.02-05-held'] });
     assert.strictEqual(runGsdTools('phase add "New thing" --raw', tmp).output.trim(), '06');
-    const text = fs.readFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), 'utf-8');
-    assert.match(text, /### Phase 6: New thing[\s\S]*?\*\*Depends on:\*\* Phase 1\b/);
+    assert.strictEqual(dependsOn(6), 'Phase 1');
   });
 
   test('a STATE milestone whose number no bracket id carries does not hide that id\'s directories (v1.0 STATE, [GSD.02] ids)', () => {
@@ -3101,10 +3100,10 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
     const rm = ['# Roadmap', '', '## Milestone v1.0', '', '### [GSD.02] 01: Current', '', '## Milestone v0.9 (shipped)', '', '### [GSD.01] 04: Old', ''];
     setup(rm, { milestone: 'v1.0', dirs: ['GSD.02-05-held'] });
     assert.strictEqual(runGsdTools('phase add "New thing" --raw', tmp).output.trim(), '06');
-    assert.match(roadmapText(), /### Phase 6: New thing[\s\S]*?\*\*Depends on:\*\* Phase 1\b/);
+    assert.strictEqual(dependsOn(6), 'Phase 1');
     setup(rm, { milestone: 'v1.0', dirs: ['GSD.02-05-held'] });
     runGsdTools(['phase', 'add-batch', '--descriptions', '["A","B"]'], tmp);
-    assert.match(roadmapText(), /### Phase 6: A[\s\S]*?\*\*Depends on:\*\* Phase 1\b[\s\S]*### Phase 7: B[\s\S]*?\*\*Depends on:\*\* Phase 6\b/);
+    assert.deepStrictEqual([dependsOn(6), dependsOn(7)], ['Phase 1', 'Phase 6']);
   });
 
   test('a no-checkbox prose bullet "- [GSD.02] 2026 release notes" is not a phase', () => {
@@ -3148,15 +3147,13 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
   });
 
   test('add-batch allocates consecutive free numbers after the bracket phases', () => {
-    const planning = setup([
+    setup([
       '# Roadmap', '', '## Milestone v2.0', '', '- [ ] **[GSD.02] 01: Existing**', '',
       '### Phase [GSD.02] 01: Existing', '', '**Goal:** x', '',
     ]);
     const result = runGsdTools(['phase', 'add-batch', '--descriptions', '["First New","Second New"]'], tmp);
     assert.ok(result.success, result.error);
-    const r = roadmap(planning);
-    assert.match(r, /### Phase 2: First New[\s\S]*\*\*Depends on:\*\* Phase 1\b/);
-    assert.match(r, /### Phase 3: Second New[\s\S]*\*\*Depends on:\*\* Phase 2\b/);
+    assert.deepStrictEqual([dependsOn(2), dependsOn(3)], ['Phase 1', 'Phase 2']);
   });
 
   test('a bracket checklist bullet held only by a sibling worktree ROADMAP blocks reuse of its number (gsd-core-xh86)', (t) => {
