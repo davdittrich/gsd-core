@@ -550,8 +550,9 @@ Commit the REQUIREMENTS.md deletion (archive files and ROADMAP.md were already c
 ```bash
 # The preceding step staged the deletion; read the path back from the index (init reports null once the file is gone).
 # --relative: cwd-relative paths, matching the `git commit --` pathspec below (project may sit in a repo subdir).
+# --no-renames: a staged add with identical content turns the deletion into a rename entry that --diff-filter=D hides.
 # core.quotepath=off keeps non-ASCII paths unquoted for the grep; `:(literal)` stops glob characters in the path expanding.
-REQUIREMENTS_PATH=$(git -c core.quotepath=off diff --cached --name-only --relative --diff-filter=D | grep -E '(^|/)\.planning/(.*/)?REQUIREMENTS\.md$')
+REQUIREMENTS_PATH=$(git -c core.quotepath=off diff --cached --name-only --relative --no-renames --diff-filter=D | grep -E '(^|/)\.planning/(.*/)?REQUIREMENTS\.md$')
 [ -n "$REQUIREMENTS_PATH" ] && [ "$(printf '%s\n' "$REQUIREMENTS_PATH" | wc -l)" -eq 1 ] || { echo "expected exactly one staged .planning REQUIREMENTS.md deletion, found: ${REQUIREMENTS_PATH:-none}" >&2; exit 1; }
 git commit -m "chore: remove REQUIREMENTS.md for v[X.Y] milestone" -- ":(literal)$REQUIREMENTS_PATH"
 ```

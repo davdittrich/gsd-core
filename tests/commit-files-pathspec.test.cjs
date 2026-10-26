@@ -3524,7 +3524,7 @@ describe('shipped prompts scope raw git commit with a pathspec (#5211)', () => {
     };
 
     // Seeds `rm` + a stray, stages the deletions and the stray's edit, then runs the fence from `sub`.
-    function run(rm, sub = '.') {
+    function run(rm, sub = '.', stageMore = () => {}) {
       let teardown;
       try {
         const { dir, git } = initFixtureRepo((f) => { teardown = f; }, 'gsd-5489-');
@@ -3532,6 +3532,7 @@ describe('shipped prompts scope raw git commit with a pathspec (#5211)', () => {
         git('add', '-A'); git('commit', '-q', '-m', 'seed');
         for (const f of rm) git('rm', '-q', f);
         fs.writeFileSync(path.join(dir, 'stray'), 'y'); git('add', 'stray');
+        stageMore(dir, git);
         const r = runFence(dir, fenceOf(), path.join(dir, sub));
         const lines = (s) => s.trim().split('\n').filter(Boolean);
         return {
@@ -3558,6 +3559,11 @@ describe('shipped prompts scope raw git commit with a pathspec (#5211)', () => {
     test('non-ASCII directory in the path: git does not quote it, deletion still committed', () => {
       const r = run(['é/.planning/REQUIREMENTS.md']);
       assert.deepStrictEqual([r.status, r.commits, r.head, r.staged], [0, 2, ['é/.planning/REQUIREMENTS.md'], ['stray']]);
+    });
+
+    test('deletion with identical content staged elsewhere (git reports a rename): still committed alone', () => {
+      const r = run(['.planning/REQUIREMENTS.md'], '.', (dir, git) => { fs.writeFileSync(path.join(dir, 'moved.txt'), 'x'); git('add', 'moved.txt'); });
+      assert.deepStrictEqual([r.status, r.commits, r.head, r.staged], [0, 2, ['.planning/REQUIREMENTS.md'], ['moved.txt', 'stray']]);
     });
 
     test('two staged REQUIREMENTS.md deletions: refuses, commits nothing', () => {
