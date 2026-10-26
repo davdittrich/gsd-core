@@ -169,11 +169,11 @@ describe('roadmap analyze checkbox_conflict (#4757)', () => {
     assert.deepStrictEqual(record(roadmap('x', 'x')), { 3: true });
   });
 
-  test('#5221: phase_naming custom: a custom-id entry is in roadmap_record but never in missing_phase_details', () => {
+  test('#5221: phase_naming custom: a custom-id entry is not a record and never in missing_phase_details (D2)', () => {
     record('# Roadmap\n\n## Milestone: v1.0\n\n- [ ] **Phase AUTH: Auth**\n- [x] **Phase 1: Setup**\n\n### Phase AUTH: Auth\n\n### Phase 1: Setup\n',
       { phase_naming: 'custom' });
     const out = analyze(tmpDir);
-    assert.deepStrictEqual(out.roadmap_record, { 1: true, AUTH: false });
+    assert.deepStrictEqual(out.roadmap_record, { 1: true });
     assert.ok(!(out.missing_phase_details ?? []).includes('AUTH'), JSON.stringify(out.missing_phase_details));
   });
 

@@ -2409,6 +2409,21 @@ function currentMilestoneRawRanges(
   return { primary: { start: sectionStart, end: sectionEnd }, details };
 }
 
+// phase-id-owner: uses [.-] (dot-or-dash) separator variant, not the canonical dot-only token; swapping to PHASE_NUMBER_TOKEN_SOURCE would drop hyphenated phase-id matches.
+const NUMERIC_PHASE_ID_SRC = '[A-Za-z]?\\d+[A-Z]?(?:[.-]\\d+)*';
+
+// #5221 (D1, D7, D8, D9): end of a checklist entry's phase id. On a bold entry (`- [ ] **…`) any non-id
+// character ends it (`:`, space, `*`, end), so dash-separated and titleless bold entries count; a plain
+// entry needs `:` or the end of the line (trailing blanks or one parenthesised annotation allowed),
+// so `- [ ] Phase 2` and `- [x] Phase 2 (completed …)` count and prose never does.
+const CHECKLIST_ID_END_SRC = '(?:(?<=^[ \\t]*-[ \\t]*\\[[ xX]\\][ \\t]*\\*\\*[^\\r\\n]*)(?![\\w.-])|:|[ \\t]*(?:\\([^)\\r\\n]{0,200}\\)[ \\t]*)?(?=\\r?$))';
+
+/** #5221 (D1, D7, D8): the one ROADMAP checklist-entry grammar — line-anchored, optional `**`, id ended by CHECKLIST_ID_END_SRC.
+ *  Token is the last group; use with the `m` flag. */
+function checklistEntrySrc(convention: string | null | undefined, capturing = false): string {
+  return `^[ \\t]*-[ \\t]*\\[[ x]\\][ \\t]*(?:\\*\\*)?[ \\t]*${phaseHeadingPrefixSrcFor(PHASE_HEADING_BASELINE.LABEL_ONLY, convention, capturing)}(${NUMERIC_PHASE_ID_SRC})${OPTIONAL_PHASE_TAG_SOURCE}${CHECKLIST_ID_END_SRC}`;
+}
+
 /**
  * Offset where the active milestone's writable scope starts: just past the last
  * `</details>` that closes BEFORE the selected milestone heading, so a backlog
@@ -2427,7 +2442,7 @@ function activeScopeStart(content: string, cwd?: string): number {
     // First phase entry outside any open <details>: the last tag before it must be a close (or there is none).
     upTo = content.length;
     let seen = 0;
-    for (const m of content.matchAll(/^(?:#{2,4}[ \t]+Phase\b|[ \t]*-[ \t]*\[[ x]\][ \t]*\*\*Phase\b)/gim)) {
+    for (const m of content.matchAll(new RegExp(`^#{2,4}[ \\t]+Phase\\b|${checklistEntrySrc(undefined)}`, 'gim'))) {
       while (seen < tags.length && (tags[seen].index ?? 0) < (m.index ?? 0)) seen += 1;
       if (seen === 0 || tags[seen - 1][1] === '/') { upTo = m.index ?? 0; break; }
     }
@@ -2438,6 +2453,9 @@ function activeScopeStart(content: string, cwd?: string): number {
 
 export = {
   activeScopeStart,
+  NUMERIC_PHASE_ID_SRC,
+  CHECKLIST_ID_END_SRC,
+  checklistEntrySrc,
   stripShippedMilestones,
   extractCurrentMilestone,
   extractCurrentMilestoneScoped,

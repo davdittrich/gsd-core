@@ -611,7 +611,7 @@ CRUD for phases in ROADMAP.md — add, insert, remove, or edit phases with a sin
 | `--force` | Allow editing in-progress or completed phases (used with `--edit`) |
 
 **Prerequisites:** `.planning/ROADMAP.md` exists
-**Produces:** Updated ROADMAP.md. Add and insert also give the new phase a ROADMAP record (#5221), so `/gsd-ship` can read it: a `- [ ] **Phase N: …**` checklist entry after the active milestone's checklist, or, with no checklist, a `Not started` progress-table row; with neither, no readable record is written (`roadmap_entry: none`; also reported when the written entry is one `roadmap analyze` cannot read, e.g. a custom id over 64 characters) and `/gsd-ship` blocks the phase `PHASE_NOT_RECORDED` until you add one.
+**Produces:** Updated ROADMAP.md. Add and insert also give the new phase a ROADMAP record (#5221), so `/gsd-ship` can read it: a `- [ ] **Phase N: …**` checklist entry after the active milestone's checklist, or, with no checklist, a `Not started` progress-table row; with neither, no readable record is written (`roadmap_entry: none`; also reported when the written entry is one `roadmap analyze` cannot read, e.g. a `phase_naming: custom` id, which gets no record) and `/gsd-ship` blocks the phase `PHASE_NOT_RECORDED` until you add one.
 
 ```bash
 /gsd-phase "Add authentication system"          # Append new phase with description

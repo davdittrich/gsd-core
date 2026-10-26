@@ -26,7 +26,7 @@ const { SCOPE } = planningScopeMod;
 type Scope = planningScopeMod.Scope;
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import roadmapParserModule = require('./roadmap-parser.cjs');
-const { stripShippedMilestones, extractCurrentMilestone, extractCurrentMilestoneScoped, replaceInCurrentMilestone, editActiveChecklist, activeScopeStart, editOutsideShippedBlocks, listMilestoneHeadings, scanMilestonePhaseIds, collectTablePhaseRows, hasPhaseListingTableHeader } = roadmapParserModule;
+const { stripShippedMilestones, extractCurrentMilestone, extractCurrentMilestoneScoped, replaceInCurrentMilestone, editActiveChecklist, activeScopeStart, NUMERIC_PHASE_ID_SRC, CHECKLIST_ID_END_SRC, checklistEntrySrc, editOutsideShippedBlocks, listMilestoneHeadings, scanMilestonePhaseIds, collectTablePhaseRows, hasPhaseListingTableHeader } = roadmapParserModule;
 import { tokenizeHeadings } from './markdown-sectionizer.cjs';
 import { escapeCell, findTableWithColumns, parseMarkdownTable, updateTableCell } from './markdown-table.cjs';
 import { clampPercent, normalizeMilestoneToken } from './phase-lifecycle.cjs';
@@ -628,7 +628,7 @@ function collectAnalyzePhases(
     // checkbox — no passing `*-VERIFICATION.md`, plans outstanding — now
     // reports incomplete; this is the deliberate Tier-2 break (ADR-3180 §7.4
     // Decision 3).
-    const checkboxPattern = new RegExp(`^[ \\t]*-[ \\t]*\\[(x| )\\][ \\t]*(?:\\*\\*)?${phaseHeadingPrefixSrcFor(PHASE_HEADING_BASELINE.LABEL_ONLY, convention)}${phaseMarkdownRegexSource(phaseNum)}${OPTIONAL_PHASE_TAG_SOURCE}[:\\s]`, 'im');
+    const checkboxPattern = new RegExp(`^[ \\t]*-[ \\t]*\\[(x| )\\][ \\t]*(?:\\*\\*)?${phaseHeadingPrefixSrcFor(PHASE_HEADING_BASELINE.LABEL_ONLY, convention)}${phaseMarkdownRegexSource(phaseNum)}${OPTIONAL_PHASE_TAG_SOURCE}${CHECKLIST_ID_END_SRC}`, 'im');
     const checkboxMatch = content.match(checkboxPattern);
     const roadmapComplete = checkboxMatch ? checkboxMatch[1] === 'x' : false;
 
@@ -808,9 +808,7 @@ function cmdRoadmapAnalyze(cwd: string, raw: boolean): void {
   // phase-id-owner: uses the [.-] (dot-or-dash) separator variant, not the canonical dot-only token; a swap to PHASE_NUMBER_TOKEN_SOURCE would drop hyphenated phase-id matches.
   // #3036: widen to accept non-numeric-leading ids (same widening as the detail-heading pattern above).
   // phase-id-owner: uses the [.-] (dot-or-dash) separator variant, not the canonical dot-only token; a swap to PHASE_NUMBER_TOKEN_SOURCE would drop hyphenated phase-id matches.
-  let customIds = false;
-  try { customIds = loadConfigForScope(cwd)['phase_naming'] === 'custom'; } catch { /* unreadable config: numeric ids only */ }
-  const checklistPattern = new RegExp(checklistEntrySrc(convention, true), 'gi');
+  const checklistPattern = new RegExp(checklistEntrySrc(convention, true), 'gim');
   // #2761 M1: an OCCURRENCE list keyed by `occurrenceKey`, not a token->bracket
   // map. The map was first-wins on the bare token, so of two checklist entries
   // sharing a token across brackets the FIRST one's bracket id classified BOTH:
@@ -837,20 +835,10 @@ function cmdRoadmapAnalyze(cwd: string, raw: boolean): void {
     seenChecklistKeys.add(key);
     checklistOccurrences.push(entry);
   }
-  // phase_naming: custom ids (`- [ ] **Phase AUTH: …**`, as phase add writes them) are records too.
-  const isCustomId = (t: string): boolean => customIds && !new RegExp(`^${NUMERIC_PHASE_ID_SRC}$`).test(t);
-  const customEntries: Array<{ token: string; checked: boolean }> = [];
   // #5221 (D3): the record is read from the one region the writers write (editActiveChecklist).
   editActiveChecklist(rawContent, cwd, (region) => {
-    for (const m of region.matchAll(new RegExp(checklistEntrySrc(convention, true), 'gi'))) {
-      // A custom id that merely starts like a number (`P1-setup`) is read by the custom path below, not as `P1`.
-      if (customIds && /[\w-]/.test(region[(m.index ?? 0) + m[0].length] ?? '')) continue;
+    for (const m of region.matchAll(new RegExp(checklistEntrySrc(convention, true), 'gim'))) {
       everyChecklistEntry.push({ token: m[1 + G], bracketId: G ? m[1] : undefined, checked: /\[x\]/i.test(m[0]) });
-    }
-    if (customIds) {
-      for (const m of region.matchAll(new RegExp(checklistEntrySrc(convention, false, true), 'gi'))) {
-        if (isCustomId(m[1])) customEntries.push({ token: m[1], checked: /\[x\]/i.test(m[0]) });
-      }
     }
     return region;
   });
@@ -1007,8 +995,8 @@ function cmdRoadmapAnalyze(cwd: string, raw: boolean): void {
     const k = foldPhaseId(token);
     roadmapRecord[k] = (roadmapRecord[k] ?? true) && done;
   };
+  // A custom id (`phase_naming: custom`, `Phase AUTH:`) is not a record (D2): the checklist and table tokens are numeric.
   for (const o of everyChecklistEntry) if (!isSentinelPhase(o.token, o.bracketId)) fold(o.token, o.checked);
-  for (const e of customEntries) fold(e.token, e.checked);
   // A phase table that does not parse (e.g. a ragged row) makes the record unknown: null, so ship stops.
   let tableUnreadable = false;
   editProgressTableSlice(rawContent, (scoped) => {
@@ -1023,8 +1011,8 @@ function cmdRoadmapAnalyze(cwd: string, raw: boolean): void {
     for (const r of table.value.rows) {
       if (wantMilestone !== null && (wantMilestone === '' || normalizeMilestoneToken(r['Milestone']) !== wantMilestone)) continue;
       const cell = (r['Phase'] ?? '').trim();
-      const token = cell.match(/^[A-Za-z]?\d\S*?(?=\.?(?:\s|$))/)?.[0] ?? cell.match(new RegExp(`^${CUSTOM_PHASE_ID_SRC}?(?=\\.?(?:\\s|$))`))?.[0];
-      if (token && (/^[A-Za-z]?\d/.test(token) ? !isSentinelPhase(token) : isCustomId(token))) fold(token, parseRoadmapStatusCell(r['Status']) === WIRE_STATUS.COMPLETE);
+      const token = cell.match(/^[A-Za-z]?\d\S*?(?=\.?(?:\s|$))/)?.[0];
+      if (token && !isSentinelPhase(token)) fold(token, parseRoadmapStatusCell(r['Status']) === WIRE_STATUS.COMPLETE);
     }
     return scoped;
   }, cwd);
@@ -1147,23 +1135,6 @@ function foldPhaseId(token: string): string {
 function insideOpenDetails(text: string, idx: number): boolean {
   const prior = text.slice(0, idx).toLowerCase();
   return prior.lastIndexOf('<details>') > prior.lastIndexOf('</details>');
-}
-
-// phase-id-owner: uses [.-] (dot-or-dash) separator variant, not the canonical dot-only token; swapping to PHASE_NUMBER_TOKEN_SOURCE would drop hyphenated phase-id matches.
-const NUMERIC_PHASE_ID_SRC = '[A-Za-z]?\\d+[A-Z]?(?:[.-]\\d+)*';
-
-/** #5221: a `phase_naming: custom` id (`Phase AUTH:`). */
-const CUSTOM_PHASE_ID_SRC = '[A-Za-z][\\w-]{0,63}';
-
-/**
- * #5221: source of a `- [ ] **Phase N:` checklist entry, the one shape `roadmap analyze` reads and
- * phase add/insert anchor on. Token is the last group; `custom` also admits a custom id before `:`.
- */
-function checklistEntrySrc(convention: string | null | undefined, capturing = false, custom = false): string {
-  const numeric = NUMERIC_PHASE_ID_SRC;
-  // numeric must end at a word edge, else `P1-setup` matches as `P1` before the custom alternative is tried.
-  const token = custom ? `(?:${numeric}(?![\\w-])|${CUSTOM_PHASE_ID_SRC}(?=:))` : numeric;
-  return `-\\s*\\[[ x]\\]\\s*\\*\\*${phaseHeadingPrefixSrcFor(PHASE_HEADING_BASELINE.LABEL_ONLY, convention, capturing)}(${token})`;
 }
 
 // #5221: a phase table's `Phase` + `Status` header: the one definition roadmap_record and the writers share.
@@ -1402,11 +1373,11 @@ function cmdRoadmapUpdatePlanProgress(cwd: string, phaseNum: string | null | und
     // blockquote, link) is deliberately NOT the phase's bullet either — the
     // same narrowing #4965 made for `roadmap analyze`'s checklist reader.
     // The lookahead only PEEKS (its `\s` may see a newline but consumes none):
-    // the label must be followed by `:`, whitespace or the end of the line, so
+    // the label must be ended as `CHECKLIST_ID_END_SRC` says (D8), so
     // `Phase 2.1` / `Phase 20` are not `Phase 2`. Capture group 1 is the opening
     // `- [`, group 2 the rest of the line after the box.
     const phaseChecklistBullet = (anyState: boolean): RegExp => new RegExp(
-      `^([ \\t]*-[ \\t]*\\[)${anyState ? '[ x]' : ' '}(\\][ \\t]*(?:\\*\\*)?[ \\t]*Phase[ \\t]+${phasePattern}${OPTIONAL_PHASE_TAG_SOURCE}(?=[:\\s]|$)[^\\r\\n]*)`,
+      `^([ \\t]*-[ \\t]*\\[)${anyState ? '[ x]' : ' '}(\\][ \\t]*(?:\\*\\*)?[ \\t]*Phase[ \\t]+${phasePattern}${OPTIONAL_PHASE_TAG_SOURCE}${CHECKLIST_ID_END_SRC}[^\\r\\n]*)`,
       'im',
     );
     // Checklist target: when the phase is complete, its own checklist bullet
@@ -2141,4 +2112,6 @@ export = {
   foldPhaseId,
   insideOpenDetails,
   checklistEntrySrc,
+  CHECKLIST_ID_END_SRC,
+  NUMERIC_PHASE_ID_SRC,
 };

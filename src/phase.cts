@@ -91,7 +91,7 @@ import { PHASE_STATUS, WIRE_STATUS, parseRoadmapStatusCell, toRoadmapStatusCell,
 import { deleteSection, updateBullet, tokenizeHeadings } from './markdown-sectionizer.cjs';
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- roadmap.cjs is an export= CommonJS module
 import roadmapMod = require('./roadmap.cjs');
-const { buildPhaseHeadingRegex, editProgressSlice, editProgressTableSlice, foldPhaseId, checklistEntrySrc } = roadmapMod;
+const { buildPhaseHeadingRegex, editProgressSlice, editProgressTableSlice, foldPhaseId, checklistEntrySrc, CHECKLIST_ID_END_SRC, NUMERIC_PHASE_ID_SRC } = roadmapMod;
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- uat-predicate.cjs is an export= CommonJS module
 import uatPredicate = require('./uat-predicate.cjs');
 const { evaluateUatPassed } = uatPredicate;
@@ -1311,14 +1311,14 @@ const spliceAfter = (raw: string, at: number, eol: string, line: string): string
  * with neither, nothing. Entries inside an open <details> (shipped blocks) are not the checklist.
  */
 function recordNewPhase(raw: string, cwd: string, id: string | number, description: string, after?: string): { content: string; entry: 'checklist' | 'progress_table' | 'none' } {
-  let custom = false;
-  try { custom = loadConfig(cwd).phase_naming === 'custom'; } catch { /* unreadable config: numeric ids only */ }
-  const entrySrc = checklistEntrySrc(resolvePhaseIdConvention(cwd), false, custom);
-  const entryRe = new RegExp(`^[ \\t]*${entrySrc}[^\\r\\n]*`, 'gim');
+  // D2: a custom (non-numeric) id gets no ROADMAP record.
+  if (!new RegExp(`^${NUMERIC_PHASE_ID_SRC}$`).test(String(id))) return { content: raw, entry: 'none' };
+  const entrySrc = checklistEntrySrc(resolvePhaseIdConvention(cwd));
+  const entryRe = new RegExp(`${entrySrc}[^\\r\\n]*`, 'gim');
   const eol = raw.includes('\r\n') ? '\r\n' : '\n';
   const entry = `- [ ] **Phase ${id}: ${description}**`;
-  // An id past CUSTOM_PHASE_ID_SRC's cap is written but not readable by analyze: report that, not 'checklist'.
-  const kind = new RegExp(`^${entrySrc}`).test(entry) ? 'checklist' : 'none';
+  // Guards an entry the reader cannot read (an unreadable bracket label): report that, not 'checklist'.
+  const kind = new RegExp(entrySrc, 'm').test(entry) ? 'checklist' : 'none';
   // #5221 (D3): the checklist is the active milestone's region the record reader reads (editActiveChecklist).
   let placed = false;
   const withEntry = editActiveChecklist(raw, cwd, (scope: string) => {
@@ -1970,8 +1970,8 @@ function cmdPhaseInsert(
       // templating it via detectEol(rawContent) was inert dead code. '\n'
       // matches what platformWriteSync enforces anyway.
       const bulletEntry = `\n- [ ] ${phaseLabel}`;
-      // A non-bold bullet is not an entry `roadmap analyze` reads (checklistEntrySrc needs `**`).
-      roadmapEntry = new RegExp(checklistEntrySrc(insertConvention, false, true)).test(bulletEntry) ? 'checklist' : 'none';
+      // A bullet `roadmap analyze` reads: bold, or plain with the `Phase N:` colon (D1, D8).
+      roadmapEntry = new RegExp(checklistEntrySrc(insertConvention), 'm').test(bulletEntry) ? 'checklist' : 'none';
 
       // #3413: was `[^\n]*`, which on CRLF content swallows the line's
       // trailing \r into the match, shifting bulletLineEnd to land BETWEEN
@@ -4161,13 +4161,13 @@ function cmdPhaseComplete(cwd: string, phaseNum: string, raw: boolean): void {
         // its own `- [ ] Phase N: …` entries inside a fenced code block, but it
         // is a real (and correct) behavioural difference on pathological input.
         const checkboxPattern = new RegExp(
-          `^[ \\t]*(-\\s*\\[)[ ](\\]\\s*(?:\\*\\*)?\\s*Phase\\s+${phaseEscaped}${OPTIONAL_PHASE_TAG_SOURCE}[:\\s][^\\r\\n]*)`,
+          `^[ \\t]*(-\\s*\\[)[ ](\\]\\s*(?:\\*\\*)?\\s*Phase\\s+${phaseEscaped}${OPTIONAL_PHASE_TAG_SOURCE}${CHECKLIST_ID_END_SRC}[^\\r\\n]*)`,
           'i',
         );
 
         // #5165: pre-mutation read of the same checklist line, checked this time.
         const checkedBoxPattern = new RegExp(
-          `^[ \\t]*(-\\s*\\[)[xX](\\]\\s*(?:\\*\\*)?\\s*Phase\\s+${phaseEscaped}${OPTIONAL_PHASE_TAG_SOURCE}[:\\s][^\\n]*)`,
+          `^[ \\t]*(-\\s*\\[)[xX](\\]\\s*(?:\\*\\*)?\\s*Phase\\s+${phaseEscaped}${OPTIONAL_PHASE_TAG_SOURCE}${CHECKLIST_ID_END_SRC}[^\\n]*)`,
         );
         const originalMilestoneScope = extractCurrentMilestone(originalRoadmapContent, cwd);
         editActiveChecklist(originalRoadmapContent, cwd, (r) => { phaseWasAlreadyComplete = r.split('\n').some((line) => checkedBoxPattern.test(line)); return r; });
