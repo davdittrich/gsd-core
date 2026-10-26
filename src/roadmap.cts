@@ -833,7 +833,8 @@ function cmdRoadmapAnalyze(cwd: string, raw: boolean): void {
     // `G` index this loop and `missingDetails` below already depend on.
     // Reading it off the full match text instead is index-safe.
     const entry = { token, bracketId, checked: /\[x\]/i.test(checklistMatch[0]) };
-    everyChecklistEntry.push(entry);
+    // A custom id that merely starts like a number (`P1-setup`) is read by the custom path below, not as `P1`.
+    if (!customIds || !/[\w-]/.test(effectiveContent[checklistPattern.lastIndex] ?? '')) everyChecklistEntry.push(entry);
     if (seenChecklistKeys.has(key)) continue;
     seenChecklistKeys.add(key);
     checklistOccurrences.push(entry);
@@ -993,7 +994,7 @@ function cmdRoadmapAnalyze(cwd: string, raw: boolean): void {
   };
   for (const o of everyChecklistEntry) if (!isSentinelPhase(o.token, o.bracketId)) fold(o.token, o.checked);
   // phase_naming: custom ids (`- [ ] **Phase AUTH: …**`, as phase add writes them) are records too.
-  const isCustomId = (t: string): boolean => customIds && !/^[A-Za-z]?\d/.test(t);
+  const isCustomId = (t: string): boolean => customIds && !new RegExp(`^${NUMERIC_PHASE_ID_SRC}$`).test(t);
   if (customIds) {
     for (const m of effectiveContent.matchAll(new RegExp(checklistEntrySrc(convention, false, true), 'gi'))) {
       if (isCustomId(m[1])) fold(m[1], /\[x\]/i.test(m[0]));
@@ -1139,6 +1140,8 @@ function insideOpenDetails(text: string, idx: number): boolean {
   return prior.lastIndexOf('<details>') > prior.lastIndexOf('</details>');
 }
 
+const NUMERIC_PHASE_ID_SRC = '[A-Za-z]?\\d+[A-Z]?(?:[.-]\\d+)*';
+
 /** #5221: a `phase_naming: custom` id (`Phase AUTH:`). */
 const CUSTOM_PHASE_ID_SRC = '[A-Za-z][\\w-]{0,63}';
 
@@ -1148,7 +1151,7 @@ const CUSTOM_PHASE_ID_SRC = '[A-Za-z][\\w-]{0,63}';
  */
 function checklistEntrySrc(convention: string | null | undefined, capturing = false, custom = false): string {
   // phase-id-owner: uses [.-] (dot-or-dash) separator variant, not the canonical dot-only token; swapping to PHASE_NUMBER_TOKEN_SOURCE would drop hyphenated phase-id matches.
-  const numeric = '[A-Za-z]?\\d+[A-Z]?(?:[.-]\\d+)*';
+  const numeric = NUMERIC_PHASE_ID_SRC;
   // numeric must end at a word edge, else `P1-setup` matches as `P1` before the custom alternative is tried.
   const token = custom ? `(?:${numeric}(?![\\w-])|${CUSTOM_PHASE_ID_SRC}(?=:))` : numeric;
   return `-\\s*\\[[ x]\\]\\s*\\*\\*${phaseHeadingPrefixSrcFor(PHASE_HEADING_BASELINE.LABEL_ONLY, convention, capturing)}(${token})`;
