@@ -26,7 +26,7 @@ const { SCOPE } = planningScopeMod;
 type Scope = planningScopeMod.Scope;
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import roadmapParserModule = require('./roadmap-parser.cjs');
-const { stripShippedMilestones, extractCurrentMilestone, extractCurrentMilestoneScoped, replaceInCurrentMilestone, activeScopeStart, editOutsideShippedBlocks, listMilestoneHeadings, scanMilestonePhaseIds, collectTablePhaseRows, hasPhaseListingTableHeader } = roadmapParserModule;
+const { stripShippedMilestones, extractCurrentMilestone, extractCurrentMilestoneScoped, replaceInCurrentMilestone, editActiveChecklist, activeScopeStart, editOutsideShippedBlocks, listMilestoneHeadings, scanMilestonePhaseIds, collectTablePhaseRows, hasPhaseListingTableHeader } = roadmapParserModule;
 import { tokenizeHeadings } from './markdown-sectionizer.cjs';
 import { escapeCell, findTableWithColumns, parseMarkdownTable, updateTableCell } from './markdown-table.cjs';
 import { clampPercent, normalizeMilestoneToken } from './phase-lifecycle.cjs';
@@ -833,12 +833,27 @@ function cmdRoadmapAnalyze(cwd: string, raw: boolean): void {
     // `G` index this loop and `missingDetails` below already depend on.
     // Reading it off the full match text instead is index-safe.
     const entry = { token, bracketId, checked: /\[x\]/i.test(checklistMatch[0]) };
-    // A custom id that merely starts like a number (`P1-setup`) is read by the custom path below, not as `P1`.
-    if (!customIds || !/[\w-]/.test(effectiveContent[checklistPattern.lastIndex] ?? '')) everyChecklistEntry.push(entry);
     if (seenChecklistKeys.has(key)) continue;
     seenChecklistKeys.add(key);
     checklistOccurrences.push(entry);
   }
+  // phase_naming: custom ids (`- [ ] **Phase AUTH: …**`, as phase add writes them) are records too.
+  const isCustomId = (t: string): boolean => customIds && !new RegExp(`^${NUMERIC_PHASE_ID_SRC}$`).test(t);
+  const customEntries: Array<{ token: string; checked: boolean }> = [];
+  // #5221 (D3): the record is read from the one region the writers write (editActiveChecklist).
+  editActiveChecklist(rawContent, cwd, (region) => {
+    for (const m of region.matchAll(new RegExp(checklistEntrySrc(convention, true), 'gi'))) {
+      // A custom id that merely starts like a number (`P1-setup`) is read by the custom path below, not as `P1`.
+      if (customIds && /[\w-]/.test(region[(m.index ?? 0) + m[0].length] ?? '')) continue;
+      everyChecklistEntry.push({ token: m[1 + G], bracketId: G ? m[1] : undefined, checked: /\[x\]/i.test(m[0]) });
+    }
+    if (customIds) {
+      for (const m of region.matchAll(new RegExp(checklistEntrySrc(convention, false, true), 'gi'))) {
+        if (isCustomId(m[1])) customEntries.push({ token: m[1], checked: /\[x\]/i.test(m[0]) });
+      }
+    }
+    return region;
+  });
 
   // #4899: `collectAnalyzePhases` only recognises `### Phase N:` headings and
   // progress-table rows — the shape `templates/roadmap.md` itself emits
@@ -993,13 +1008,7 @@ function cmdRoadmapAnalyze(cwd: string, raw: boolean): void {
     roadmapRecord[k] = (roadmapRecord[k] ?? true) && done;
   };
   for (const o of everyChecklistEntry) if (!isSentinelPhase(o.token, o.bracketId)) fold(o.token, o.checked);
-  // phase_naming: custom ids (`- [ ] **Phase AUTH: …**`, as phase add writes them) are records too.
-  const isCustomId = (t: string): boolean => customIds && !new RegExp(`^${NUMERIC_PHASE_ID_SRC}$`).test(t);
-  if (customIds) {
-    for (const m of effectiveContent.matchAll(new RegExp(checklistEntrySrc(convention, false, true), 'gi'))) {
-      if (isCustomId(m[1])) fold(m[1], /\[x\]/i.test(m[0]));
-    }
-  }
+  for (const e of customEntries) fold(e.token, e.checked);
   // A phase table that does not parse (e.g. a ragged row) makes the record unknown: null, so ship stops.
   let tableUnreadable = false;
   editProgressTableSlice(rawContent, (scoped) => {
@@ -1406,7 +1415,8 @@ function cmdRoadmapUpdatePlanProgress(cwd: string, phaseNum: string | null | und
     // one notch to `[ x]` so an ALREADY-checked bullet still counts as a
     // found target: an idempotent re-run then takes the honest
     // "no changes were needed" decline instead of this refusal.
-    const checklistTargetFound = isComplete && phaseChecklistBullet(true).test(gateActiveRegion);
+    let checklistTargetFound = false;
+    if (isComplete) editActiveChecklist(originalContent, cwd, (r) => { checklistTargetFound = phaseChecklistBullet(true).test(r); return r; });
     // Table-row target: set by the row-scoped cell updates below.
     let tableRowFound = false;
 
@@ -1688,7 +1698,7 @@ function cmdRoadmapUpdatePlanProgress(cwd: string, phaseNum: string | null | und
 
     // If complete: check checkbox
     if (isComplete) {
-      roadmapContent = replaceInCurrentMilestone(roadmapContent, phaseChecklistBullet(false), `$1x$2 (completed ${today})`, cwd);
+      roadmapContent = editActiveChecklist(roadmapContent, cwd, (r) => r.replace(phaseChecklistBullet(false), `$1x$2 (completed ${today})`));
     }
 
     // Mark completed plan checkboxes (e.g. "- [ ] 50-01-PLAN.md", "- [ ] 50-01:", or "- [ ] **50-01**")

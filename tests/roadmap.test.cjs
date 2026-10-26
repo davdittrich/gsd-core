@@ -6595,23 +6595,64 @@ describe('#5221: roadmap update-plan-progress — active milestone scope and pha
     '</details>',
     '',
   ];
-  for (const [label, layout] of [
+  // Parity (#5221, D3): the record reader and both writers share one checklist region (activeScopeStart to the
+  // milestone end, bare <details> and fences hidden), so they tick and read the same entry on every layout.
+  const recordLines = () => {
+    const all = roadmapLines();
+    return {
+      entries: all.filter((l) => /^\s*-\s*\[[ x]\].*Phase 68:/.test(l)),
+      rows: all.filter((l) => /^\|\s*68\s*\|/.test(l)).map((l) => l.split('|').map((c) => c.trim())),
+    };
+  };
+  for (const [label, layout, decoy] of [
     ['active first, shipped below', [...ACTIVE, ...SHIPPED]],
     ['active first, shipped block with its own Progress below', [...ACTIVE, ...SHIPPED_PROGRESS]],
     ['shipped first, backlog below', [...SHIPPED, ...ACTIVE, ...BACKLOG]],
+    ['bare <details> backlog above the active entry holding a same-numbered entry',
+      ['## v2.0 Active', '', '<details>', '<summary>Ideas</summary>', '- [ ] **Phase 68: Idea**', '</details>', '', ...ACTIVE.slice(2)],
+      '- [ ] **Phase 68: Idea**'],
+    ['fenced example above the active entry',
+      ['## v2.0 Active', '', '```markdown', '- [ ] **Phase 68: Example**', '```', '', ...ACTIVE.slice(2)],
+      '- [ ] **Phase 68: Example**'],
+    ['uppercase <DETAILS> backlog below the active milestone',
+      [...ACTIVE, '<DETAILS>', '<summary>Ideas</summary>', '- [ ] **Phase 68: Idea**', '</DETAILS>', ''],
+      '- [ ] **Phase 68: Idea**'],
+    ['no Progress heading, phase table below a bare backlog <details>', [...ACTIVE.slice(0, 8), ...BACKLOG, ...ACTIVE.slice(10)]],
   ]) {
-    test(`parity: phase complete and update-plan-progress change the same active cells (${label})`, () => {
+    test(`parity: both writers tick the same checklist entry and the record reads complete (${label})`, () => {
+      const shipped = layout.includes(SHIPPED[1]);
       seed(layout, { complete: true });
       run();
-      assertShippedUntouched();
+      const upp = recordLines();
+      if (shipped) assertShippedUntouched();
       assertActiveComplete();
       seed(layout, { complete: true });
       const r = runGsdTools('phase complete 68', tmpDir);
       assert.ok(r.success, `phase complete failed: ${r.error}`);
-      assertShippedUntouched();
+      const pc = recordLines();
+      if (shipped) assertShippedUntouched();
       assertActiveComplete();
+      assert.deepStrictEqual(pc.entries, upp.entries);
+      assert.deepStrictEqual(pc.rows, upp.rows);
+      assert.ok(upp.entries.some((l) => l.startsWith('- [x] **Phase 68: Scheduler** - ship it (completed ')), JSON.stringify(upp.entries));
+      if (decoy) {
+        const decoys = upp.entries.filter((l) => /Phase 68: (Idea|Example)/.test(l));
+        assert.deepStrictEqual(decoys, [decoy], 'the hidden entry is left byte-unchanged');
+      }
     });
   }
+
+  test('editActiveChecklist hides bare <details> (any case) and fences and stops at the milestone end', () => {
+    const { editActiveChecklist } = require('../gsd-core/bin/lib/roadmap-parser.cjs');
+    fs.writeFileSync(path.join(tmpDir, '.planning', 'STATE.md'), '---\nmilestone: v2.0\n---\n');
+    const content = [...SHIPPED, ...ACTIVE, '<DETAILS>', '<summary>x</summary>', '- [ ] **Phase 68: Idea**', '</DETAILS>',
+      '```', '- [ ] **Phase 68: Example**', '```', '## v3.0 Next', '- [ ] **Phase 68: Future**'].join('\n');
+    let region = '';
+    const out = editActiveChecklist(content, tmpDir, (r) => { region = r; return r; });
+    assert.ok(region.includes('Phase 68: Scheduler'), region);
+    for (const hidden of ['Old Scheduler', 'Idea', 'Example', 'Future']) assert.ok(!region.includes(hidden), `${hidden} is outside the region`);
+    assert.strictEqual(out, content);
+  });
 
   test('property: activeScopeStart ignores backlog </details> after the active heading and excludes every shipped block before it', () => {
     const fc = require('fast-check');

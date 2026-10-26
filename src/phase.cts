@@ -67,7 +67,7 @@ import planningScopeMod = require('./planning-scope.cjs');
 const { SCOPE } = planningScopeMod;
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- roadmap-parser.cjs is an export= CommonJS module
 import roadmapParserMod = require('./roadmap-parser.cjs');
-const { stripShippedMilestones, extractCurrentMilestone, currentMilestoneRawRanges, withPhaseSection, editOutsideShippedBlocks, findMilestoneScopeHeadingLines, activeScopeStart } = roadmapParserMod;
+const { stripShippedMilestones, extractCurrentMilestone, currentMilestoneRawRanges, withPhaseSection, editOutsideShippedBlocks, findMilestoneScopeHeadingLines, editActiveChecklist } = roadmapParserMod;
 // #4129: the single owner of "count the ROADMAP's milestone Complete rows"
 // (pure computation, no I/O — no cycle on this path) for the intent-first
 // progress counters the phase-complete transaction passes downstream.
@@ -91,7 +91,7 @@ import { PHASE_STATUS, WIRE_STATUS, parseRoadmapStatusCell, toRoadmapStatusCell,
 import { deleteSection, updateBullet, tokenizeHeadings } from './markdown-sectionizer.cjs';
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- roadmap.cjs is an export= CommonJS module
 import roadmapMod = require('./roadmap.cjs');
-const { buildPhaseHeadingRegex, editProgressSlice, editProgressTableSlice, foldPhaseId, insideOpenDetails, checklistEntrySrc } = roadmapMod;
+const { buildPhaseHeadingRegex, editProgressSlice, editProgressTableSlice, foldPhaseId, checklistEntrySrc } = roadmapMod;
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- uat-predicate.cjs is an export= CommonJS module
 import uatPredicate = require('./uat-predicate.cjs');
 const { evaluateUatPassed } = uatPredicate;
@@ -1311,32 +1311,32 @@ const spliceAfter = (raw: string, at: number, eol: string, line: string): string
  * with neither, nothing. Entries inside an open <details> (shipped blocks) are not the checklist.
  */
 function recordNewPhase(raw: string, cwd: string, id: string | number, description: string, after?: string): { content: string; entry: 'checklist' | 'progress_table' | 'none' } {
-  const start = activeScopeStart(raw, cwd);
-  // End at the active milestone's section so a later planned milestone's checklist is never the target.
-  const end = currentMilestoneRawRanges(raw, cwd)?.primary.end;
-  const scope = raw.slice(start, end !== undefined && end > start ? end : undefined);
   let custom = false;
   try { custom = loadConfig(cwd).phase_naming === 'custom'; } catch { /* unreadable config: numeric ids only */ }
   const entrySrc = checklistEntrySrc(resolvePhaseIdConvention(cwd), false, custom);
   const entryRe = new RegExp(`^[ \\t]*${entrySrc}[^\\r\\n]*`, 'gim');
-  const bullets = [...scope.matchAll(entryRe)].filter((m) => !insideOpenDetails(scope, m.index));
   const eol = raw.includes('\r\n') ? '\r\n' : '\n';
   const entry = `- [ ] **Phase ${id}: ${description}**`;
   // An id past CUSTOM_PHASE_ID_SRC's cap is written but not readable by analyze: report that, not 'checklist'.
   const kind = new RegExp(`^${entrySrc}`).test(entry) ? 'checklist' : 'none';
-  if (after !== undefined) {
-    const anchor = foldPhaseId(after);
-    const own = bullets.filter((m) => foldPhaseId(m[1]) === anchor || foldPhaseId(m[1]).startsWith(`${anchor}.`)).at(-1);
-    // Anchor phase has no entry: go before the first numerically later entry, so the checklist stays ordered.
-    const later = own ? undefined : bullets.find((m) => comparePhaseIds(foldPhaseId(m[1]), anchor) > 0);
-    if (later) {
-      const at = start + later.index;
-      return { content: `${raw.slice(0, at)}${entry}${eol}${raw.slice(at)}`, entry: kind };
+  // #5221 (D3): the checklist is the active milestone's region the record reader reads (editActiveChecklist).
+  let placed = false;
+  const withEntry = editActiveChecklist(raw, cwd, (scope: string) => {
+    const bullets = [...scope.matchAll(entryRe)];
+    if (after !== undefined) {
+      const anchor = foldPhaseId(after);
+      const own = bullets.filter((m) => foldPhaseId(m[1]) === anchor || foldPhaseId(m[1]).startsWith(`${anchor}.`)).at(-1);
+      // Anchor phase has no entry: go before the first numerically later entry, so the checklist stays ordered.
+      const later = own ? undefined : bullets.find((m) => comparePhaseIds(foldPhaseId(m[1]), anchor) > 0);
+      if (later) { placed = true; return `${scope.slice(0, later.index)}${entry}${eol}${scope.slice(later.index)}`; }
+      if (own) { placed = true; return spliceAfter(scope, own.index + own[0].length, eol, entry); }
     }
-    if (own) return { content: spliceAfter(raw, start + own.index + own[0].length, eol, entry), entry: kind };
-  }
-  const last = bullets.at(-1);
-  if (last) return { content: spliceAfter(raw, start + last.index + last[0].length, eol, entry), entry: kind };
+    const last = bullets.at(-1);
+    if (!last) return scope;
+    placed = true;
+    return spliceAfter(scope, last.index + last[0].length, eol, entry);
+  });
+  if (placed) return { content: withEntry, entry: kind };
   let wrote = false;
   const content = editProgressTableSlice(raw, (scoped: string) => {
     // `scoped` starts at the phase table (editFromPhaseTable's pick). A Milestone column is filled with the
@@ -4170,9 +4170,7 @@ function cmdPhaseComplete(cwd: string, phaseNum: string, raw: boolean): void {
           `^[ \\t]*(-\\s*\\[)[xX](\\]\\s*(?:\\*\\*)?\\s*Phase\\s+${phaseEscaped}${OPTIONAL_PHASE_TAG_SOURCE}[:\\s][^\\n]*)`,
         );
         const originalMilestoneScope = extractCurrentMilestone(originalRoadmapContent, cwd);
-        phaseWasAlreadyComplete = originalMilestoneScope
-          .split('\n')
-          .some((line) => checkedBoxPattern.test(line));
+        editActiveChecklist(originalRoadmapContent, cwd, (r) => { phaseWasAlreadyComplete = r.split('\n').some((line) => checkedBoxPattern.test(line)); return r; });
 
         // Progress table row: update Plans Complete/Status/Completed columns BY
         // COLUMN NAME (handles 4- or 5-column RoadmapProgress tables) via the
@@ -4323,13 +4321,14 @@ function cmdPhaseComplete(cwd: string, phaseNum: string, raw: boolean): void {
         // a shipped milestone, a Backlog section, or a backticked prose literal is
         // outside the window and stays untouched. With no versioned active
         // milestone, fall back to whole-content mutation (prior behaviour).
+        // Bare `<details>` blocks inside the window are shipped/backlog and stay untouched (#5221, D3).
         const mutateMilestonePhase = (slice: string): string => {
           let s = slice;
-          s = updateBullet(
-            s,
+          s = editOutsideShippedBlocks(s, (t) => updateBullet(
+            t,
             (_bulletText, rawLine) => checkboxPattern.test(rawLine),
             (rawLine) => rawLine.replace(checkboxPattern, `$1x$2 (completed ${today})`),
-          );
+          ));
 
           s = editProgressSlice(s, (scoped) => {
             let text = scoped;

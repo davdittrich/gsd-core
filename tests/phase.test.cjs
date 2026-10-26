@@ -17678,6 +17678,23 @@ describe('#4972: phase complete warns when an active verify:post audit is missin
       }
     });
 
+    test('R2f: a ticked same-numbered entry inside a bare <details> or a fence is not "already complete" (#5221, D3)', () => {
+      const old = '- [x] **Phase 3: Old**';
+      for (const hidden of [`<details>\n<summary>Ideas</summary>\n${old}\n</details>\n`, `\`\`\`markdown\n${old}\n\`\`\`\n`]) {
+        const roadmap = roadmapText({ box3: ' ' }).replace('- [ ] **Phase 3: Three**', `${hidden}- [ ] **Phase 3: Three**`);
+        const dir = makeProject({ roadmap });
+        try {
+          gsd(dir, 'phase.complete', '3');
+          const after = read(dir, 'ROADMAP.md');
+          assert.match(after, /^- \[x\] \*\*Phase 3: Three\*\*/m, 'the active box is checked');
+          assert.match(read(dir, 'STATE.md'), /^Stopped at: Phase 3 complete/m, 'the hidden ticked entry does not read as already complete');
+          assert.ok(after.split('\n').includes(old), 'the hidden entry is byte-unchanged');
+        } finally {
+          cleanup(dir);
+        }
+      }
+    });
+
     test('R3: the ROADMAP phase.complete writes differs from its input only at the checkbox, the Plans line and the progress row', () => {
       const dir = makeProject();
       try {

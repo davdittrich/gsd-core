@@ -61,7 +61,7 @@ import { platformReadSync } from './shell-command-projection.cjs';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import unusableInputMod = require('./unusable-input.cjs');
 const { UNUSABLE_REASON, warnUnusableInput } = unusableInputMod;
-import { tokenizeHeadings, stripTaggedBlocks, editOutsideTaggedBlocks, withSection, stripFencedCode, collectSection } from './markdown-sectionizer.cjs';
+import { tokenizeHeadings, stripTaggedBlocks, editOutsideTaggedBlocks, withSection, stripFencedCode, collectSection, editOutsideFences } from './markdown-sectionizer.cjs';
 import type { HeadingToken } from './markdown-sectionizer.cjs';
 import { findTableWithColumns, isDelimiterRow, splitTableRow } from './markdown-table.cjs';
 import type { MarkdownTable } from './markdown-table.cjs';
@@ -1474,6 +1474,17 @@ function replaceInCurrentMilestone(
   return content.slice(0, offset) + editOutsideShippedBlocks(content.slice(offset), apply);
 }
 
+/** #5221 (D3): run `edit` over the active milestone's checklist region (activeScopeStart to the milestone end)
+ *  with every bare <details> block and every fenced code block hidden; the record reader and every checklist writer share it. */
+function editActiveChecklist(content: string, cwd: string | undefined, edit: (region: string) => string): string {
+  const start = activeScopeStart(content, cwd);
+  const end = currentMilestoneRawRanges(content, cwd)?.primary.end;
+  const stop = end !== undefined && end > start ? end : content.length;
+  return content.slice(0, start)
+    + editOutsideShippedBlocks(content.slice(start, stop), (outside) => editOutsideFences(outside, edit))
+    + content.slice(stop);
+}
+
 /**
  * Resolve a single phase's detail-section heading (`### Phase N: …`, any level
  * 1–6, via the #2121 phase-id source) and run `edit` against ONLY that
@@ -2433,6 +2444,7 @@ export = {
   isMilestoneShippedInRoadmap,
   isMilestoneBoundedInRoadmap,
   replaceInCurrentMilestone,
+  editActiveChecklist,
   getRoadmapPhaseInternal,
   getMilestoneInfo,
   classifyMilestoneScalar,
