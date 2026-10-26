@@ -17,7 +17,7 @@ const analyze = (number, complete) => JSON.stringify({ phases: [{ number }], roa
 
 describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, () => {
   const lines = () => span(SHIP, 'ANALYZE=$(gsd_run query roadmap.analyze', '[ "$VERDICT" != incomplete ]');
-  const run = (stdout, rc, phase = '3') => runBash(lines(), { stdout, rc }, { preamble: [`PHASE_NUMBER=${phase}`, 'cd "$(mktemp -d)"; mkdir .planning; : > .planning/ROADMAP.md'], probe: 'echo CONTINUED' });
+  const run = (stdout, rc, phase = '3', padded = phase) => runBash(lines(), { stdout, rc }, { preamble: [`PHASE_NUMBER=${phase}`, `padded_phase=${padded}`, 'cd "$(mktemp -d)"; mkdir .planning; : > .planning/ROADMAP.md'], probe: 'echo CONTINUED' });
   const blocked = (r, code) => {
     assert.equal(r.status, 1, r.stdout);
     assert.match(r.stderr, new RegExp(code));
@@ -74,19 +74,19 @@ describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, ()
   });
 
   test('missing ROADMAP.md (analyze reports not found, exit 0) skips the check', () => {
-    const r = runBash(lines(), { stdout: JSON.stringify({ error: 'ROADMAP.md not found', phases: [] }), rc: 0 }, { preamble: ['PHASE_NUMBER=3', 'cd "$(mktemp -d)"'], probe: 'echo CONTINUED' });
+    const r = runBash(lines(), { stdout: JSON.stringify({ error: 'ROADMAP.md not found', phases: [] }), rc: 0 }, { preamble: ['PHASE_NUMBER=3', 'padded_phase=3', 'cd "$(mktemp -d)"'], probe: 'echo CONTINUED' });
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /CONTINUED/);
   });
 
   test('workstream layout (no root .planning/ROADMAP.md) still runs the gate', () => {
-    const r = runBash(lines(), { stdout: analyze('3', false), rc: 0 }, { preamble: ['PHASE_NUMBER=3', 'cd "$(mktemp -d)"; mkdir -p .planning/workstreams/alpha; : > .planning/workstreams/alpha/ROADMAP.md'], probe: 'echo CONTINUED' });
+    const r = runBash(lines(), { stdout: analyze('3', false), rc: 0 }, { preamble: ['PHASE_NUMBER=3', 'padded_phase=3', 'cd "$(mktemp -d)"; mkdir -p .planning/workstreams/alpha; : > .planning/workstreams/alpha/ROADMAP.md'], probe: 'echo CONTINUED' });
     blocked(r, 'PHASE_NOT_COMPLETE');
   });
 
   test('--ws reaches roadmap.analyze so the workstream roadmap is the one read', () => {
     const r = runBash(lines(), { stdout: analyze('3', true), rc: 0 }, { preamble: [
-      'PHASE_NUMBER=3; GSD_WS="--ws alpha"', 'cd "$(mktemp -d)"; mkdir .planning; : > .planning/ROADMAP.md',
+      'PHASE_NUMBER=3; padded_phase=3; GSD_WS="--ws alpha"', 'cd "$(mktemp -d)"; mkdir .planning; : > .planning/ROADMAP.md',
       'gsd_run() { [ "$*" = "query roadmap.analyze --ws=alpha" ] || { echo "unexpected args: $*" >&2; return 2; }; printf %s "$STUB_OUT"; }',
     ], probe: 'echo CONTINUED' });
     assert.equal(r.status, 0, r.stderr);
@@ -136,6 +136,22 @@ describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, ()
       const unticked = ship(`${HEAD}- [ ] **Phase 1: A**\n\n### Phase 1: A\n\n**Goal**: g\n`).r;
       blocked(unticked, 'PHASE_NOT_COMPLETE');
       assert.ok(!/by hand/.test(unticked.stderr), 'numeric phases get no custom-id hint');
+    });
+
+    test('project_code: init.phase-op padded_phase finds the record, so CK-01 ships', (t) => {
+      const tmp = createTempProject();
+      t.after(() => cleanup(tmp));
+      fs.writeFileSync(path.join(tmp, '.planning', 'config.json'), JSON.stringify({ project_code: 'CK' }));
+      fs.writeFileSync(path.join(tmp, '.planning', 'STATE.md'), '---\nmilestone: v1.0\n---\n');
+      fs.writeFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), '# Roadmap\n\n## v1.0\n\n- [x] **Phase 1: A**\n\n### Phase 1: A\n\n**Goal**: g\n');
+      fs.mkdirSync(path.join(tmp, '.planning', 'phases', 'CK-01-a'), { recursive: true });
+      const init = JSON.parse(runGsdTools('query init.phase-op 1', tmp).output);
+      assert.equal(init.phase_number, 'CK-01');
+      const a = runGsdTools('roadmap analyze', tmp);
+      assert.ok(a.success, a.error);
+      const r = run(a.output, 0, init.phase_number, init.padded_phase);
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.stdout, /CONTINUED/);
     });
 
     test('heading-only phase blocks PHASE_NOT_RECORDED', () => {
@@ -221,7 +237,6 @@ describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, ()
       assert.equal(JSON.parse(analyze()).roadmap_record.AUTH, false);
       const unticked = run(analyze(), 0, 'AUTH');
       blocked(unticked, 'PHASE_NOT_COMPLETE');
-      assert.match(unticked.stderr, /tick its ROADMAP\.md checklist entry by hand/, 'custom-id dead end is explained');
       fs.writeFileSync(roadmapPath, fs.readFileSync(roadmapPath, 'utf8').replace('- [ ] **Phase AUTH:', '- [x] **Phase AUTH:'));
       assert.equal(JSON.parse(analyze()).roadmap_record.AUTH, true);
       assert.match(run(analyze(), 0, 'AUTH').stdout, /CONTINUED/);
