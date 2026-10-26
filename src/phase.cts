@@ -1261,6 +1261,7 @@ function roadmapDeclaredPhaseNums(rawContent: string, scope: PhaseScope, withBul
     let m: RegExpExecArray | null;
     while ((m = regex.exec(rawContent)) !== null) {
       const num = parseInt(m[numGroup], 10);
+      if (!Number.isSafeInteger(num)) continue; // a 24-digit run parses to 1e24; max+1 of it is not a phase number
       const id = idGroup !== null && m[idGroup] ? m[idGroup].toUpperCase() : null;
       if (id) {
         // 999 is a backlog number in any milestone, as in the legacy scans.
@@ -1281,12 +1282,12 @@ function dirPhaseNum(entry: string, { convention, milestone: onlyMilestone }: Ph
   const bracketDir = convention === 'bracket' ? parseBracketPhaseDir(entry) : null;
   if (bracketDir) {
     const skip = isSentinelPhaseDir(entry.toUpperCase()) || isSentinelPhaseId(bracketDir.phase, 'bracket') || (onlyMilestone !== null && bracketDir.milestone !== onlyMilestone);
-    return skip ? null : bracketDir.phase;
+    return skip || !Number.isSafeInteger(bracketDir.phase) ? null : bracketDir.phase;
   }
   const match = entry.match(/^(?:[A-Z][A-Z0-9]*-)?(\d+)-/);
   if (!match) return null;
   const num = parseInt(match[1], 10);
-  return isSentinelPhaseId(num) ? null : num;
+  return !Number.isSafeInteger(num) || isSentinelPhaseId(num) ? null : num;
 }
 
 /**
@@ -1519,6 +1520,20 @@ function collectSiblingWorktreePhaseNums(
   }
 }
 
+/** The highest used number (a loop, not `Math.max(...set)`, which overflows the argument limit on a large set). */
+function maxPhaseNum(used: Iterable<number>): number {
+  let max = 0;
+  for (const n of used) if (n > max) max = n;
+  return max;
+}
+
+/** The number after `max`, stepping past the backlog sentinel (999) so allocation never lands on one. */
+function nextPhaseNum(max: number): number {
+  let n = max + 1;
+  while (isSentinelPhaseId(n)) n += 1;
+  return n;
+}
+
 /** Phase numbers already taken: the current milestone's text, phase directories, sibling worktrees (#1229, #3849, #5528). */
 function collectUsedPhaseNums(cwd: string, content: string, scope: PhaseScope): Set<number> {
   const used = new Set(roadmapDeclaredPhaseNums(content, { convention: scope.convention, milestone: null }));
@@ -1564,7 +1579,7 @@ function cmdPhaseAdd(cwd: string, description: string, raw: boolean, customId?: 
       // and under the bracket convention `[CODE.MM] NN` forms count in all three (#5528).
       // Header/bullet scans are #1729 pre-colon-tag tolerant and #3185 sentinel-filtered.
       const usedPhaseNums = collectUsedPhaseNums(cwd, content, scope);
-      _newPhaseId = Math.max(0, ...usedPhaseNums) + 1;
+      _newPhaseId = nextPhaseNum(maxPhaseNum(usedPhaseNums));
       const paddedNum = String(_newPhaseId).padStart(2, '0');
       _dirName = `${prefix}${paddedNum}-${slug}`;
     }
@@ -1643,7 +1658,7 @@ function cmdPhaseAddBatch(cwd: string, descriptions: string[], raw: boolean): vo
     if (config.phase_naming !== 'custom') {
       // Same three cwd-scoped sources as cmdPhaseAdd (#1229, #5528): headers, roadmap bullets,
       // on-disk dirs, then sibling worktrees (#3849) — same max+1, wider horizon.
-      maxPhase = Math.max(0, ...collectUsedPhaseNums(cwd, content, scope));
+      maxPhase = maxPhaseNum(collectUsedPhaseNums(cwd, content, scope));
     }
     const added: Record<string, unknown>[] = [];
     for (const description of descriptions) {
@@ -1654,7 +1669,7 @@ function cmdPhaseAddBatch(cwd: string, descriptions: string[], raw: boolean): vo
         newPhaseId = slug.toUpperCase();
         dirName = `${prefix}${newPhaseId}-${slug}`;
       } else {
-        maxPhase += 1;
+        maxPhase = nextPhaseNum(maxPhase);
         newPhaseId = maxPhase;
         dirName = `${prefix}${String(newPhaseId).padStart(2, '0')}-${slug}`;
       }

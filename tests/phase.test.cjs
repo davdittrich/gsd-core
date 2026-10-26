@@ -3125,6 +3125,16 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
     assert.strictEqual(runGsdTools('phase add "Another" --raw', tmp).output.trim(), '01');
   });
 
+  test('an absurd-length phase number reserves nothing and allocation steps past the 999 sentinel (Postel, parity with legacy)', () => {
+    setup(['# Roadmap', '', '## Milestone v2.0', '', `### [GSD.02] ${'9'.repeat(24)}: Absurd`, '']);
+    assert.strictEqual(runGsdTools('phase add "New thing" --raw', tmp).output.trim(), '01');
+    setup(['# Roadmap', '', '## Milestone v2.0', '', '- [ ] **[GSD.02] 998: Near the sentinel**', '']);
+    assert.strictEqual(runGsdTools('phase add "New thing" --raw', tmp).output.trim(), '1000');
+    setup(['# Roadmap', '', '## Milestone v2.0', '', '- [ ] **[GSD.02] 997: Near the sentinel**', '']);
+    const batch = runGsdTools(['phase', 'add-batch', '--descriptions', '["A","B"]'], tmp);
+    assert.deepStrictEqual(JSON.parse(batch.output).phases.map((p) => p.phase_number), [998, 1000]);
+  });
+
   test('property: whatever mix of heading and bullet bracket phases exists, the next number is max+1', () => {
     const fc = require('fast-check');
     fc.assert(
