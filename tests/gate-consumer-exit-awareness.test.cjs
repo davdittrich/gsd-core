@@ -410,6 +410,7 @@ describe('roadmap.update-plan-progress: only a missing_phase_details decline sto
       const r = run('{"updated":false,"reason":"missing_phase_details"}', 0);
       assert.equal(r.status, 1);
       assert.match(r.stderr, /ERROR: .*3-01/);
+      assert.match(r.stderr, /no entry, query failed, or jq missing/, 'every cause that takes this branch is named');
       assert.ok(!/CONTINUED/.test(r.stdout));
     });
 
