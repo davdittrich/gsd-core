@@ -1151,11 +1151,12 @@ function checklistEntrySrc(convention: string | null | undefined, capturing = fa
 }
 
 function editFromPhaseTable(scoped: string, edit: (scoped: string) => string): string {
-  // #5221: Status/Completed bind to the first table carrying that column; start
-  // at the phase table so an earlier versions table is never the target.
-  const header = scoped.match(/^\|.*\bPhase\b.*\bPlans Complete\b.*$/m);
-  const at = header?.index ?? 0;
-  return scoped.slice(0, at) + edit(scoped.slice(at));
+  // #5221: Status/Completed bind to the first table carrying that column; start at the phase table
+  // (case-insensitive `Plans Complete`, the header analyze's unreadable-table probe reads) so an earlier
+  // versions table is never the target. No phase table: refuse, leave `scoped` untouched.
+  const header = scoped.match(/^\|.*\bPhase\b.*\bPlans Complete\b.*$/im);
+  if (!header || header.index === undefined) return scoped;
+  return scoped.slice(0, header.index) + edit(scoped.slice(header.index));
 }
 
 /**
