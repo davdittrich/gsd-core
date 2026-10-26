@@ -6632,6 +6632,15 @@ describe('#5221: roadmap update-plan-progress — active milestone scope and pha
     assert.ok(!scope.includes('Phase 1: Old'), 'shipped block stays out');
   });
 
+  test('activeScopeStart closes a shipped block whatever the tag case, and an unclosed <details> closes nothing', () => {
+    const { activeScopeStart } = require('../gsd-core/bin/lib/roadmap-parser.cjs');
+    fs.writeFileSync(path.join(tmpDir, '.planning', 'STATE.md'), '---\nmilestone: v2.0\n---\n');
+    const upper = [...SHIPPED.slice(0, -2), '</DETAILS>', '', ...ACTIVE].join('\n');
+    assert.strictEqual(activeScopeStart(upper, tmpDir), upper.indexOf('</DETAILS>') + '</DETAILS>'.length);
+    const unclosed = [...SHIPPED.slice(0, -2), '', ...ACTIVE].join('\n');
+    assert.strictEqual(activeScopeStart(unclosed, tmpDir), 0);
+  });
+
   test('a Plans-headed Progress table directly above a shipped <details> does not leak into the shipped table', () => {
     const active = ACTIVE.map((l) => l.replace('| Phase | Plans Complete |', '| Phase | Plans |'));
     seed([...active, ...SHIPPED], { complete: true });
