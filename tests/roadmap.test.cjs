@@ -6909,6 +6909,14 @@ describe('#5221: roadmap update-plan-progress — active milestone scope and pha
     assert.match(out, DONE_ROW);
     assert.ok(out.includes('| 68 | 0/9 | Planned | - |'), 'second table untouched');
   });
+
+  test('activeScopeStart without a resolvable heading also finds bracket-convention entries', () => {
+    const { activeScopeStart } = require('../gsd-core/bin/lib/roadmap-parser.cjs');
+    for (const [entry, heading] of [['- [ ] **[GSD.02] 01: A**', '### [GSD.02] 01: A'], ['- [ ] [GSD.02] 01: A', '## [GSD.02] 01: A']]) {
+      const content = ['# Roadmap', entry, heading, '', '<details>', '<summary>Backlog</summary>', '</details>'].join('\n');
+      assert.strictEqual(activeScopeStart(content, tmpDir), 0, entry);
+    }
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

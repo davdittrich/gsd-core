@@ -2398,6 +2398,12 @@ function currentMilestoneRawRanges(
   return { primary: { start: sectionStart, end: sectionEnd }, details };
 }
 
+// A phase heading or checklist entry (bold or plain), `Phase N` or bracket-tagged (`[GSD.02] 01:`): the convention is unknown here.
+const PHASE_ENTRY_RE = new RegExp(
+  `^(?:#{2,4}[ \\t]+|[ \\t]*-[ \\t]*\\[[ x]\\][ \\t]*(?:\\*\\*)?)${phaseHeadingPrefixSrcFor(PHASE_HEADING_BASELINE.ANY_BRACKET, 'bracket', false)}`,
+  'gim',
+);
+
 /**
  * Offset where the active milestone's writable scope starts: just past the last
  * `</details>` that closes BEFORE the selected milestone heading, so a backlog
@@ -2416,7 +2422,7 @@ function activeScopeStart(content: string, cwd?: string): number {
     // First phase entry outside any open <details>: the last tag before it must be a close (or there is none).
     upTo = content.length;
     let seen = 0;
-    for (const m of content.matchAll(/^(?:#{2,4}[ \t]+Phase\b|[ \t]*-[ \t]*\[[ x]\][ \t]*\*\*Phase\b)/gim)) {
+    for (const m of content.matchAll(PHASE_ENTRY_RE)) {
       while (seen < tags.length && (tags[seen].index ?? 0) < (m.index ?? 0)) seen += 1;
       if (seen === 0 || tags[seen - 1][1] === '/') { upTo = m.index ?? 0; break; }
     }
