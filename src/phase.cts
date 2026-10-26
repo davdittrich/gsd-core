@@ -2069,7 +2069,7 @@ function cmdPhaseInsert(
       }
 
       ({ content: updatedContent, entry: roadmapEntry } = recordNewPhase(
-        rawContent.slice(0, insertIdx) + phaseEntry + rawContent.slice(insertIdx), cwd, _decimalPhase, description, afterPhase));
+        rawContent.slice(0, insertIdx) + phaseEntry + rawContent.slice(insertIdx), cwd, _decimalPhase, description, subtreeRoot));
     }
 
     platformWriteSync(roadmapPath, updatedContent);

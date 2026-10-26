@@ -274,6 +274,14 @@ describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, ()
       assert.match(roadmap, /\*\*Phase 2: P2\*\*\n- \[ \] \*\*Phase 0?3\.1: X\*\*\n- \[ \] \*\*Phase 5: P5\*\*/);
     });
 
+    test('phase insert --sibling lands its checklist entry after the whole family, not beside the anchor', () => {
+      const heads = ['3', '3.1', '3.2', '4'].map((n) => `### Phase ${n}: P${n}\n\n**Goal**: g\n`).join('\n');
+      const list = ['3', '3.1', '3.2', '4'].map((n) => `- [ ] **Phase ${n}: P${n}**`).join('\n');
+      const { out, roadmap } = addTo(`${HEAD}## Phases\n\n${list}\n\n## Phase Details\n\n${heads}`, null, ['phase', 'insert', '3.1', 'X', '--sibling']);
+      assert.equal(out.roadmap_entry, 'checklist');
+      assert.match(roadmap, /\*\*Phase 3\.2: P3\.2\*\*\n- \[ \] \*\*Phase 0?3\.3: X\*\*\n- \[ \] \*\*Phase 4: P4\*\*/);
+    });
+
     test('progress-table row written under a Milestone column carries the active milestone, so analyze reads it back', (t) => {
       const tmp = createTempProject();
       t.after(() => cleanup(tmp));
