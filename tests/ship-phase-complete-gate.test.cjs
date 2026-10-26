@@ -348,6 +348,12 @@ describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, ()
       assert.equal(rec['1.1'], false);
     });
 
+    test('phase insert after a custom-id bullet writes an entry analyze cannot read and reports none', () => {
+      const { out, roadmap } = addTo('# Roadmap\n\n- [ ] Phase AUTH: Auth\n', { phase_naming: 'custom' }, ['phase', 'insert', 'AUTH', 'Fix']);
+      assert.match(roadmap, /- \[ \] Phase AUTH\.1: Fix/);
+      assert.equal(out.roadmap_entry, 'none');
+    });
+
     test('phase add into a non-bold checklist writes a non-bold entry that analyze reads', () => {
       const { out, roadmap } = addTo(`${HEAD}## Phases\n\n- [x] Phase 1: A\n\n### Phase 1: A\n\n**Goal**: g\n`, null, ['phase', 'add', 'Second thing']);
       assert.equal(out.roadmap_entry, 'checklist');

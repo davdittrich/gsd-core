@@ -1302,6 +1302,8 @@ function comparePhaseIds(a: string, b: string): number {
   return 0;
 }
 
+const checklistEntryKind = (entry: string, entrySrc: string): 'checklist' | 'none' => new RegExp(`^${entrySrc}`).test(entry) ? 'checklist' : 'none';
+
 const spliceAfter = (raw: string, at: number, eol: string, line: string): string => `${raw.slice(0, at)}${eol}${line}${raw.slice(at)}`;
 
 /**
@@ -1310,13 +1312,11 @@ const spliceAfter = (raw: string, at: number, eol: string, line: string): string
  * phase `after`'s own entries, else before the first later entry); with no checklist, a `N. desc | Not started` progress-table row;
  * with neither, nothing. Entries inside an open <details> (shipped blocks) are not the checklist.
  */
-function recordNewPhase(raw: string, cwd: string, id: string | number, description: string, after?: string): { content: string; entry: 'checklist' | 'progress_table' | 'none' } {
+function recordNewPhase(raw: string, cwd: string, custom: boolean, id: string | number, description: string, after?: string): { content: string; entry: 'checklist' | 'progress_table' | 'none' } {
   const start = activeScopeStart(raw, cwd);
   // End at the active milestone's section so a later planned milestone's checklist is never the target.
   const end = currentMilestoneRawRanges(raw, cwd)?.primary.end;
   const scope = raw.slice(start, end !== undefined && end > start ? end : undefined);
-  let custom = false;
-  try { custom = loadConfig(cwd).phase_naming === 'custom'; } catch { /* unreadable config: numeric ids only */ }
   const entrySrc = checklistEntrySrc(resolvePhaseIdConvention(cwd), false, custom);
   const entryRe = new RegExp(`^[ \\t]*${entrySrc}[^\\r\\n]*`, 'gim');
   const bullets = [...scope.matchAll(entryRe)].filter((m) => !insideOpenDetails(scope, m.index));
@@ -1324,8 +1324,8 @@ function recordNewPhase(raw: string, cwd: string, id: string | number, descripti
   // Match the checklist's own style: a plain list gets a plain entry.
   const bold = !bullets[0] || /^[^\r\n]*?\]\s*\*\*/.test(bullets[0][0]);
   const entry = `- [ ] ${bold ? `**Phase ${id}: ${description}**` : `Phase ${id}: ${description}`}`;
-  // An id past CUSTOM_PHASE_ID_SRC's cap is written but not readable by analyze: report that, not 'checklist'.
-  const kind = new RegExp(`^${entrySrc}`).test(entry) ? 'checklist' : 'none';
+  // An id analyze cannot read (past CUSTOM_PHASE_ID_SRC's cap, a dotted custom id) is written but unrecorded: report that, not 'checklist'.
+  const kind = checklistEntryKind(entry, entrySrc);
   if (after !== undefined) {
     const anchor = foldPhaseId(after);
     const own = bullets.filter((m) => foldPhaseId(m[1]) === anchor || foldPhaseId(m[1]).startsWith(`${anchor}.`)).at(-1);
@@ -1609,7 +1609,7 @@ function cmdPhaseAdd(cwd: string, description: string, raw: boolean, customId?: 
       `\n### Phase ${_newPhaseId}: ${description}\n\n**Goal:** [To be planned]\n**Requirements**: TBD${dependsOn}\n**Plans:** 0 plans\n\nPlans:\n- [ ] TBD (run ${formatGsdSlash('plan-phase', resolveRuntime(cwd)) as string} ${_newPhaseId} to break down)\n`;
 
     const insertAt = phaseEntryInsertOffset(rawContent, cwd);
-    const recorded = recordNewPhase(spliceRoadmapBlock(rawContent, insertAt, phaseEntry), cwd, _newPhaseId, description);
+    const recorded = recordNewPhase(spliceRoadmapBlock(rawContent, insertAt, phaseEntry), cwd, config.phase_naming === 'custom', _newPhaseId, description);
 
     platformWriteSync(roadmapPath, recorded.content, { verbatim: true });
     return { newPhaseId: _newPhaseId, dirName: _dirName, roadmapEntry: recorded.entry };
@@ -1732,7 +1732,7 @@ function cmdPhaseAddBatch(cwd: string, descriptions: string[], raw: boolean): vo
       const phaseEntry =
         `\n### Phase ${newPhaseId}: ${description}\n\n**Goal:** [To be planned]\n**Requirements**: TBD${dependsOn}\n**Plans:** 0 plans\n\nPlans:\n- [ ] TBD (run ${formatGsdSlash('plan-phase', resolveRuntime(cwd)) as string} ${newPhaseId} to break down)\n`;
       const insertAt = phaseEntryInsertOffset(rawContent, cwd);
-      const recorded = recordNewPhase(spliceRoadmapBlock(rawContent, insertAt, phaseEntry), cwd, newPhaseId, description);
+      const recorded = recordNewPhase(spliceRoadmapBlock(rawContent, insertAt, phaseEntry), cwd, config.phase_naming === 'custom', newPhaseId, description);
       rawContent = recorded.content;
       added.push({
         roadmap_entry: recorded.entry,
@@ -1973,8 +1973,8 @@ function cmdPhaseInsert(
       // templating it via detectEol(rawContent) was inert dead code. '\n'
       // matches what platformWriteSync enforces anyway.
       const bulletEntry = `\n- [ ] ${phaseLabel}`;
-      // The bullet (bold, or plain `Phase N:`, matching its neighbours) is itself the checklist entry `roadmap analyze` reads.
-      roadmapEntry = 'checklist';
+      // The bullet (bold, or plain `Phase N:`, matching its neighbours) is itself the checklist entry `roadmap analyze` reads, unless the id is one it cannot (a dotted custom id).
+      roadmapEntry = checklistEntryKind(bulletEntry.trimStart(), checklistEntrySrc(insertConvention, false, insertConfig.phase_naming === 'custom'));
 
       // #3413: was `[^\n]*`, which on CRLF content swallows the line's
       // trailing \r into the match, shifting bulletLineEnd to land BETWEEN
@@ -2070,7 +2070,7 @@ function cmdPhaseInsert(
       }
 
       ({ content: updatedContent, entry: roadmapEntry } = recordNewPhase(
-        rawContent.slice(0, insertIdx) + phaseEntry + rawContent.slice(insertIdx), cwd, _decimalPhase, description, subtreeRoot));
+        rawContent.slice(0, insertIdx) + phaseEntry + rawContent.slice(insertIdx), cwd, insertConfig.phase_naming === 'custom', _decimalPhase, description, subtreeRoot));
     }
 
     platformWriteSync(roadmapPath, updatedContent);
