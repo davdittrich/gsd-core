@@ -3190,6 +3190,20 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
     assert.strictEqual(result.output.trim(), '01');
     assertWritten(1);
   });
+
+  // #5528 acceptance criterion 4: a non-bracket repo's `Depends on` still reads the whole roadmap,
+  // archived milestones included, exactly as before the bracket scoping existed.
+  for (const convention of [null, 'sequential', 'milestone-prefixed']) {
+    test(`non-bracket (${convention}): Depends on still names a phase from a shipped milestone block`, () => {
+      const rm = ['# Roadmap', '', '## Milestone v1.0 (shipped)', '', '### Phase 4: Old', '', '## Milestone v2.0', ''];
+      setup(rm, { convention, dirs: ['05-held'] });
+      assert.strictEqual(runGsdTools('phase add "New thing" --raw', tmp).output.trim(), '06');
+      assert.strictEqual(dependsOn(6), 'Phase 4');
+      setup(rm, { convention, dirs: ['05-held'] });
+      runGsdTools(['phase', 'add-batch', '--descriptions', '["A","B"]'], tmp);
+      assert.deepStrictEqual([dependsOn(6), dependsOn(7)], ['Phase 4', 'Phase 6']);
+    });
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
