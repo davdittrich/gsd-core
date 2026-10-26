@@ -12,6 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const { runGsdTools, createTempProject, cleanup, captureFdSync } = require('./helpers.cjs');
 const { scanFencedBlocks } = require('../gsd-core/bin/lib/markdown-sectionizer.cjs');
+const { splitLines } = require('../gsd-core/bin/lib/text-lines.cjs');
 
 describe('roadmap get-phase command', () => {
   let tmpDir;
@@ -6528,7 +6529,7 @@ describe('#5221: roadmap update-plan-progress — active milestone scope and pha
 
   // What the writer left is read back through `roadmap analyze`; a row that must not move is checked as a whole line
   // (the writer re-spaces blank lines file-wide, so blank lines are ignored).
-  const roadmapLines = () => fs.readFileSync(roadmapPath, 'utf-8').split('\n').filter((l) => l.trim() !== '');
+  const roadmapLines = () => splitLines(fs.readFileSync(roadmapPath, 'utf-8')).filter((l) => l.trim() !== '');
   const assertLine = (line, msg) => assert.ok(roadmapLines().includes(line), msg);
   const assertRun = (run, msg) => {
     const all = roadmapLines();
