@@ -274,6 +274,30 @@ describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, ()
       assert.match(roadmap, /\*\*Phase 2: P2\*\*\n- \[ \] \*\*Phase 0?3\.1: X\*\*\n- \[ \] \*\*Phase 5: P5\*\*/);
     });
 
+    test('progress-table row written under a Milestone column carries the active milestone, so analyze reads it back', (t) => {
+      const tmp = createTempProject();
+      t.after(() => cleanup(tmp));
+      fs.writeFileSync(path.join(tmp, '.planning', 'STATE.md'), '---\nmilestone: v2.0\n---\n');
+      fs.writeFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), `${HEAD.replace('v1.0', 'v2.0')}### Phase 1: A\n\n**Goal**: g\n\n## Progress\n\n| Phase | Milestone | Plans Complete | Status | Completed |\n|---|---|---|---|---|\n| 1. A | v2.0 | 1/1 | Complete | 2026-01-01 |\n`);
+      const c = runGsdTools(['phase', 'add', 'Second thing'], tmp);
+      assert.ok(c.success, c.error);
+      assert.equal(JSON.parse(c.output).roadmap_entry, 'progress_table');
+      assert.match(fs.readFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), 'utf8'), /\| 2\. Second thing \| v2\.0 \| 0\/0 \| Not started/);
+      assert.equal(JSON.parse(runGsdTools('roadmap analyze', tmp).output).roadmap_record['2'], false);
+    });
+
+    test('Milestone-column table with no resolvable milestone: no unreadable row is written, roadmap_entry none', (t) => {
+      const tmp = createTempProject();
+      t.after(() => cleanup(tmp));
+      fs.rmSync(path.join(tmp, '.planning', 'STATE.md'), { force: true });
+      const roadmap = '# Roadmap\n\n### Phase 1: A\n\n**Goal**: g\n\n## Progress\n\n| Phase | Milestone | Plans Complete | Status | Completed |\n|---|---|---|---|---|\n';
+      fs.writeFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), roadmap);
+      const c = runGsdTools(['phase', 'add', 'Second thing'], tmp);
+      assert.ok(c.success, c.error);
+      assert.equal(JSON.parse(c.output).roadmap_entry, 'none');
+      assert.ok(!fs.readFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), 'utf8').includes('Second thing | -'));
+    });
+
     test('phase insert into a non-bold bullet roadmap records the entry and analyze reads it', (t) => {
       const tmp = createTempProject();
       t.after(() => cleanup(tmp));

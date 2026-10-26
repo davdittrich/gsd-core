@@ -1342,7 +1342,10 @@ function recordNewPhase(raw: string, cwd: string, id: string | number, descripti
   let wrote = false;
   const content = editProgressTableSlice(raw, (scoped: string) => {
     if (!/^\|.*\bPhase\b.*\bPlans Complete\b/m.test(scoped)) return scoped;
-    const cell: Record<string, string> = { Phase: `${id}. ${description}`, 'Plans Complete': '0/0', Status: 'Not started' };
+    // analyze reads only rows of the active milestone: with no milestone to name, a Milestone-column row would be unreadable.
+    const milestone = roadmapParserMod.getMilestoneInfo(cwd).value?.version;
+    if (/^\|.*\bMilestone\b/m.test(scoped) && !normalizeMilestoneToken(milestone)) return scoped;
+    const cell: Record<string, string | undefined> = { Phase: `${id}. ${description}`, Milestone: milestone, 'Plans Complete': '0/0', Status: 'Not started' };
     const r = insertTableRow(scoped, (col) => cell[col]);
     if (!r.ok) return scoped;
     wrote = true;
