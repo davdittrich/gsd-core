@@ -1199,7 +1199,7 @@ function editProgressSlice(milestoneSlice: string, edit: (scoped: string) => str
   const progressMatch = [...milestoneSlice.matchAll(/^##[ \t]+Progress\b/gim)].find((m) => !insideOpenDetails(milestoneSlice, m.index));
   if (!progressMatch || progressMatch.index === undefined) {
     // #5221: no Progress heading — stop at the next <details> so a shipped block below the active milestone is never the target.
-    const details = milestoneSlice.search(/^[ \t]*<details>/im);
+    const details = milestoneSlice.search(/<details>/i);
     const end = details === -1 ? milestoneSlice.length : details;
     return editFromPhaseTable(milestoneSlice.slice(0, end), edit) + milestoneSlice.slice(end);
   }
@@ -1207,7 +1207,7 @@ function editProgressSlice(milestoneSlice: string, edit: (scoped: string) => str
   const headingOffset = progressMatch.index;
   const beforeHeading = milestoneSlice.slice(0, headingOffset);
   const fromHeading = milestoneSlice.slice(headingOffset);
-  const nextHeading = fromHeading.search(/\n(?:#{1,2}[ \t]|[ \t]*<details>)/i);
+  const nextHeading = fromHeading.search(/\n#{1,2}[ \t]|<details>/i);
   const scoped = nextHeading >= 0 ? fromHeading.slice(0, nextHeading) : fromHeading;
   const after = nextHeading >= 0 ? fromHeading.slice(nextHeading) : '';
 

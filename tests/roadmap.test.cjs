@@ -6552,6 +6552,14 @@ describe('#5221: roadmap update-plan-progress — active milestone scope and pha
     assert.ok(out.includes('<summary>Ideas</summary>\nlater\n</details>'), 'backlog untouched');
   });
 
+  test('a blockquoted "> <details>" block below an active milestone with no phase table is never the write target', () => {
+    seed(['# Roadmap', '', '## v2.0 Active', '', '- [ ] **Phase 68: Scheduler** - ship it', '', '### Phase 68: Scheduler', '**Goal**: schedule',
+      '**Plans**: 0/5 plans executed', '', '> <details>', '> <summary>Old</summary>', '',
+      '| Phase | Plans Complete | Status | Completed |', '|---|---|---|---|', '| 68 | 0/3 | Planned | - |', '', '> </details>', ''], { complete: true });
+    run();
+    assert.ok(fs.readFileSync(roadmapPath, 'utf-8').includes('| 68 | 0/3 | Planned | - |'), 'the shipped table row is untouched');
+  });
+
   test('active milestone first, shipped <details> with a same-numbered phase below it', () => {
     seed([...ACTIVE, ...SHIPPED], { complete: true });
     assert.strictEqual(run().updated, true);
