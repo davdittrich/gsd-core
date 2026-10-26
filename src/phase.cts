@@ -91,7 +91,7 @@ import { PHASE_STATUS, WIRE_STATUS, parseRoadmapStatusCell, toRoadmapStatusCell,
 import { deleteSection, updateBullet, tokenizeHeadings } from './markdown-sectionizer.cjs';
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- roadmap.cjs is an export= CommonJS module
 import roadmapMod = require('./roadmap.cjs');
-const { buildPhaseHeadingRegex, editFromPhaseTable, editProgressTableSlice, foldPhaseId, insideOpenDetails, checklistEntrySrc } = roadmapMod;
+const { buildPhaseHeadingRegex, editProgressSlice, editProgressTableSlice, foldPhaseId, insideOpenDetails, checklistEntrySrc } = roadmapMod;
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- uat-predicate.cjs is an export= CommonJS module
 import uatPredicate = require('./uat-predicate.cjs');
 const { evaluateUatPassed } = uatPredicate;
@@ -151,7 +151,7 @@ const looksLikePlanFile = (f: string): boolean =>
  * with `{ok:false, reason:'unknown column: Status'}`, and the real
  * Traceability row is never flipped, while the checkbox surface still flips
  * and the command reports success (the #2140 silent-divergence class one
- * level deeper). Mirrors `editProgressHeadingSlice` below, which scopes
+ * level deeper). Mirrors `editProgressSlice` (roadmap.cts), which scopes
  * `## Progress` writes to that heading's own slice for the same reason.
  *
  * Falls back to running `updateTableCell` against the whole `text` when no
@@ -4206,28 +4206,6 @@ function cmdPhaseComplete(cwd: string, phaseNum: string, raw: boolean): void {
           }
         }
 
-        /**
-         * Within `text` (already scoped to one milestone window by the
-         * caller), scope further to the `## Progress` heading section (up to
-         * the next `#`/`##` heading) when present, run `edit` against just
-         * that slice, and splice the result back — falling back to the whole
-         * `text` when no `## Progress` heading exists (mirrors phase-
-         * lifecycle.cjs's deriveProgressFromRoadmap read-side scoping).
-         */
-        const editProgressHeadingSlice = (text: string, edit: (scoped: string) => string): string => {
-          const progressMatch = text.match(/^##[ \t]+Progress\b/im);
-          if (!progressMatch || progressMatch.index === undefined) {
-            return editFromPhaseTable(text, edit);
-          }
-          const headingOffset = progressMatch.index;
-          const beforeHeading = text.slice(0, headingOffset);
-          const fromHeading = text.slice(headingOffset);
-          const nextHeading = fromHeading.search(/\n#{1,2}[ \t]/);
-          const scoped = nextHeading >= 0 ? fromHeading.slice(0, nextHeading) : fromHeading;
-          const after = nextHeading >= 0 ? fromHeading.slice(nextHeading) : '';
-          return beforeHeading + editFromPhaseTable(scoped, edit) + after;
-        };
-
         // ADR-2143 §4: the plan-count write is now routed through
         // withPhaseSection (see mutateMilestonePhase below), which hands this
         // seam call ONLY phase N's own detail-section body — the section
@@ -4350,7 +4328,7 @@ function cmdPhaseComplete(cwd: string, phaseNum: string, raw: boolean): void {
             (rawLine) => rawLine.replace(checkboxPattern, `$1x$2 (completed ${today})`),
           );
 
-          s = editProgressHeadingSlice(s, (scoped) => {
+          s = editProgressSlice(s, (scoped) => {
             let text = scoped;
 
             const plansResult = updateTableCell(text, rowMatch, 'Plans Complete', ` ${summaryCount}/${planCount} `);

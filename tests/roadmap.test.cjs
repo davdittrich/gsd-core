@@ -6568,6 +6568,44 @@ describe('#5221: roadmap update-plan-progress — active milestone scope and pha
     assertShippedUntouched(fs.readFileSync(roadmapPath, 'utf-8'));
   });
 
+  // Parity (#5221): `phase complete` and `update-plan-progress` scope their writes with one shared
+  // rule, so on the same layout the same active cells change and every shipped row stays put.
+  const SHIPPED_PROGRESS = [
+    '<details>',
+    '<summary>✅ v1.0 Shipped</summary>',
+    '',
+    '### Phase 68: Old Scheduler',
+    '**Plans**: 3 plans',
+    '- [ ] **Phase 68: Old Scheduler**',
+    '',
+    '## Progress',
+    '',
+    '| Phase | Plans Complete | Status | Completed |',
+    '|-------|----------------|--------|-----------|',
+    '| 68 | 0/3 | Planned | - |',
+    '</details>',
+    '',
+  ];
+  for (const [label, layout] of [
+    ['active first, shipped below', [...ACTIVE, ...SHIPPED]],
+    ['active first, shipped block with its own Progress below', [...ACTIVE, ...SHIPPED_PROGRESS]],
+    ['shipped first, backlog below', [...SHIPPED, ...ACTIVE, ...BACKLOG]],
+  ]) {
+    test(`parity: phase complete and update-plan-progress change the same active cells (${label})`, () => {
+      seed(layout, { complete: true });
+      const viaUpdate = run() && fs.readFileSync(roadmapPath, 'utf-8');
+      seed(layout, { complete: true });
+      const r = runGsdTools('phase complete 68', tmpDir);
+      assert.ok(r.success, `phase complete failed: ${r.error}`);
+      const viaComplete = fs.readFileSync(roadmapPath, 'utf-8');
+      for (const out of [viaUpdate, viaComplete]) {
+        assertShippedUntouched(out);
+        assert.match(out, /- \[x\] \*\*Phase 68: Scheduler\*\*/);
+        assert.match(out, /\| 68 \| 5\/5 \| Complete\s+\| \d{4}-\d{2}-\d{2} \|/);
+      }
+    });
+  }
+
   test('property: activeScopeStart ignores backlog </details> after the active heading and excludes every shipped block before it', () => {
     const fc = require('fast-check');
     const { activeScopeStart } = require('../gsd-core/bin/lib/roadmap-parser.cjs');
