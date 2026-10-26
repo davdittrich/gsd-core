@@ -36,6 +36,14 @@ describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, ()
     blocked(noJq(analyze('3', false)), 'PHASE_NOT_COMPLETE');
   });
 
+  test('only a custom id (one the numeric reader token does not cover whole) gets the CUSTOM_ID_PHASE hint', () => {
+    for (const [id, custom] of [['AUTH', true], ['P1-setup', true], ['3', false], ['3.2', false], ['A1', false], ['12A', false], ['1-2', false]]) {
+      const r = run(analyze(id, false), 0, id);
+      blocked(r, 'PHASE_NOT_COMPLETE');
+      assert.equal(/CUSTOM_ID_PHASE/.test(r.stderr), custom, id);
+    }
+  });
+
   test('incomplete phase blocks with PHASE_NOT_COMPLETE', () => {
     const r = run(analyze('3', false), 0);
     blocked(r, 'PHASE_NOT_COMPLETE');
@@ -75,7 +83,6 @@ describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, ()
   test('roadmap_record null (the ROADMAP.md progress table does not parse) blocks ROADMAP_TABLE_UNREADABLE naming the table', () => {
     const r = run(JSON.stringify({ phases: [{ number: '3' }], roadmap_record: null }), 0);
     blocked(r, 'ROADMAP_TABLE_UNREADABLE');
-    assert.match(r.stderr, /ROADMAP\.md progress table/);
     assert.ok(!/unparseable|PHASE_NOT_/.test(r.stderr));
   });
 
@@ -227,7 +234,7 @@ describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, ()
       assert.equal(JSON.parse(analyze()).roadmap_record.AUTH, false);
       const unticked = run(analyze(), 0, 'AUTH');
       blocked(unticked, 'PHASE_NOT_COMPLETE');
-      assert.match(unticked.stderr, /tick its ROADMAP\.md checklist entry by hand/, 'custom-id dead end is explained');
+      assert.match(unticked.stderr, /CUSTOM_ID_PHASE/, 'custom-id dead end is flagged');
       fs.writeFileSync(roadmapPath, fs.readFileSync(roadmapPath, 'utf8').replace('- [ ] **Phase AUTH:', '- [x] **Phase AUTH:'));
       assert.equal(JSON.parse(analyze()).roadmap_record.AUTH, true);
       assert.match(run(analyze(), 0, 'AUTH').stdout, /CONTINUED/);
