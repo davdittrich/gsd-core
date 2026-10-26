@@ -6632,6 +6632,15 @@ describe('#5221: roadmap update-plan-progress — active milestone scope and pha
     assert.ok(!scope.includes('Phase 1: Old'), 'shipped block stays out');
   });
 
+  test('activeScopeStart on a non-bracket repo does not read a bracket-tagged citation heading as the first phase entry', () => {
+    const { activeScopeStart } = require('../gsd-core/bin/lib/roadmap-parser.cjs');
+    const content = ['# Roadmap', '', '### [RFC.2119] 5: notes', '', '<details>', '<summary>shipped</summary>', '- [x] **Phase 1: Old**', '</details>', '',
+      '- [ ] **Phase 2: Active**'].join('\n');
+    assert.strictEqual(activeScopeStart(content, tmpDir), content.indexOf('</details>') + '</details>'.length);
+    fs.writeFileSync(path.join(tmpDir, '.planning', 'config.json'), JSON.stringify({ phase_id_convention: 'bracket' }));
+    assert.strictEqual(activeScopeStart(content, tmpDir), 0, 'a bracket repo does read it as a phase entry');
+  });
+
   test('activeScopeStart closes a shipped block whatever the tag case, and an unclosed <details> closes nothing', () => {
     const { activeScopeStart } = require('../gsd-core/bin/lib/roadmap-parser.cjs');
     fs.writeFileSync(path.join(tmpDir, '.planning', 'STATE.md'), '---\nmilestone: v2.0\n---\n');
@@ -6949,6 +6958,7 @@ describe('#5221: roadmap update-plan-progress — active milestone scope and pha
 
   test('activeScopeStart without a resolvable heading also finds bracket-convention entries', () => {
     const { activeScopeStart } = require('../gsd-core/bin/lib/roadmap-parser.cjs');
+    fs.writeFileSync(path.join(tmpDir, '.planning', 'config.json'), JSON.stringify({ phase_id_convention: 'bracket' }));
     for (const [entry, heading] of [['- [ ] **[GSD.02] 01: A**', '### [GSD.02] 01: A'], ['- [ ] [GSD.02] 01: A', '## [GSD.02] 01: A']]) {
       const content = ['# Roadmap', entry, heading, '', '<details>', '<summary>Backlog</summary>', '</details>'].join('\n');
       assert.strictEqual(activeScopeStart(content, tmpDir), 0, entry);

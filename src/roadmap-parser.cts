@@ -2398,9 +2398,9 @@ function currentMilestoneRawRanges(
   return { primary: { start: sectionStart, end: sectionEnd }, details };
 }
 
-// A phase heading or checklist entry (bold, or plain `Phase N:`), `Phase N` or bracket-tagged (`[GSD.02] 01:`): the convention is unknown here.
-const PHASE_ENTRY_RE = new RegExp(
-  `^(?:#{2,4}[ \\t]+|[ \\t]*-[ \\t]*\\[[ x]\\][ \\t]*(?:\\*\\*)?)${phaseHeadingPrefixSrcFor(PHASE_HEADING_BASELINE.ANY_BRACKET, 'bracket', false)}`,
+// A phase heading or checklist entry (bold, or plain `Phase N:`), `Phase N` or, on a bracket-convention repo, bracket-tagged (`[GSD.02] 01:`).
+const phaseEntryRe = (convention: string | null): RegExp => new RegExp(
+  `^(?:#{2,4}[ \\t]+|[ \\t]*-[ \\t]*\\[[ x]\\][ \\t]*(?:\\*\\*)?)${phaseHeadingPrefixSrcFor(PHASE_HEADING_BASELINE.ANY_BRACKET, convention, false)}`,
   'gim',
 );
 
@@ -2422,7 +2422,9 @@ function activeScopeStart(content: string, cwd?: string): number {
     // First phase entry outside any open <details>: the last tag before it must be a close (or there is none).
     upTo = content.length;
     let seen = 0;
-    for (const m of content.matchAll(PHASE_ENTRY_RE)) {
+    let convention: string | null = null;
+    try { if (cwd) convention = resolvePhaseIdConvention(cwd); } catch { /* unresolvable convention: the legacy grammar */ }
+    for (const m of content.matchAll(phaseEntryRe(convention))) {
       while (seen < tags.length && (tags[seen].index ?? 0) < (m.index ?? 0)) seen += 1;
       if (seen === 0 || tags[seen - 1][1] === '/') { upTo = m.index ?? 0; break; }
     }

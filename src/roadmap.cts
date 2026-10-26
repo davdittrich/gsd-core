@@ -1147,9 +1147,8 @@ function checklistEntrySrc(convention: string | null | undefined, capturing = fa
   const numeric = '[A-Za-z]?\\d+[A-Z]?(?:[.-]\\d+)*';
   // numeric must end at a word edge, else `P1-setup` matches as `P1` before the custom alternative is tried.
   const token = custom ? `(?:${numeric}(?![\\w-])|${CUSTOM_PHASE_ID_SRC}(?=:))` : numeric;
-  const label = phaseHeadingPrefixSrcFor(PHASE_HEADING_BASELINE.LABEL_ONLY, convention, false);
-  // Bold opens with `**`; plain must show `label token:` ahead (the same token, non-capturing here).
-  return `-\\s*\\[[ x]\\]\\s*(?:\\*\\*|(?=${label}${token}:))${phaseHeadingPrefixSrcFor(PHASE_HEADING_BASELINE.LABEL_ONLY, convention, capturing)}(${token})`;
+  // Plain (no `**` after the checkbox) must show `token:` right after the token.
+  return `-\\s*\\[[ x]\\]\\s*(?:\\*\\*)?${phaseHeadingPrefixSrcFor(PHASE_HEADING_BASELINE.LABEL_ONLY, convention, capturing)}(${token})(?:(?<=\\[[ x]\\]\\s*\\*\\*[^\\n]*)|(?=:))`;
 }
 
 // #5221: the phase table's header, the ONE definition for the reader (roadmap_record), the progress writers and
