@@ -1972,7 +1972,7 @@ function cmdPhaseInsert(
       // templating it via detectEol(rawContent) was inert dead code. '\n'
       // matches what platformWriteSync enforces anyway.
       const bulletEntry = `\n- [ ] ${phaseLabel}`;
-      // The bullet (bold or plain, matching its neighbours) is itself the checklist entry `roadmap analyze` reads.
+      // The bullet (bold, or plain `Phase N:`, matching its neighbours) is itself the checklist entry `roadmap analyze` reads.
       roadmapEntry = 'checklist';
 
       // #3413: was `[^\n]*`, which on CRLF content swallows the line's

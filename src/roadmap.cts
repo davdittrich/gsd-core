@@ -612,8 +612,8 @@ function collectAnalyzePhases(
     // after the checkbox, tolerating only an optional `**` bold marker and
     // horizontal whitespace — matching `cmdRoadmapAnalyze`'s own
     // `checklistPattern` (the missing-detail-section scan a bit further down
-    // in this file), which already hard-requires `\*\*` immediately after the
-    // checkbox for the same reason. A decoration the old `.*` used to tolerate
+    // in this file, built from `checklistEntrySrc`), which reads the same
+    // label-first entry — bold, or plain with a colon after the token — for the same reason. A decoration the old `.*` used to tolerate
     // by accident — a blockquoted bullet, an emoji/badge before the label —
     // now resolves to `roadmap_complete: false` instead of matching; this is
     // the deliberate, precedent-consistent narrowing (see 10-diagnosis.md's
@@ -1137,15 +1137,18 @@ function insideOpenDetails(text: string, idx: number): boolean {
 const CUSTOM_PHASE_ID_SRC = '[A-Za-z][\\w-]{0,63}';
 
 /**
- * #5221: source of a `- [ ] **Phase N:` (bold or plain) checklist entry, the one shape `roadmap analyze` reads and
- * phase add/insert anchor on. Token is the last group; `custom` also admits a custom id before `:`.
+ * #5221: source of a `- [ ] **Phase N` (bold) or `- [ ] Phase N:` (plain, colon-delimited so a prose checkbox such as
+ * `- [ ] Phase 3 docs reviewed` is never a record) checklist entry, the one shape `roadmap analyze` reads and phase
+ * add/insert anchor on. Token is the last group; `custom` also admits a custom id before `:`.
  */
 function checklistEntrySrc(convention: string | null | undefined, capturing = false, custom = false): string {
   // phase-id-owner: uses [.-] (dot-or-dash) separator variant, not the canonical dot-only token; swapping to PHASE_NUMBER_TOKEN_SOURCE would drop hyphenated phase-id matches.
   const numeric = '[A-Za-z]?\\d+[A-Z]?(?:[.-]\\d+)*';
   // numeric must end at a word edge, else `P1-setup` matches as `P1` before the custom alternative is tried.
   const token = custom ? `(?:${numeric}(?![\\w-])|${CUSTOM_PHASE_ID_SRC}(?=:))` : numeric;
-  return `-\\s*\\[[ x]\\]\\s*(?:\\*\\*)?${phaseHeadingPrefixSrcFor(PHASE_HEADING_BASELINE.LABEL_ONLY, convention, capturing)}(${token})`;
+  const label = phaseHeadingPrefixSrcFor(PHASE_HEADING_BASELINE.LABEL_ONLY, convention, false);
+  // Bold opens with `**`; plain must show `label token:` ahead (the same token, non-capturing here).
+  return `-\\s*\\[[ x]\\]\\s*(?:\\*\\*|(?=${label}${token}:))${phaseHeadingPrefixSrcFor(PHASE_HEADING_BASELINE.LABEL_ONLY, convention, capturing)}(${token})`;
 }
 
 // #5221: the phase table's header, one definition for the reader (roadmap_record) and the writers: `Phase` as the

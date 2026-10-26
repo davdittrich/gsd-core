@@ -2457,10 +2457,11 @@ describe('roadmap upgrade --convention bracket', () => {
   // bullet naming a phase number no heading defines (e.g.
   // `- [ ] Phase 2 retrospective write-up`, where no "Phase 2" heading
   // exists anywhere) now refuses the whole migration even though NO reader
-  // treats a non-bold bullet as a phase reference (roadmap.cts:770 requires
-  // bold, roadmap-parser.cts:1446 requires `**Phase`, phase.cts's checkbox
-  // branch requires a separator). Two tiers: Tier 1 (the readers' own
-  // grammar — an EXACT `**` bold intro) converts when it resolves, refuses
+  // treats a colon-less non-bold bullet as a phase reference (roadmap.cts
+  // `checklistEntrySrc` requires bold or `Phase N:`, roadmap-parser.cts:1446
+  // requires `**Phase`, phase.cts's checkbox branch requires a
+  // separator). Two tiers: Tier 1 (the readers' own
+  // grammar — an EXACT `**` bold intro, or a plain `Phase N:`) converts when it resolves, refuses
   // when it does not (the partial-conversion rule, unchanged). Tier 2 (this
   // migrator's own wider, non-bold tolerance) converts when it resolves
   // (e.g. `- [ ] Phase 1 demo video`, a plain to-do naming a real "Phase 1"
@@ -2563,6 +2564,29 @@ describe('roadmap upgrade --convention bracket', () => {
 
       assertExited(result, 1, 'bold unresolvable checklist bullet dry-run');
       assert.match(result.stderr, /recognize as a phase reference/i);
+      assert.deepEqual(snapshotTree(cwd, { skipGit: true }), before, 'a refusal must write nothing');
+    });
+
+    // #5221: the readers also read a plain `Phase N:` entry, so it is Tier 1 too.
+    test('a plain colon-delimited to-do bullet naming an unresolvable phase number refuses before any write', () => {
+      const cwd = materializeEmptyFixture('plain-colon-unresolvable-checklist');
+      fs.writeFileSync(
+        path.join(cwd, '.planning', 'config.json'),
+        JSON.stringify({ project_code: 'GSD', phase_id_convention: null }, null, 2) + '\n',
+        'utf8',
+      );
+      fs.writeFileSync(
+        path.join(cwd, '.planning', 'ROADMAP.md'),
+        ['# Roadmap', '', '## v1.0 Core', '', '- [ ] **Phase 1: Alpha** - a', '', '### Phase 1: Alpha', '**Goal**: a', '',
+          '## Notes', '', '- [ ] Phase 2: retrospective write-up', ''].join('\n'),
+        'utf8',
+      );
+      const phasesDir = path.join(cwd, '.planning', 'phases');
+      fs.mkdirSync(path.join(phasesDir, '01-alpha'), { recursive: true });
+      fs.writeFileSync(path.join(phasesDir, '01-alpha', '01-01-PLAN.md'), '---\nphase: "01"\n---\n', 'utf8');
+      const before = snapshotTree(cwd, { skipGit: true });
+
+      assertExited(runBracketUpgrade(cwd), 1, 'plain colon unresolvable checklist bullet dry-run');
       assert.deepEqual(snapshotTree(cwd, { skipGit: true }), before, 'a refusal must write nothing');
     });
 

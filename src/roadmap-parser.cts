@@ -2398,7 +2398,7 @@ function currentMilestoneRawRanges(
   return { primary: { start: sectionStart, end: sectionEnd }, details };
 }
 
-// A phase heading or checklist entry (bold or plain), `Phase N` or bracket-tagged (`[GSD.02] 01:`): the convention is unknown here.
+// A phase heading or checklist entry (bold, or plain `Phase N:`), `Phase N` or bracket-tagged (`[GSD.02] 01:`): the convention is unknown here.
 const PHASE_ENTRY_RE = new RegExp(
   `^(?:#{2,4}[ \\t]+|[ \\t]*-[ \\t]*\\[[ x]\\][ \\t]*(?:\\*\\*)?)${phaseHeadingPrefixSrcFor(PHASE_HEADING_BASELINE.ANY_BRACKET, 'bracket', false)}`,
   'gim',

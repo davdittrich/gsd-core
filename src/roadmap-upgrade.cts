@@ -1660,10 +1660,10 @@ function computeBracketPlan(cwd: string): MigrationPlan {
   }
 
   // #4144 round 6 B4: the READERS' own checklist grammar
-  // (`src/roadmap.cts`'s `cmdRoadmapAnalyze checklistPattern`, the exact
-  // scan `missing_phase_details` is computed from) requires a bold `**`
-  // immediately before the `Phase` label and — unlike the previous regex
-  // here — never requires a colon anywhere after the token:
+  // (`src/roadmap.cts`'s `checklistEntrySrc`, the exact
+  // scan `missing_phase_details` is computed from) reads a bold `**` entry
+  // without requiring a colon after the token (a plain entry needs the colon, #5221) —
+  // unlike the previous regex here:
   // `- [ ] **Phase 7** - Eta` and `- [x] **Phase 8**: Theta` are both real
   // phase references to it. A colon-requiring copy left such bullets
   // byte-identical while their headings converted, so a "done" migration
@@ -1700,7 +1700,7 @@ function computeBracketPlan(cwd: string): MigrationPlan {
   // #4144 round 8 I1: `legacyChecklistRe` above requires nothing at all
   // after the number/tag — deliberately, since Tier 1 (reader-recognized,
   // `isReaderRecognizedBullet` below) must match exactly what the readers'
-  // own grammar matches, and neither `roadmap.cts:770`'s checklistPattern
+  // own grammar matches, and neither `roadmap.cts`'s `checklistEntrySrc` for bold entries
   // nor `phase.cts`'s heading branch require a boundary there either (a
   // bold `**Phase 1-on-1 meetings**` is read by every reader as naming
   // phase 1, trailing text and all — narrowing the MATCH itself would
@@ -1755,19 +1755,22 @@ function computeBracketPlan(cwd: string): MigrationPlan {
     if (!legacyChecklist) continue;
     const key = legacyLookupKey(legacyChecklist[2]);
     // #4144 round 7 B2: the READERS' own checklist grammar
-    // (`src/roadmap.cts` checklistPattern, the exact scan
-    // `missing_phase_details` is computed from) requires an EXACT bold `**`
-    // immediately before the `Phase` label. This migrator's own
+    // (`src/roadmap.cts` `checklistEntrySrc`, the exact scan
+    // `missing_phase_details` is computed from) reads an EXACT bold `**`
+    // immediately before the `Phase` label, or (#5221) a plain `Phase N:` entry
+    // whose token is followed directly by a colon. This migrator's own
     // long-standing tolerance additionally accepts 0 or 1 asterisks
     // (`\*{0,2}` in CHECKLIST_BULLET_PREFIX_SRC above) — captured group 1
-    // therefore ends in `**` if and only if the bullet is the exact shape a
+    // therefore ends in `**`, or the line continues `:` straight after an
+    // untagged token, if and only if the bullet is the exact shape a
     // reader recognizes. A bullet the readers recognize that cannot be
     // attributed to any converted phase is a genuine partial-conversion
     // hazard and must refuse; a bullet only THIS migrator's wider tolerance
     // matches is not a phase reference to any reader — converted when it
     // resolves (keeps the long-standing non-bold conversion case green),
     // left byte-identical rather than refused when it does not.
-    const isReaderRecognizedBullet = /\*\*$/.test(legacyChecklist[1]);
+    const isReaderRecognizedBullet = /\*\*$/.test(legacyChecklist[1])
+      || (!legacyChecklist[3] && line.charAt(legacyChecklist[0].length) === ':');
     // #4144 round 8 I1: Tier 2 additionally requires a token boundary right
     // after the number/tag (see `TIER2_TOKEN_BOUNDARY_RE` above) — Tier 1
     // never does, since narrowing the shared match itself would silently
@@ -1862,7 +1865,7 @@ function computeBracketPlan(cwd: string): MigrationPlan {
       }
       if (!isReaderRecognizedBullet) {
         // #4144 round 7 B2: no reader treats this bullet as a phase
-        // reference (roadmap.cts:770 requires bold, roadmap-parser.cts:1446
+        // reference (roadmap.cts `checklistEntrySrc` requires bold or `Phase N:`, roadmap-parser.cts:1446
         // requires `**Phase`, phase.cts's checkbox branch requires a
         // separator after the token) — there is nothing for a "done"
         // migration to have missed. Left byte-identical, never refused.

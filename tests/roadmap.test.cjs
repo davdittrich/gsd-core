@@ -7006,6 +7006,12 @@ describe('#5221: roadmap analyze roadmap_record reader', () => {
     assert.strictEqual(out.phases[0].roadmap_complete, true);
   });
 
+  test('a prose checkbox that merely starts with "Phase N" is not a record', () => {
+    const out = analyze('# Roadmap\n\n- [x] **Phase 1: A**\n- [ ] Phase 2 tests pass before merge\n- [ ] Phase 3 docs reviewed\n\n### Phase 1: A\n**Goal**: g\n');
+    assert.deepStrictEqual(out.roadmap_record, { 1: true });
+    assert.strictEqual(out.missing_phase_details, null);
+  });
+
   test('a non-bold custom-id checklist entry is a record', () => {
     const out = analyze('# Roadmap\n\n- [x] Phase AUTH: Auth\n', { phase_naming: 'custom' });
     assert.strictEqual(out.roadmap_record.AUTH, true);

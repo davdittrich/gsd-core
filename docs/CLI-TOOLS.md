@@ -485,7 +485,7 @@ no checklist entry, has no checkbox to disagree with and is never listed
 | `plan_count` | number | Plans found for the phase |
 | `summary_count` | number | Summaries paired with a plan |
 
-`roadmap_record` (#5221) maps each phase number (leading zeros stripped per segment; under `phase_naming: custom`, also each custom id such as `AUTH`, written `AUTH. name` in a table cell) to `true` when every recognised ROADMAP record of it — each checklist entry (bold or plain), under any bracket, and its progress-table Status cell — reads complete, else `false`; a phase with no checklist entry or table row is absent, and the whole field is `null` when the phase table does not parse or its `Phase`/`Status` headers are not recognised (a `Plans Complete` table headed in another case or wording). It reads the record only (whatever the disk says); `/gsd-ship` ships only a `true` phase.
+`roadmap_record` (#5221) maps each phase number (leading zeros stripped per segment; under `phase_naming: custom`, also each custom id such as `AUTH`, written `AUTH. name` in a table cell) to `true` when every recognised ROADMAP record of it — each checklist entry (bold, or plain `Phase N:` with its colon), under any bracket, and its progress-table Status cell — reads complete, else `false`; a phase with no checklist entry or table row is absent, and the whole field is `null` when the phase table does not parse or its `Phase`/`Status` headers are not recognised (a `Plans Complete` table headed in another case or wording). It reads the record only (whatever the disk says); `/gsd-ship` ships only a `true` phase.
 
 The selectors are unchanged: `checkbox_conflict` only reports the
 disagreement. To treat a phase as done despite its disk status, verify it
