@@ -3135,6 +3135,13 @@ describe('phase add / add-batch count bracket phases under phase_id_convention b
     assert.deepStrictEqual(JSON.parse(batch.output).phases.map((p) => p.phase_number), [998, 1000]);
   });
 
+  for (const line of ['- **[GSD.02] 05**', '- [GSD.02] 05 - Name', '### [GSD.02] 05 - Name', '1. [ ] **[GSD.02] 05: Name**']) {
+    test(`the spelling "${line}" reserves its number (Postel)`, () => {
+      setup(['# Roadmap', '', '## Milestone v2.0', '', line, '']);
+      assert.strictEqual(runGsdTools('phase add "New thing" --raw', tmp).output.trim(), '06');
+    });
+  }
+
   test('property: whatever mix of heading and bullet bracket phases exists, the next number is max+1', () => {
     const fc = require('fast-check');
     fc.assert(
