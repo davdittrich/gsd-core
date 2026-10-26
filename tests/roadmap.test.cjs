@@ -6601,7 +6601,8 @@ describe('#5221: roadmap update-plan-progress — active milestone scope and pha
   ]) {
     test(`parity: phase complete and update-plan-progress change the same active cells (${label})`, () => {
       seed(layout, { complete: true });
-      const viaUpdate = run() && fs.readFileSync(roadmapPath, 'utf-8');
+      run();
+      const viaUpdate = fs.readFileSync(roadmapPath, 'utf-8');
       seed(layout, { complete: true });
       const r = runGsdTools('phase complete 68', tmpDir);
       assert.ok(r.success, `phase complete failed: ${r.error}`);
