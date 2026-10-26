@@ -996,19 +996,20 @@ function cmdRoadmapAnalyze(cwd: string, raw: boolean): void {
   // A phase table that does not parse (e.g. a ragged row) makes the record unknown: null, so ship stops.
   let tableUnreadable = false;
   editProgressTableSlice(rawContent, (scoped) => {
-    const header = scoped.search(PHASE_STATUS_HEADER_RE);
-    // A phase table (Phase + Plans Complete, any case) whose Phase/Status headers are not recognised is unknown too.
-    if (header === -1) { tableUnreadable = PLANS_COMPLETE_HEADER_RE.test(scoped); return scoped; }
-    const table = parseMarkdownTable(scoped.slice(header));
-    if (!table.ok) { tableUnreadable = true; return scoped; }
-    const wantMilestone = table.value.columns.includes('Milestone')
+    // `scoped` starts at the phase table's header (editFromPhaseTable); its columns match in any case, as the header does.
+    const table = parseMarkdownTable(scoped);
+    const column = (name: string): string | undefined => table.ok ? table.value.columns.find((c) => c.toLowerCase() === name) : undefined;
+    const [phaseCol, statusCol, milestoneCol] = [column('phase'), column('status'), column('milestone')];
+    // A phase table without Phase and Status columns, or that does not parse, is unknown.
+    if (!table.ok || !phaseCol || !statusCol) { tableUnreadable = true; return scoped; }
+    const wantMilestone = milestoneCol
       ? normalizeMilestoneToken(roadmapParserModule.getMilestoneInfo(cwd).value?.version)
       : null;
     for (const r of table.value.rows) {
-      if (wantMilestone !== null && (wantMilestone === '' || normalizeMilestoneToken(r['Milestone']) !== wantMilestone)) continue;
-      const cell = (r['Phase'] ?? '').trim();
+      if (wantMilestone !== null && (wantMilestone === '' || normalizeMilestoneToken(r[milestoneCol!]) !== wantMilestone)) continue;
+      const cell = (r[phaseCol] ?? '').trim();
       const token = cell.match(/^[A-Za-z]?\d\S*?(?=\.?(?:\s|$))/)?.[0] ?? cell.match(new RegExp(`^(${CUSTOM_PHASE_ID_SRC})\\.(?=\\s|$)`))?.[1];
-      if (token && (/^[A-Za-z]?\d/.test(token) ? !isSentinelPhase(token) : isCustomId(token))) fold(token, parseRoadmapStatusCell(r['Status']) === WIRE_STATUS.COMPLETE);
+      if (token && (/^[A-Za-z]?\d/.test(token) ? !isSentinelPhase(token) : isCustomId(token))) fold(token, parseRoadmapStatusCell(r[statusCol]) === WIRE_STATUS.COMPLETE);
     }
     return scoped;
   }, cwd);
@@ -1151,18 +1152,16 @@ function checklistEntrySrc(convention: string | null | undefined, capturing = fa
   return `-\\s*\\[[ x]\\]\\s*(?:\\*\\*|(?=${label}${token}:))${phaseHeadingPrefixSrcFor(PHASE_HEADING_BASELINE.LABEL_ONLY, convention, capturing)}(${token})`;
 }
 
-// #5221: the phase table's header, one definition for the reader (roadmap_record) and the writers: `Phase` as the
-// FIRST cell (a versions table headed `Version | Phase | Status` is never the phase table) with a `Status` cell, or
-// `Plans Complete` in any case.
-const PHASE_STATUS_HEADER_RE = /^[ \t]*\|[ \t]*Phase[ \t]*(?=\|(?:.*\|)?[ \t]*Status[ \t]*\|).*$/m;
-const PLANS_COMPLETE_HEADER_RE = /^[ \t]*\|[ \t]*phase[ \t]*(?=\|(?:.*\|)?[ \t]*Plans Complete[ \t]*\|).*$/im;
+// #5221: the phase table's header, the ONE definition for the reader (roadmap_record), the progress writers and
+// `phase add|insert`'s row writer: `Phase` as the FIRST cell (a versions table headed `Version | Phase | Status`
+// is never the phase table) with a `Status` or `Plans Complete` cell, in any case.
+const PHASE_TABLE_HEADER_RE = /^[ \t]*\|[ \t]*Phase[ \t]*(?=\|(?:.*\|)?[ \t]*(?:Status|Plans Complete)[ \t]*\|).*$/im;
 
 function editFromPhaseTable(scoped: string, edit: (scoped: string) => string): string {
   // #5221: Status/Completed bind to the first table carrying that column; start at the phase table so an earlier
   // versions table is never the target. No phase table: refuse, leave `scoped` untouched.
-  const at = [scoped.search(PHASE_STATUS_HEADER_RE), scoped.search(PLANS_COMPLETE_HEADER_RE)]
-    .filter((i) => i >= 0).sort((x, y) => x - y)[0];
-  if (at === undefined) return scoped;
+  const at = scoped.search(PHASE_TABLE_HEADER_RE);
+  if (at === -1) return scoped;
   return scoped.slice(0, at) + edit(scoped.slice(at));
 }
 
@@ -2121,7 +2120,7 @@ export = {
   cmdRoadmapUpdatePlanProgress,
   cmdRoadmapAnnotateDependencies,
   buildPhaseHeadingRegex,
-  PLANS_COMPLETE_HEADER_RE,
+  PHASE_TABLE_HEADER_RE,
   editProgressSlice,
   editProgressTableSlice,
   foldPhaseId,

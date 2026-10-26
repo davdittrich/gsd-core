@@ -85,13 +85,13 @@ import { parsePlanningDoc, findField, readNode, setFieldValue, serialize } from 
 import { formatGsdSlash, resolveRuntime } from './runtime-slash.cjs';
 import { realClock } from './clock.cjs';
 import { transitionCore, isStatePastPhase } from './state-transition.cjs';
-import { updateTableCell, deleteTableRow, escapeCell, insertTableRow } from './markdown-table.cjs';
+import { updateTableCell, deleteTableRow, escapeCell, insertTableRow, parseMarkdownTable } from './markdown-table.cjs';
 // #5060: the Phase Status Module owns the ROADMAP Status-cell token vocabulary.
 import { PHASE_STATUS, WIRE_STATUS, parseRoadmapStatusCell, toRoadmapStatusCell, phaseStatus } from './phase-status.cjs';
 import { deleteSection, updateBullet, tokenizeHeadings } from './markdown-sectionizer.cjs';
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- roadmap.cjs is an export= CommonJS module
 import roadmapMod = require('./roadmap.cjs');
-const { buildPhaseHeadingRegex, editProgressSlice, editProgressTableSlice, foldPhaseId, insideOpenDetails, checklistEntrySrc, PLANS_COMPLETE_HEADER_RE } = roadmapMod;
+const { buildPhaseHeadingRegex, editProgressSlice, editProgressTableSlice, foldPhaseId, insideOpenDetails, checklistEntrySrc } = roadmapMod;
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- uat-predicate.cjs is an export= CommonJS module
 import uatPredicate = require('./uat-predicate.cjs');
 const { evaluateUatPassed } = uatPredicate;
@@ -1341,12 +1341,13 @@ function recordNewPhase(raw: string, cwd: string, id: string | number, descripti
   if (last) return { content: spliceAfter(raw, start + last.index + last[0].length, eol, entry), entry: kind };
   let wrote = false;
   const content = editProgressTableSlice(raw, (scoped: string) => {
-    if (!PLANS_COMPLETE_HEADER_RE.test(scoped)) return scoped;
-    // analyze reads only rows of the active milestone: with no milestone to name, a Milestone-column row would be unreadable.
+    // `scoped` starts at the phase table's header (editFromPhaseTable). analyze reads only rows of the active milestone:
+    // with no milestone to name, a row in a table with a Milestone column would be unreadable.
     const milestone = roadmapParserMod.getMilestoneInfo(cwd).value?.version;
-    if (/^\|.*\bMilestone\b/m.test(scoped) && !normalizeMilestoneToken(milestone)) return scoped;
-    const cell: Record<string, string | undefined> = { Phase: `${id}. ${description}`, Milestone: milestone, 'Plans Complete': '0/0', Status: 'Not started' };
-    const r = insertTableRow(scoped, (col) => cell[col]);
+    const header = parseMarkdownTable(scoped);
+    if (header.ok && header.value.columns.some((c) => c.toLowerCase() === 'milestone') && !normalizeMilestoneToken(milestone)) return scoped;
+    const cell: Record<string, string | undefined> = { phase: `${id}. ${description}`, milestone, 'plans complete': '0/0', status: 'Not started' };
+    const r = insertTableRow(scoped, (col) => cell[col.toLowerCase()]);
     if (!r.ok) return scoped;
     wrote = true;
     return r.value;
