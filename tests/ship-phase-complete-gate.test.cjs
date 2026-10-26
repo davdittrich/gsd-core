@@ -297,7 +297,7 @@ describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, ()
     test('Milestone-column table with no resolvable milestone: no unreadable row is written, roadmap_entry none', (t) => {
       const tmp = createTempProject();
       t.after(() => cleanup(tmp));
-      fs.rmSync(path.join(tmp, '.planning', 'STATE.md'), { force: true });
+      fs.writeFileSync(path.join(tmp, '.planning', 'STATE.md'), '# State\n');
       const roadmap = '# Roadmap\n\n### Phase 1: A\n\n**Goal**: g\n\n## Progress\n\n| Phase | Milestone | Plans Complete | Status | Completed |\n|---|---|---|---|---|\n';
       fs.writeFileSync(path.join(tmp, '.planning', 'ROADMAP.md'), roadmap);
       const c = runGsdTools(['phase', 'add', 'Second thing'], tmp);
