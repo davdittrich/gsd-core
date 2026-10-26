@@ -384,10 +384,10 @@ describe('capture-and-continue consumers: a verdict is read under set -e, the st
 
 describe('roadmap.update-plan-progress: only a missing_phase_details decline stops the plan\'s completion step (#5221)', { skip: SKIP }, () => {
   const marker = 'PROGRESS=$(gsd_run query roadmap.update-plan-progress';
-  for (const [name, file] of [
-    ['gsd-executor', 'agents/gsd-executor.md'],
-    ['execute-plan', EXECUTE_PLAN],
-    ['execute-phase wave tracking', EXECUTE_PHASE],
+  for (const [name, file, said] of [
+    ['gsd-executor', 'agents/gsd-executor.md', /STATE\.md already advanced/],
+    ['execute-plan', EXECUTE_PLAN, /STATE\.md already advanced/],
+    ['execute-phase wave tracking', EXECUTE_PHASE, /skip the tracking commit/],
   ]) {
     const run = (stdout, rc) => runBash(span(file, marker, marker), { stdout, rc }, {
       preamble: ['PHASE=3; PHASE_NUMBER=3; PLAN=01; plan_id=01'],
@@ -411,6 +411,12 @@ describe('roadmap.update-plan-progress: only a missing_phase_details decline sto
       assert.equal(r.status, 1);
       assert.match(r.stderr, /ERROR: .*3-01/);
       assert.ok(!/CONTINUED/.test(r.stdout));
+    });
+
+    test(`${name}: the missing_phase_details message is true at this site`, () => {
+      const r = run('{"updated":false,"reason":"missing_phase_details"}', 0);
+      assert.match(r.stderr, said);
+      if (file === EXECUTE_PHASE) assert.ok(!/STATE\.md already advanced|requirements/.test(r.stderr), r.stderr);
     });
 
     test(`${name}: a failed query (exit 69) stops too`, () => {
