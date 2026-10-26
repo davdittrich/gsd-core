@@ -6735,9 +6735,7 @@ describe('#5221: roadmap update-plan-progress — active milestone scope and pha
     seed([...ACTIVE.slice(0, 8), ...SHIPPED], { complete: true });
     assert.strictEqual(run().updated, true);
     assertShippedUntouched();
-    const a = runGsdTools('roadmap analyze', tmpDir);
-    assert.ok(a.success, a.error);
-    assert.strictEqual(JSON.parse(a.output).roadmap_record['68'], true);
+    assertActiveComplete();
   });
 
   test('a ## Progress inside a shipped <details> below a Progress-less active milestone is neither written nor read', () => {
@@ -6759,9 +6757,7 @@ describe('#5221: roadmap update-plan-progress — active milestone scope and pha
     ], { complete: true });
     run();
     assertLine(shippedRow, 'shipped Progress row untouched');
-    const a = runGsdTools('roadmap analyze', tmpDir);
-    assert.ok(a.success, a.error);
-    assert.strictEqual(JSON.parse(a.output).roadmap_record['68'], true, 'the shipped Planned row is not the record');
+    assertActiveComplete();
   });
 
   test('a ## Progress inside an upper-case <DETAILS> shipped block is neither written nor read', () => {
@@ -6781,9 +6777,7 @@ describe('#5221: roadmap update-plan-progress — active milestone scope and pha
     ], { complete: true });
     run();
     assertLine(shippedRow, 'shipped Progress row untouched');
-    const a = runGsdTools('roadmap analyze', tmpDir);
-    assert.ok(a.success, a.error);
-    assert.strictEqual(JSON.parse(a.output).roadmap_record['68'], true, 'the shipped Planned row is not the record');
+    assertActiveComplete();
   });
 
   test('versions table above the phase table: execute -> verify -> phase complete -> analyze reads the phase row Complete', () => {
