@@ -8,9 +8,6 @@
 # blanket docstring coverage bar — see issue #2932 for rationale.
 
 reviews:
-  # Fork only: no automatic CodeRabbit review of PRs opened against davdittrich/gsd-core.
-  auto_review:
-    enabled: false
   pre_merge_checks:
     # Disable docstring coverage check.
     #
