@@ -162,6 +162,13 @@ describe('roadmap analyze checkbox_conflict (#4757)', () => {
     assert.deepStrictEqual(record(roadmap('x', 'x'), { phase_id_convention: 'bracket' }), { 1: true });
   });
 
+  test('#5221: every checklist entry of a phase counts, whichever order the ticks come in', () => {
+    const roadmap = (a, b) => `# Roadmap\n\n## Milestone: v1.0\n\n- [${a}] **Phase 3: A**\n- [${b}] **Phase 3: A**\n`;
+    assert.deepStrictEqual(record(roadmap('x', ' ')), { 3: false });
+    assert.deepStrictEqual(record(roadmap(' ', 'x')), { 3: false });
+    assert.deepStrictEqual(record(roadmap('x', 'x')), { 3: true });
+  });
+
   test('#5221: phase_naming custom: a custom-id entry is in roadmap_record but never in missing_phase_details', () => {
     record('# Roadmap\n\n## Milestone: v1.0\n\n- [ ] **Phase AUTH: Auth**\n- [x] **Phase 1: Setup**\n\n### Phase AUTH: Auth\n\n### Phase 1: Setup\n',
       { phase_naming: 'custom' });

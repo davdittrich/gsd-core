@@ -821,18 +821,22 @@ function cmdRoadmapAnalyze(cwd: string, raw: boolean): void {
   // what makes the classification order-independent.
   const checklistOccurrences: Array<{ token: string; bracketId?: string; checked: boolean }> = [];
   const seenChecklistKeys = new Set<string>();
+  // #5221: roadmap_record folds EVERY entry (a duplicate token fails closed), so keep them all before the per-phase dedupe.
+  const everyChecklistEntry: Array<{ token: string; bracketId?: string; checked: boolean }> = [];
   let checklistMatch: RegExpExecArray | null;
   while ((checklistMatch = checklistPattern.exec(effectiveContent)) !== null) {
     const token = checklistMatch[1 + G];
     const bracketId = G ? checklistMatch[1] : undefined;
     const key = occurrenceKey(token, bracketId);
-    if (seenChecklistKeys.has(key)) continue;
-    seenChecklistKeys.add(key);
     // #4899: the checkbox state (`[x]` vs `[ ]`) isn't a capturing group in
     // `checklistPattern` — adding one would shift every downstream `1 + G` /
     // `G` index this loop and `missingDetails` below already depend on.
     // Reading it off the full match text instead is index-safe.
-    checklistOccurrences.push({ token, bracketId, checked: /\[x\]/i.test(checklistMatch[0]) });
+    const entry = { token, bracketId, checked: /\[x\]/i.test(checklistMatch[0]) };
+    everyChecklistEntry.push(entry);
+    if (seenChecklistKeys.has(key)) continue;
+    seenChecklistKeys.add(key);
+    checklistOccurrences.push(entry);
   }
 
   // #4899: `collectAnalyzePhases` only recognises `### Phase N:` headings and
@@ -987,7 +991,7 @@ function cmdRoadmapAnalyze(cwd: string, raw: boolean): void {
     const k = foldPhaseId(token);
     roadmapRecord[k] = (roadmapRecord[k] ?? true) && done;
   };
-  for (const o of checklistOccurrences) if (!isSentinelPhase(o.token, o.bracketId)) fold(o.token, o.checked);
+  for (const o of everyChecklistEntry) if (!isSentinelPhase(o.token, o.bracketId)) fold(o.token, o.checked);
   // phase_naming: custom ids (`- [ ] **Phase AUTH: …**`, as phase add writes them) are records too.
   const isCustomId = (t: string): boolean => customIds && !/^[A-Za-z]?\d/.test(t);
   if (customIds) {
