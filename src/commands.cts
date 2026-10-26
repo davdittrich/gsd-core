@@ -25,7 +25,7 @@ import configLoaderMod = require('./config-loader.cjs');
 const { loadConfig, isGitIgnored } = configLoaderMod;
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import coreUtilsMod = require('./core-utils.cjs');
-const { toPosixPath, generateSlugInternal, extractOneLinerFromBody } = coreUtilsMod;
+const { toPosixPath, generateSlugInternal, extractOneLinerFromBody, isStateJsonPublishPath } = coreUtilsMod;
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import phaseIdMod = require('./phase-id.cjs');
 const {
@@ -2256,6 +2256,18 @@ function cmdCommit(cwd: string, message: string | undefined, files: string[] | u
       // cmdCommitToSubrepo's exitCode-gated push.
       if (addResult.exitCode === 0) {
         stagedPaths.push(file);
+      } else if (
+        explicitFiles &&
+        // Any publish path (`.planning[/<project>][/workstreams/<ws>]/state.json`), whichever scope the env selects.
+        isStateJsonPublishPath(cwd, path.relative(cwd, fullPath)) &&
+        execGit(['check-ignore', '-q', '--', file], { cwd }).exitCode === 0
+      ) {
+        // Deliberately not env-scrubbed (GIT_LOCATION_ENV_UNSET): it must ask the repo the failed
+        // `git add` above used, which honours an inherited GIT_DIR.
+        // #5505: the derived state.json, untracked and ignored, cannot stage; like a missing
+        // file it is skipped and recorded, not a failure. Any other ignored path still fails
+        // (naming it is a user error), and check-ignore exits 0 only for UNTRACKED paths.
+        skippedFiles.push(file);
       } else {
         stagingFailures.push({
           file,

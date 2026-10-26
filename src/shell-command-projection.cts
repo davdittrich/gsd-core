@@ -662,10 +662,22 @@ function _spawnResult(result: { error?: NodeJS.ErrnoException | null; status?: n
   };
 }
 
-export function execGit(args: string[], opts: { cwd?: string; env?: Record<string, string>; timeout?: number } = {}): SpawnResultOutput {
+/**
+ * Drop inherited repository-location variables (e.g. inside a git hook) so `cwd` picks the repo.
+ * Contract: the four variables that change WHICH repository answers (`git rev-parse --local-env-vars`
+ * also lists object/config variables, which do not). Pass it to probes that ask "does the project
+ * at `cwd` ignore/track X" (config-loader's `isGitIgnored`, the planning snapshot, the state.json
+ * exclude); do NOT pass it to a probe that must see the repository a preceding `git add`/`commit`
+ * in the same call used (cmdCommit's `check-ignore`), which stays on the inherited environment.
+ * A setup whose only repo discovery is an exported `GIT_DIR` is therefore unsupported for the
+ * project-level probes.
+ */
+export const GIT_LOCATION_ENV_UNSET = { GIT_DIR: undefined, GIT_WORK_TREE: undefined, GIT_INDEX_FILE: undefined, GIT_COMMON_DIR: undefined };
+
+export function execGit(args: string[], opts: { cwd?: string; env?: Record<string, string | undefined>; timeout?: number } = {}): SpawnResultOutput {
   // Non-interactive defaults: a hung credential prompt or terminal-input
   // probe must surface as a timeout, not block the tool forever. Callers
-  // can override via opts.env.
+  // can override via opts.env; an `undefined` value drops the variable.
   //
   // #5048: readOnlyGitEnv() as well. execGit is the shared seam behind every
   // git call the tool makes, including the read-only ones (`status`,

@@ -58,6 +58,7 @@ type PlanningSnapshot = ReturnType<typeof planningSnapshotMod.buildPlanningSnaps
 import healthDiagnosticMod = require('../health-diagnostic-types.cjs');
 const { SEVERITY, REMEDY_ACTION, REMEDY_RISK, adviseRemedy } = healthDiagnosticMod;
 type Diagnostic = healthDiagnosticMod.Diagnostic;
+import { sanitizeLabel } from '../security.cjs';
 type Rule = healthDiagnosticMod.Rule;
 
 import { VALID_PROFILES, VALID_TIERS, VALID_PHASE_TYPES } from '../model-catalog.cjs';
@@ -310,6 +311,38 @@ function checkW029(snapshot: PlanningSnapshot): Diagnostic[] {
   ];
 }
 
+// ─── W031 — derived state.json still tracked by git (#5505 Case B) ──────────
+//
+// publishStateContract rewrites state.json at every boundary command and lists
+// it in .git/info/exclude, but an exclude cannot hide a tracked file: a copy
+// committed earlier is left modified, so /gsd-ship's clean-tree preflight
+// refuses. ADVISE-only, like W029: GSD never untracks files for you. The fix
+// uses --ignore-unmatch so rerunning it is a no-op.
+
+function checkW031(snapshot: PlanningSnapshot): Diagnostic[] {
+  const paths = snapshot.stateJsonTracked;
+  if (!paths || paths.length === 0) return [];
+  // Tracked names are repository content and health output is read by agents: escape control
+  // characters in the message, and quote the pasted command (POSIX single quotes; `$'..'` for a
+  // name with control characters) so it pastes as-is.
+  const quote = (p: string): string => {
+    if (/^[\w./-]+$/.test(p)) return p;
+    if (/\p{Cc}/u.test(p)) return `$'${sanitizeLabel(p.replace(/[\\']/g, '\\$&'))}'`;
+    return `'${p.replace(/'/g, `'\\''`)}'`;
+  };
+  const args = paths.map(quote).join(' ');
+  return [
+    {
+      code: 'W031',
+      severity: SEVERITY.WARNING,
+      message: `${paths.map(sanitizeLabel).join(', ')} is tracked by git, but it is a derived cache rewritten at every boundary command — the tracked copy stays modified and /gsd-ship refuses the dirty tree`,
+      remedy: adviseRemedy(
+        `Run \`git rm --cached --ignore-unmatch -- ${args}\` once and commit the removal; the file stays on disk and GSD's .git/info/exclude entry keeps it ignored from then on (quoting is POSIX-shell; in PowerShell or cmd quote paths yourself)`,
+      ),
+    },
+  ];
+}
+
 // ─── Exports ────────────────────────────────────────────────────────────────
 
 const RULES: Rule[] = [
@@ -372,6 +405,13 @@ const RULES: Rule[] = [
     description: '.planning/ matches a gitignore rule but is still tracked by git (gitignore has no effect on already-tracked files)',
     repairable: false,
     check: checkW029,
+  },
+  {
+    code: 'W031',
+    severity: SEVERITY.WARNING,
+    description: 'Derived .planning/state.json is tracked by git, so each boundary command leaves it modified',
+    repairable: false,
+    check: checkW031,
   },
 ];
 

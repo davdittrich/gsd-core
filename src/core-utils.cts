@@ -580,8 +580,24 @@ function planRowPattern(planId: string, opts: { anchored?: boolean; anyState?: b
   );
 }
 
+/**
+ * True when `rel` (a path relative to `cwd`) is a file `publishStateContract` writes:
+ * `.planning[/<project>][/workstreams/<ws>]/state.json`. The project segment is free text, so
+ * `.planning/<name>/…` counts only when `<name>` is a project directory, i.e. holds its own
+ * planning files; `.planning/intel/state.json` is not a publish path.
+ */
+function isStateJsonPublishPath(cwd: string, rel: string): boolean {
+  const m = /^\.planning\/(?:([^/]+)\/)?(?:workstreams\/[^/]+\/)?state\.json$/.exec(toPosixPath(rel));
+  if (!m) return false;
+  const project = m[1];
+  if (project === undefined) return true;
+  return ['STATE.md', 'ROADMAP.md', 'PROJECT.md', 'config.json', 'phases'].some((x) =>
+    fs.existsSync(path.join(cwd, '.planning', project, x)));
+}
+
 export = {
   toPosixPath,
+  isStateJsonPublishPath,
   normalizeLineEndings,
   detectSubRepos,
   extractOneLinerFromBody,

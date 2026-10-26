@@ -88,6 +88,16 @@ describe('execGit', () => {
     assert.strictEqual(result.exitCode, 0);
   });
 
+  test('an undefined env value drops the inherited variable', (t) => {
+    const prior = process.env.GIT_DIR;
+    t.after(() => { if (prior === undefined) delete process.env.GIT_DIR; else process.env.GIT_DIR = prior; });
+    process.env.GIT_DIR = path.join(tmpDir, 'no-such-git-dir');
+    assert.notStrictEqual(execGit(['rev-parse', '--git-dir'], { cwd: tmpDir }).exitCode, 0);
+    const result = execGit(['rev-parse', '--git-dir'], { cwd: tmpDir, env: { GIT_DIR: undefined } });
+    assert.strictEqual(result.exitCode, 0);
+    assert.strictEqual(result.stdout, '.git');
+  });
+
   // #5048: execGit is the shared seam behind every git call the tool makes,
   // including the read-only ones. Left at git's default, a read refreshes the
   // index and takes an optional .git/index.lock to write the refreshed copy

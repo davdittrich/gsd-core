@@ -1872,6 +1872,21 @@ describe('planningTracked field (#3586, matrix rows A1-A12)', () => {
     assert.deepStrictEqual(snap.planningTracked.value, { tracked: true, ignored: false });
   });
 
+  test('an exported GIT_DIR naming another repo decides neither tracked nor ignored (#5505)', (t) => {
+    const cwd = createTempGitProject('gsd-5505-env-');
+    const other = createTempGitProject('gsd-5505-env-other-');
+    t.after(() => { cleanup(cwd); cleanup(other); });
+    writeGitignore(other, '.planning/\n');
+    commitAll(other, 'other tracks .planning');
+    gitOrThrow(['rm', '-rq', '--', '.planning'], { cwd });
+    gitOrThrow(['commit', '-m', 'cwd tracks nothing'], { cwd });
+    const prior = process.env.GIT_DIR;
+    t.after(() => { if (prior === undefined) delete process.env.GIT_DIR; else process.env.GIT_DIR = prior; });
+    process.env.GIT_DIR = path.join(other, '.git');
+    const snap = buildPlanningSnapshot(cwd);
+    assert.deepStrictEqual(snap.planningTracked.value, { tracked: false, ignored: false });
+  });
+
   // ─── Locale-independence regression (#3586) ────────────────────────────────
   // The original defect: `not_a_git_repo` vs `git_list_failed` was
   // distinguished by regex-matching git's (localized) stderr prose. Under a

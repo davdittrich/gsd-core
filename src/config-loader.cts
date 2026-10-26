@@ -23,7 +23,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { execGit, platformWriteSync, platformReadSync } from './shell-command-projection.cjs';
+import { execGit, GIT_LOCATION_ENV_UNSET, platformWriteSync, platformReadSync } from './shell-command-projection.cjs';
 // #4717: runtime-identity fill — env rung + per-install marker rung.
 import { readInstallRuntimeMarker } from './runtime-slash.cjs';
 import { resolveGsdHome } from './runtime-homes.cjs';
@@ -244,7 +244,7 @@ function isGitIgnored(cwd: string, targetPath: string): boolean {
   const key = cwd + '::' + normalized;
   if (_gitIgnoredCache.has(key)) return _gitIgnoredCache.get(key)!;
   // --no-index checks .gitignore rules regardless of whether the file is tracked.
-  const result = execGit(['check-ignore', '-q', '--no-index', '--', normalized], { cwd });
+  const result = execGit(['check-ignore', '-q', '--no-index', '--', normalized], { cwd, env: GIT_LOCATION_ENV_UNSET });
   const ignored = result.exitCode === 0;
   _gitIgnoredCache.set(key, ignored);
   return ignored;
@@ -666,6 +666,57 @@ function _warnUnusableConfig(fault: ConfigFault): void {
 }
 
 /**
+ * Legacy-key migration found sub-repos on disk (#3760): record them and turn commit_docs off.
+ * `requiresFilesystem` only reaches here when `planning` is absent or an object
+ * (configuration.cts refuses otherwise and reports it via `skipped`), so the narrowing
+ * chooses between merge and create and never discards the user's config.
+ */
+function _applyDetectedSubRepos(cfg: ParsedConfig, norms: NormalizationEntry[], detect: () => string[]): void {
+  for (const norm of norms) {
+    if (norm.requiresFilesystem && !cfg.planning?.['sub_repos']) {
+      const detected = detect();
+      if (detected.length > 0) {
+        if (!isConfigSection(cfg.planning)) cfg.planning = {};
+        cfg.planning['sub_repos'] = detected;
+        cfg.planning['commit_docs'] = false;
+      }
+    }
+  }
+}
+
+/** The one commit_docs resolution: explicit key (flat, then planning.*), else false when .planning/ is git-ignored, else the default. */
+function _resolveCommitDocs(parsed: Record<string, unknown>, planningIgnored: () => boolean): unknown {
+  const explicit = _getConfigValue(parsed, 'commit_docs', { section: 'planning', field: 'commit_docs' });
+  if (explicit !== undefined) return explicit;
+  if (planningIgnored()) return false;
+  return CONFIG_DEFAULTS.commit_docs;
+}
+
+/**
+ * loadConfig's commit_docs without its side effects (REQ-SC-04: the state-contract publisher
+ * may neither migrate config files nor write stderr). Mirrors the read path: same files and
+ * precedence (root config only under an active workstream, deep-merged), same legacy-key and
+ * sub-repo handling, same `_resolveCommitDocs`.
+ */
+function resolveCommitDocsReadOnly(cwd: string): unknown {
+  const ws = process.env['GSD_WORKSTREAM']?.trim() || null;
+  const detect = () => detectSubRepos(cwd);
+  const read = (file: string): ParsedConfig | null => {
+    const r = _readConfigFile(file);
+    if (r.kind !== 'ok') return null;
+    const { parsed, normalizations } = normalizeLegacyKeys(r.data);
+    _applyDetectedSubRepos(parsed, normalizations as unknown as NormalizationEntry[], detect);
+    return parsed;
+  };
+  const own = read(path.join(planningDir(cwd, ws), 'config.json'));
+  const root = ws ? read(path.join(planningRoot(cwd), 'config.json')) : null;
+  const merged = own && root ? _deepMergeConfig(root, own) as ParsedConfig : own ?? (ws ? root : null);
+  // No usable config file: loadConfig returns the builtin defaults without the ignore check.
+  if (!merged) return CONFIG_DEFAULTS.commit_docs;
+  return _resolveCommitDocs(merged, () => isGitIgnored(cwd, '.planning/'));
+}
+
+/**
  * loadConfigResolved — provenance-aware config loading (#1415, ADR-1411 P2).
  *
  * Identical to loadConfig in every observable way except it returns
@@ -757,25 +808,7 @@ function loadConfigResolvedInternal(cwd: string, options: Record<string, unknown
         _warnUnusableInput({ reason: _UNUSABLE_REASON.CONFIG_SECTION_NOT_OBJECT, source: rootConfigPath });
       }
       if (rootNorms.length > 0) {
-        for (const norm of rootNorms as unknown as NormalizationEntry[]) {
-          if (norm.requiresFilesystem && !(rootNormalized as ParsedConfig).planning?.['sub_repos']) {
-            const detected = getDetectedSubRepos();
-            if (detected.length > 0) {
-              // #3760: `if (!planning) planning = {}` treated a non-empty STRING as an
-              // already-present section, and the next line then assigned onto a
-              // primitive — a strict-mode TypeError the enclosing catch swallowed,
-              // discarding the user's whole config. `requiresFilesystem` now only
-              // reaches here when the section is absent or an object (configuration.cts
-              // block 3 refuses otherwise and reports it via `skipped`), so this
-              // narrowing chooses between merge and create and never discards.
-              if (!isConfigSection((rootNormalized as ParsedConfig).planning)) {
-                (rootNormalized as ParsedConfig).planning = {};
-              }
-              (rootNormalized as ParsedConfig).planning!['sub_repos'] = detected;
-              (rootNormalized as ParsedConfig).planning!['commit_docs'] = false;
-            }
-          }
-        }
+        _applyDetectedSubRepos(rootNormalized, rootNorms as unknown as NormalizationEntry[], getDetectedSubRepos);
         rootParsed = rootNormalized;
         if (persist) {
           try { platformWriteSync(rootConfigPath, JSON.stringify(rootParsed, null, 2)); } catch { /* ignore */ }
@@ -814,17 +847,7 @@ function loadConfigResolvedInternal(cwd: string, options: Record<string, unknown
         Object.keys(fileData).forEach(k => delete (fileData as Record<string, unknown>)[k]);
         Object.assign(fileData, normalized);
         configDirty = true;
-        for (const norm of normalizations as unknown as NormalizationEntry[]) {
-          if (norm.requiresFilesystem && !fileData.planning?.['sub_repos']) {
-            const detected = getDetectedSubRepos();
-            if (detected.length > 0) {
-              // #3760 — see the identical guard on the root-config path above.
-              if (!isConfigSection(fileData.planning)) fileData.planning = {};
-              fileData.planning['sub_repos'] = detected;
-              fileData.planning['commit_docs'] = false;
-            }
-          }
-        }
+        _applyDetectedSubRepos(fileData, normalizations as unknown as NormalizationEntry[], getDetectedSubRepos);
       }
     }
 
@@ -919,12 +942,7 @@ function loadConfigResolvedInternal(cwd: string, options: Record<string, unknown
 
     const _baseConfig: Record<string, unknown> = {
       model_profile: get('model_profile') ?? defaults.model_profile,
-      commit_docs: (() => {
-        const explicit = get('commit_docs', { section: 'planning', field: 'commit_docs' });
-        if (explicit !== undefined) return explicit;
-        if (isGitIgnored(cwd, '.planning/')) return false;
-        return defaults.commit_docs;
-      })(),
+      commit_docs: _resolveCommitDocs(parsed, () => isGitIgnored(cwd, '.planning/')),
       search_gitignored: get('search_gitignored', { section: 'planning', field: 'search_gitignored' }) ?? defaults.search_gitignored,
       branching_strategy: get('branching_strategy', { section: 'git', field: 'branching_strategy' }) ?? defaults.branching_strategy,
       base_branch: get('base_branch', { section: 'git', field: 'base_branch' }),
@@ -1220,6 +1238,7 @@ export = {
   _getConfigDefault,
   _getNestedConfigDefault,
   _getConfigValue,
+  resolveCommitDocsReadOnly,
   _getConfigNested,
   resolvePlannerStallDetectionEnabled,
   _deepMergeConfig,
