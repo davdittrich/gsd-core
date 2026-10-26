@@ -1307,27 +1307,34 @@ function activeBracketMilestone(cwd: string, convention: string | null, content:
   const m = typeof version === 'string' ? version.match(/^v?(\d+)/i) : null;
   const milestone = m ? parseInt(m[1], 10) : null;
   if (milestone === null) return null;
-  let tagged = false;
+  const tagged = taggedBracketMilestones(convention, content);
+  if (tagged.has(milestone)) return milestone;
+  // STATE.md naming the milestone is first-hand, but only while no id contradicts it: ids of
+  // another MM mean STATE's `vN` is not the number these directories carry (`v1.0` over `[GSD.02]`).
+  return tagged.size === 0 && stateMilestone(cwd) === milestone ? milestone : null;
+}
+
+/** The milestone numbers carried by the bracket ids declared in `content`. */
+function taggedBracketMilestones(convention: string, content: string): Set<number> {
+  const found = new Set<number>();
   for (const { regex, idGroup } of buildPhaseDeclarationScans(convention)) {
     if (idGroup === null) continue;
     let hit: RegExpExecArray | null;
     while ((hit = regex.exec(content)) !== null) {
-      if (!hit[idGroup]) continue;
-      if (bracketIdMilestone(hit[idGroup].toUpperCase()) === milestone) return milestone;
-      tagged = true;
+      if (hit[idGroup]) found.add(bracketIdMilestone(hit[idGroup].toUpperCase()));
     }
   }
-  // STATE.md naming the milestone is first-hand, but only while no id contradicts it: ids of
-  // another MM mean STATE's `vN` is not the number these directories carry (`v1.0` over `[GSD.02]`).
-  if (!tagged) {
-    try {
-      const state = fs.readFileSync(path.join(planningDir(cwd), 'STATE.md'), 'utf-8');
-      const fmMilestone = frontmatterMod.extractFrontmatter(state).milestone;
-      const declared = typeof fmMilestone === 'string' ? fmMilestone.match(/^v?(\d+)/i) : null;
-      if (declared && parseInt(declared[1], 10) === milestone) return milestone;
-    } catch { /* no STATE.md: nothing first-hand */ }
-  }
-  return null;
+  return found;
+}
+
+/** The milestone integer STATE.md's frontmatter names, or null (no STATE.md, no key, no number). */
+function stateMilestone(cwd: string): number | null {
+  try {
+    const state = fs.readFileSync(path.join(planningDir(cwd), 'STATE.md'), 'utf-8');
+    const fm = frontmatterMod.extractFrontmatter(state).milestone;
+    const declared = typeof fm === 'string' ? fm.match(/^v?(\d+)/i) : null;
+    return declared ? parseInt(declared[1], 10) : null;
+  } catch { return null; }
 }
 
 /** Add the phase number of every phase directory under `phasesDir` to `used` (a missing dir adds nothing). */
