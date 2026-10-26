@@ -1003,7 +1003,7 @@ function cmdRoadmapAnalyze(cwd: string, raw: boolean): void {
   // A phase table that does not parse (e.g. a ragged row) makes the record unknown: null, so ship stops.
   let tableUnreadable = false;
   editProgressTableSlice(rawContent, (scoped) => {
-    const header = scoped.search(/^[ \t]*(?=.*\|[ \t]*Phase[ \t]*\|)(?=.*\|[ \t]*Status[ \t]*\|)\|.*$/m);
+    const header = scoped.search(PHASE_STATUS_HEADER_RE);
     // A phase table (Phase + Plans Complete, any case) whose Phase/Status headers are not recognised is unknown too.
     if (header === -1) { tableUnreadable = /^[ \t]*(?=\|.*\|[ \t]*Plans Complete[ \t]*\|)\|[ \t]*phase[ \t]*\|/im.test(scoped); return scoped; }
     const table = parseMarkdownTable(scoped.slice(header));
@@ -1157,12 +1157,15 @@ function checklistEntrySrc(convention: string | null | undefined, capturing = fa
   return `-\\s*\\[[ x]\\]\\s*\\*\\*${phaseHeadingPrefixSrcFor(PHASE_HEADING_BASELINE.LABEL_ONLY, convention, capturing)}(${token})`;
 }
 
+// #5221: a phase table's `Phase` + `Status` header: the one definition roadmap_record and the writers share.
+const PHASE_STATUS_HEADER_RE = /^[ \t]*(?=.*\|[ \t]*Phase[ \t]*\|)(?=.*\|[ \t]*Status[ \t]*\|)\|.*$/m;
+
 function editFromPhaseTable(scoped: string, edit: (scoped: string) => string): string {
   // #5221: Status/Completed bind to the first table carrying that column; start at the phase table
   // (a `Phase`+`Status` header, as analyze reads it, or a `Phase`+`Plans Complete` one in any case) so an
   // earlier versions table is never the target. No phase table: refuse, leave `scoped` untouched.
   const at = [
-    scoped.search(/^[ \t]*(?=.*\|[ \t]*Phase[ \t]*\|)(?=.*\|[ \t]*Status[ \t]*\|)\|.*$/m),
+    scoped.search(PHASE_STATUS_HEADER_RE),
     scoped.search(/^\|.*\bPhase\b.*\bPlans Complete\b.*$/im),
   ].filter((i) => i >= 0).sort((x, y) => x - y)[0];
   if (at === undefined) return scoped;
@@ -2123,7 +2126,6 @@ export = {
   cmdRoadmapUpdatePlanProgress,
   cmdRoadmapAnnotateDependencies,
   buildPhaseHeadingRegex,
-  editFromPhaseTable,
   editProgressSlice,
   editProgressTableSlice,
   foldPhaseId,
