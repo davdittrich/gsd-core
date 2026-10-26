@@ -794,7 +794,7 @@ gsd_run query state.record-session \
 
 ```bash
 # Update ROADMAP.md progress for this phase (plan counts, status)
-PROGRESS=$(gsd_run query roadmap.update-plan-progress "${PHASE_NUMBER}") && REASON=$(jq -er '.reason//""' <<<"$PROGRESS") && [ "$REASON" != missing_phase_details ] || { echo "ERROR: ROADMAP update failed for ${PHASE_NUMBER}-${PLAN} (no entry, query failed, or jq missing); STATE.md already advanced. STOP: skip requirements and commit; fix ROADMAP, rerun this query." >&2; exit 1; }
+PROGRESS=$(gsd_run query roadmap.update-plan-progress "${PHASE_NUMBER}") && REASON=$(node -e 'const v=JSON.parse(process.argv[1]).reason;process.stdout.write(v==null?"":String(v))' "$PROGRESS") && [ "$REASON" != missing_phase_details ] || { echo "ERROR: ROADMAP update failed for ${PHASE_NUMBER}-${PLAN} (no entry, query failed, or unparseable output); STATE.md already advanced. STOP: skip requirements and commit; fix ROADMAP, rerun this query." >&2; exit 1; }
 
 # Mark completed requirements from PLAN.md frontmatter
 # Extract the `requirements` array from the plan's frontmatter, then mark each complete

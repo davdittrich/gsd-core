@@ -11,7 +11,7 @@ const { skipUnless } = require('./helpers/bash-probe.cjs');
 const { span, runBash } = require('./helpers/doc-bash-span.cjs');
 const { runGsdTools, createTempProject, cleanup } = require('./helpers.cjs');
 
-const SKIP = skipUnless('bash', 'jq', 'node');
+const SKIP = skipUnless('bash', 'node');
 const SHIP = 'gsd-core/workflows/ship.md';
 const analyze = (number, complete) => JSON.stringify({ phases: [{ number }], roadmap_record: { [number]: complete } });
 
@@ -28,6 +28,12 @@ describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, ()
     const r = run(analyze('3', true), 0);
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /CONTINUED/);
+  });
+
+  test('needs no jq (a jq that always fails changes neither verdict)', () => {
+    const noJq = (stdout) => runBash(lines(), { stdout, rc: 0 }, { preamble: ['PHASE_NUMBER=3', 'jq() { return 127; }', 'cd "$(mktemp -d)"; mkdir .planning; : > .planning/ROADMAP.md'], probe: 'echo CONTINUED' });
+    assert.match(noJq(analyze('3', true)).stdout, /CONTINUED/);
+    blocked(noJq(analyze('3', false)), 'PHASE_NOT_COMPLETE');
   });
 
   test('incomplete phase blocks with PHASE_NOT_COMPLETE', () => {
@@ -365,8 +371,8 @@ describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, ()
       }
     });
 
-    // roadmap_record keys are foldPhaseId(token); ship.md's jq `def n` must fold PHASE_NUMBER the same way.
-    test('foldPhaseId and ship.md def n agree: a record keyed by foldPhaseId(t) ships PHASE_NUMBER=t', () => {
+    // roadmap_record keys are foldPhaseId(token); ship.md's `n` must fold PHASE_NUMBER the same way.
+    test('foldPhaseId and ship.md `n` agree: a record keyed by foldPhaseId(t) ships PHASE_NUMBER=t', () => {
       const { foldPhaseId } = require('../gsd-core/bin/lib/roadmap.cjs');
       for (const t of ['01', '3.02', '010.001', '0', '00.0', 'AUTH', 'A01']) {
         const r = run(JSON.stringify({ roadmap_record: { [foldPhaseId(t)]: true } }), 0, t);

@@ -454,7 +454,7 @@
 - REQ-SHIP-06: System MUST support append-only project PR body sections configured with `ship.pr_body_sections`
 - REQ-SHIP-07: System MUST refuse to ship a phase whose ROADMAP.md record does not read complete (`PHASE_NOT_COMPLETE`, `PHASE_NOT_RECORDED`, `ROADMAP_TABLE_UNREADABLE`), before any PR is created (#5221)
 
-**Prerequisites:** Phase verified, phase recorded complete in ROADMAP.md, `gh` CLI installed and authenticated, `jq` installed (the ROADMAP record preflight fails closed without it), work on feature branch
+**Prerequisites:** Phase verified, phase recorded complete in ROADMAP.md, `gh` CLI installed and authenticated, work on feature branch
 
 **Produces:** GitHub PR with rich body, optional configured PRD-style sections, STATE.md updated
 

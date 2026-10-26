@@ -394,7 +394,7 @@ Create PR from completed phase work with auto-generated body.
 | `N` | No | Phase number or milestone version (e.g., `4` or `v1.0`) |
 | `--draft` | No | Create as draft PR |
 
-**Prerequisites:** Phase verified (`/gsd-verify-work` passed), `gh` CLI installed and authenticated, `jq` installed, phase recorded complete in ROADMAP.md
+**Prerequisites:** Phase verified (`/gsd-verify-work` passed), `gh` CLI installed and authenticated, phase recorded complete in ROADMAP.md
 **Produces:** GitHub PR with rich body from planning artifacts, STATE.md updated
 
 ```bash
@@ -410,7 +410,7 @@ Create PR from completed phase work with auto-generated body.
 - Key decisions
 - Optional configured PRD-style sections from `ship.pr_body_sections`
 
-**ROADMAP record preflight** (#5221): after the verification check passes and before the gates, `/gsd-ship` runs `roadmap analyze` and reads its `roadmap_record` field with `jq`. The phase ships only when every ROADMAP record of it (checklist entry, progress-table Status) reads complete. Phase numbers match with leading zeros stripped per segment (`03.02` matches `3.2`). Every refusal prints to stderr and stops the workflow with exit 1, before any PR is created:
+**ROADMAP record preflight** (#5221): after the verification check passes and before the gates, `/gsd-ship` runs `roadmap analyze` and reads its `roadmap_record` field. The phase ships only when every ROADMAP record of it (checklist entry, progress-table Status) reads complete. Phase numbers match with leading zeros stripped per segment (`03.02` matches `3.2`). Every refusal prints to stderr and stops the workflow with exit 1, before any PR is created:
 
 | Condition | Message (stderr) | Fix |
 |-----------|------------------|-----|
@@ -419,7 +419,6 @@ Create PR from completed phase work with auto-generated body.
 | Progress table does not parse (e.g. a row with the wrong cell count) | `ROADMAP_TABLE_UNREADABLE: the ROADMAP.md progress table does not parse ...` | Fix the table, re-run. |
 | `roadmap analyze` exits non-zero | `roadmap.analyze failed — see the error above` | Fix the reported error. |
 | Analyze output has no `roadmap_record` field or is not JSON | `roadmap.analyze output unparseable` | Update gsd-core so analyze emits `roadmap_record`. |
-| `jq` is not installed | `jq: command not found`, then `roadmap.analyze output unparseable` | Install `jq`. The check fails closed: without `jq` no phase ships. |
 
 When `.planning/ROADMAP.md` does not exist, the check is skipped.
 

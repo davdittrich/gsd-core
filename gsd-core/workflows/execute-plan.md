@@ -504,7 +504,7 @@ IS_WORKTREE=$([ -f .git ] && echo "true" || echo "false")
 
 if [ "$IS_WORKTREE" != "true" ]; then
   # use_worktrees: false → this handler is the sole post-plan sync point (#2661)
-  PROGRESS=$(gsd_run query roadmap.update-plan-progress "${PHASE}") && REASON=$(jq -er '.reason//""' <<<"$PROGRESS") && [ "$REASON" != missing_phase_details ] || { echo "ERROR: ROADMAP update failed for ${PHASE}-${PLAN} (no entry, query failed, or jq missing). STOP: skip this plan's completion steps." >&2; exit 1; }
+  PROGRESS=$(gsd_run query roadmap.update-plan-progress "${PHASE}") && REASON=$(node -e 'const v=JSON.parse(process.argv[1]).reason;process.stdout.write(v==null?"":String(v))' "$PROGRESS") && [ "$REASON" != missing_phase_details ] || { echo "ERROR: ROADMAP update failed for ${PHASE}-${PLAN} (no entry, query failed, or unparseable output). STOP: skip this plan's completion steps." >&2; exit 1; }
 fi
 ```
 Counts PLAN vs SUMMARY files on disk. Updates progress table row with correct count and status (`In Progress` or `Complete` with date).

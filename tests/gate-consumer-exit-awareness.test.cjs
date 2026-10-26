@@ -292,26 +292,9 @@ describe('jq-subset-stub: jq semantics for the filters the extracted blocks use'
     });
   }
 
-  // #5221: the update-plan-progress completion step reads `.reason//""` under -er (measured from real jq 1.8).
-  const REASON = '.reason//""';
-  for (const [doc, printed] of [
-    ['{"updated":true}', ''],
-    ['{"updated":false,"reason":"missing_phase_details"}', 'missing_phase_details'],
-    ['{"reason":null}', ''],
-    ['{"reason":false}', ''],
-    ['{"reason":0}', '0'],
-  ]) {
-    test(`${doc}: -er REASON prints ${JSON.stringify(printed)} and exits 0`, () => {
-      const r = jq(['-er', REASON], doc);
-      assert.equal(r.status, 0);
-      assert.equal(r.stdout, `${printed}\n`);
-    });
-  }
-
   // KNOWN DIVERGENCES from real jq, pinned so they stay deliberate (see the stub's header): none of them is
   // reachable from the gate handler's JSON, and a block that starts to depend on one needs the real jq.
   test('known divergences: empty stdin, a non-object .data and a top-level array', () => {
-    assert.equal(jq(['-er', REASON], '[]').status, 0, '[]: jq errors (exit 5); the stub reads the missing .reason as null');
     assert.equal(jq(['-e', PASSED], '').status, 2, 'jq exits 4 (-e over no output); the stub treats it as invalid JSON');
     for (const doc of ['{"data":"x"}', '{"data":[1]}', '[]']) {
       assert.equal(jq(['-e', PASSED], doc).status, 1, `${doc}: jq errors (exit 5); the stub reads the missing field as null`);
@@ -400,6 +383,15 @@ describe('roadmap.update-plan-progress: only a missing_phase_details decline sto
       assert.match(r.stdout, /CONTINUED/);
     });
 
+    test(`${name}: needs no jq (a jq that always fails changes neither verdict)`, () => {
+      const noJq = (stdout) => runBash(span(file, marker, marker), { stdout, rc: 0 }, {
+        preamble: ['PHASE=3; PHASE_NUMBER=3; PLAN=01; plan_id=01', 'jq() { return 127; }'],
+        probe: 'echo CONTINUED',
+      });
+      assert.match(noJq('{"updated":true}').stdout, /CONTINUED/);
+      assert.equal(noJq('{"updated":false,"reason":"missing_phase_details"}').status, 1);
+    });
+
     test(`${name}: an idempotent no-op (updated false, "no changes were needed") continues`, () => {
       const r = run('{"updated":false,"reason":"no changes were needed"}', 0);
       assert.equal(r.status, 0, r.stderr);
@@ -410,7 +402,6 @@ describe('roadmap.update-plan-progress: only a missing_phase_details decline sto
       const r = run('{"updated":false,"reason":"missing_phase_details"}', 0);
       assert.equal(r.status, 1);
       assert.match(r.stderr, /ERROR: .*3-01/);
-      assert.match(r.stderr, /no entry, query failed, or jq missing/, 'every cause that takes this branch is named');
       assert.ok(!/CONTINUED/.test(r.stdout));
     });
 
@@ -421,7 +412,7 @@ describe('roadmap.update-plan-progress: only a missing_phase_details decline sto
       assert.ok(!/CONTINUED/.test(r.stdout));
     });
 
-    test(`${name}: output jq cannot parse (garbage or empty, exit 0) stops`, () => {
+    test(`${name}: output that is not JSON (garbage or empty, exit 0) stops`, () => {
       for (const out of ['not json', '']) {
         const r = run(out, 0);
         assert.equal(r.status, 1, `stdout=${JSON.stringify(out)}`);
