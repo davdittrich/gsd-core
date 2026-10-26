@@ -3323,7 +3323,7 @@ describe('shipped prompts scope raw git commit with a pathspec (#5211)', () => {
         else if (e.name.endsWith('.md')) out.push(path.relative(root, full).split(path.sep).join('/'));
       }
     };
-    for (const d of ['agents', 'gsd-core/workflows', 'gsd-core/references']) walk(path.join(root, d));
+    for (const d of ['agents', 'gsd-core/workflows', 'gsd-core/references', 'pi/package-skills', 'pi/package-agents']) walk(path.join(root, d));
     return out.sort();
   };
   // commentPortion restarts quote state per line, so a `#` after a newline
