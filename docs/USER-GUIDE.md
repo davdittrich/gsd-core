@@ -613,7 +613,7 @@ claude --dangerously-skip-permissions
 /gsd-plan-phase 1           # Research + plan + verify
 /gsd-execute-phase 1        # Parallel execution
 /gsd-verify-work 1          # Manual UAT
-/gsd-ship 1                 # Create PR from verified work
+/gsd-ship 1                 # Create PR from verified work (needs `jq`; refuses a phase ROADMAP.md does not record complete)
 /gsd-ui-review 1            # Visual audit (frontend phases)
 /clear
 /gsd-progress --next                   # Auto-detect and run next step
