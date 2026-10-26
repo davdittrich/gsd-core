@@ -147,20 +147,28 @@ First build the executor prompt. It is the **same prompt text the harness path's
 Assign the composed prompt to a shell variable so it can be passed as one argument:
 
 ```bash
-# Compose the executor prompt for THIS plan. Single-quoted multi-line
-# assignment (NOT a heredoc): these blocks are indented inside the workflow,
-# and a heredoc terminator must sit at column 0 — `<<-` strips only tabs, not
-# the leading spaces, so a heredoc here would never terminate. Single quotes
-# also stop the shell expanding anything in the prompt body — the prompt MUST
-# contain no single-quote character.
+# Compose the executor prompt for THIS plan. QUOTED-heredoc assignment (#5531):
+# the delimiter is quoted, so the shell expands and parses nothing in the body.
+# Every substituted or inlined text (the ${AGENT_SKILLS} value, the role
+# definition, the execute-plan/summary/checkpoints files) therefore reaches the
+# prompt byte-for-byte whatever quote characters it holds — apostrophes in a
+# persona must NEVER be escaped or stripped. Keep the opening line and the
+# terminator at column 0, exactly as written. The delimiter carries a per-run
+# random {nonce}, so no embedded text can contain a line equal to it and end
+# the heredoc early (which would run the rest of the embed as shell).
 #
 # ORCHESTRATOR BUILD-TIME EMBEDS (do these BEFORE the spawn, in order):
 #   1. Inline each file listed in <execution_context> verbatim, in order.
 #      An unreadable source file is a halt condition (#3637 fail-closed),
 #      never a skip — a child without these texts is not a gsd-executor.
-#   2. Substitute this plan's {plan_number}, {phase_number}, {phase_name},
-#      {phase_dir}, {plan_file}, {plan_id}, and {plan_padded} placeholders (same values the
-#      harness path substitutes into its Agent() prompt). {plan_id} is this
+#   2. In THIS bash block, replace EVERY {nonce} that is not in a comment or the
+#      embedded prompt text (the GSD_NONCE assignment, the opening line and the
+#      terminator line) with one fresh random {nonce} value (16 lowercase hex chars, new for
+#      every dispatch, e.g. `od -An -N8 -tx1 /dev/urandom | tr -d ' \n'`); never
+#      substitute into embedded text. Substitute this plan's {plan_number},
+#      {phase_number}, {phase_name}, {phase_dir}, {plan_file}, {plan_id}, and
+#      {plan_padded} placeholders (same values the harness path substitutes into
+#      its Agent() prompt). {plan_id} is this
 #      plan's `id` field from the phase-plan-index JSON — the guard hooks
 #      compare it verbatim against the sentinel the per-plan gate wrote, so a
 #      paraphrase or omission costs the dispatch its recorded isolation
@@ -187,7 +195,11 @@ if [ $_TDD_APPLICABLE_RC -ne 0 ]; then
 fi
 TDD_APPLICABLE="$_TDD_APPLICABLE_RAW"
 
-EXECUTOR_PROMPT='<objective>
+# Nonce guard (#5531): the nonce is exactly 16 lowercase hex chars; an empty, short, non-hex or unsubstituted value halts.
+GSD_NONCE='{nonce}'
+[[ $GSD_NONCE =~ ^[0-9a-f]{16}$ ]] || { echo "FATAL: the executor heredoc nonce is not 16 lowercase hex chars (not substituted?). Halting." >&2; exit 1; }
+IFS= read -r -d '' EXECUTOR_PROMPT <<'GSD_EXECUTOR_PROMPT_EOF_{nonce}' || true
+<objective>
 Execute plan {plan_number} of phase {phase_number}-{phase_name}.
 [gsd:dispatch phase="{phase_number}" plan="{plan_id}"]
 Commit each task atomically. Create SUMMARY.md.
@@ -253,7 +265,8 @@ ${AGENT_SKILLS}
       Never force-stage gitignored planning artifacts: git add -f on
       .planning paths is forbidden. An intentional skip is a success path.
 - [ ] No modifications to shared orchestrator artifacts (the orchestrator handles all post-wave shared-file writes)
-</success_criteria>'
+</success_criteria>
+GSD_EXECUTOR_PROMPT_EOF_{nonce}
 [ -n "$EXECUTOR_PROMPT" ] || { echo "FATAL: executor prompt is empty for plan {plan_number}." >&2; exit 1; }
 # #3637 fail-closed verification. Two classes of check:
 #   (a) template completeness — the prompt must carry the required-reading
@@ -290,11 +303,17 @@ printf '%s' "$EXECUTOR_PROMPT" | grep -q '\${TDD_APPLICABLE' && {
 }
 ```
 
-The prompt body must contain no single-quote character, since the assignment above is single-quoted; keep apostrophes out of it when editing.
+The prompt is a quoted heredoc, so apostrophes and any other quote characters are safe in the template and in every spliced embed; do not escape them. `read -d ''` exits non-zero at end of input by design (hence `|| true`) and keeps the body's final newline, so the delivered prompt ends in `</success_criteria>` plus one newline (the old single-quoted assignment had none); the empty-prompt check on the next line is the gate. If the terminator is not matched exactly (indented or CRLF), the heredoc runs to the end of the block and swallows the checks above, so the guard that opens the next block — outside the heredoc — halts on any prompt that does not end at `</success_criteria>`. Run the two blocks as separate commands in one shell, never concatenated into one script: a bad terminator would then swallow that guard too and the script would exit 0 without dispatching. The random `{nonce}` is what keeps embedded text from ending the heredoc early: a fixed delimiter would let an embed containing that line run its remaining lines as shell before any guard could fire. A heredoc delimiter cannot be a shell variable, so the guard checks only the `GSD_NONCE` assignment (exactly 16 lowercase hex chars); the opening and terminator lines are protected only because step 2 gives them that same value.
 
 Then create the worktree and resolve the spawn:
 
 ```bash
+# Unterminated-heredoc guard (#5531): the template ends at </success_criteria>.
+case "$EXECUTOR_PROMPT" in
+  *'</success_criteria>'|*'</success_criteria>'$'\n') ;;
+  *) echo "FATAL: executor prompt for plan {plan_number} does not end at </success_criteria> (terminator not matched: indented, CRLF or nonce mismatch; or prompt not carried over) — the verification above did not run. Halting." >&2; exit 1 ;;
+esac
+
 # 1. Create the worktree. Bounded, manifest-recorded, fail-closed, and
 #    root-confined by the verb itself — never hand-roll `git worktree add`.
 AGENT_ID="agent-p{plan_number}-$(date -u +%s)"
