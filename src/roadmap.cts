@@ -1184,16 +1184,22 @@ function editFromPhaseTable(scoped: string, edit: (scoped: string) => string): s
  */
 function editProgressTableSlice(content: string, edit: (scoped: string) => string, cwd?: string): string {
   const milestoneOffset = activeScopeStart(content, cwd);
-  const before = content.slice(0, milestoneOffset);
-  const milestoneSlice = content.slice(milestoneOffset);
+  return content.slice(0, milestoneOffset) + editProgressSlice(content.slice(milestoneOffset), edit);
+}
 
+/**
+ * #5221: heading/details scoping of `editProgressTableSlice` (layer 2 above) on an already
+ * milestone-scoped slice; shared with `phase complete`, whose window is pre-scoped, so both
+ * writers pick the same Progress section.
+ */
+function editProgressSlice(milestoneSlice: string, edit: (scoped: string) => string): string {
   // #5221: a `## Progress` inside an open <details> (a shipped block below the active milestone) is not ours.
   const progressMatch = [...milestoneSlice.matchAll(/^##[ \t]+Progress\b/gim)].find((m) => !insideOpenDetails(milestoneSlice, m.index));
   if (!progressMatch || progressMatch.index === undefined) {
     // #5221: no Progress heading — stop at the next <details> so a shipped block below the active milestone is never the target.
     const details = milestoneSlice.search(/^[ \t]*<details>/m);
     const end = details === -1 ? milestoneSlice.length : details;
-    return before + editFromPhaseTable(milestoneSlice.slice(0, end), edit) + milestoneSlice.slice(end);
+    return editFromPhaseTable(milestoneSlice.slice(0, end), edit) + milestoneSlice.slice(end);
   }
 
   const headingOffset = progressMatch.index;
@@ -1203,7 +1209,7 @@ function editProgressTableSlice(content: string, edit: (scoped: string) => strin
   const scoped = nextHeading >= 0 ? fromHeading.slice(0, nextHeading) : fromHeading;
   const after = nextHeading >= 0 ? fromHeading.slice(nextHeading) : '';
 
-  return before + beforeHeading + editFromPhaseTable(scoped, edit) + after;
+  return beforeHeading + editFromPhaseTable(scoped, edit) + after;
 }
 
 function cmdRoadmapUpdatePlanProgress(cwd: string, phaseNum: string | null | undefined, raw: boolean): void {
@@ -2111,6 +2117,7 @@ export = {
   cmdRoadmapAnnotateDependencies,
   buildPhaseHeadingRegex,
   editFromPhaseTable,
+  editProgressSlice,
   editProgressTableSlice,
   foldPhaseId,
   insideOpenDetails,
