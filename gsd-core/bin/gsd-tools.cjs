@@ -233,7 +233,9 @@
  *                                        [--config-dir <path>] [--runtime <r>] [--active-cap <capId>]
  *                                        [--after-fingerprint <phaseDir>] (#5105: skip verify:post
  *                                        steps whose declared artifact already exists in phaseDir)
- *                                        Returns JSON envelope { point, activeHooks, rendered }
+ *                                        [--phase <token>] [--phase-dir <dir>] (#4030: add context:{phase,phaseDir};
+ *                                        --phase-dir only cross-checks --phase)
+ *                                        Returns JSON envelope { point, activeHooks, rendered[, context] }
  *                                        Valid points: discuss:pre/post, plan:pre/post,
  *                                        execute:pre/wave:pre/wave:post/post, verify:pre/post, ship:pre/post
  *                                        --runtime: override the auto-detected runtime (#2003) so the config
@@ -3321,78 +3323,42 @@ function dispatchOverlayCapabilityCommand({ command, args, cwd, raw, error, load
           commands.cmdScaffold(cwd, scaffoldType, scaffoldOptions, raw);
   }
 
+  // Dual-form flag reader (--flag=v / --flag v). With missingMsg, a missing or
+  // empty value is a usage error. Without it (#4030 --phase/--phase-dir) an
+  // explicit empty value returns '' (the resolver warns), a missing one returns
+  // undefined, and it never errors: phase-scoped hooks degrade, they do not fail.
+  function readFlag(args, flag, error, missingMsg) {
+    const eq = args.find(arg => arg.startsWith(`${flag}=`));
+    const idx = args.indexOf(flag);
+    const value = eq ? eq.slice(flag.length + 1).trim() : idx === -1 ? undefined : args[idx + 1];
+    const missing = value === undefined || (!eq && value.startsWith('--')) || (missingMsg && !value);
+    if (!missing) return eq || missingMsg ? value : value.trim();
+    if (missingMsg && (eq || idx !== -1)) error(missingMsg, ERROR_REASON ? ERROR_REASON.USAGE : undefined);
+    return undefined;
+  }
+
   function routeLoop({ args, cwd, raw, error }) {
     // loop render-hooks <point>
           const loopSubcommand = args[1];
           if (loopSubcommand === 'render-hooks') {
-            let loopConfigDir = null;
-            const configDirEqArg = args.find(arg => arg.startsWith('--config-dir='));
-            const configDirIdx = args.indexOf('--config-dir');
-            if (configDirEqArg) {
-              const value = configDirEqArg.slice('--config-dir='.length).trim();
-              if (!value) error('Missing value for --config-dir', ERROR_REASON ? ERROR_REASON.USAGE : undefined);
-              loopConfigDir = value;
-            } else if (configDirIdx !== -1) {
-              const value = args[configDirIdx + 1];
-              if (!value || value.startsWith('--')) {
-                error('Missing value for --config-dir', ERROR_REASON ? ERROR_REASON.USAGE : undefined);
-              }
-              loopConfigDir = value;
-            }
+            const loopConfigDir = readFlag(args, '--config-dir', error, 'Missing value for --config-dir');
             // --active-cap <capId>: parse and validate before delegating
-            let loopActiveCap = undefined;
-            const activeCapEqArg = args.find(arg => arg.startsWith('--active-cap='));
-            const activeCapIdx = args.indexOf('--active-cap');
-            if (activeCapEqArg) {
-              const value = activeCapEqArg.slice('--active-cap='.length).trim();
-              if (!value) error('Missing value for --active-cap (e.g. --active-cap tdd)', ERROR_REASON ? ERROR_REASON.USAGE : undefined);
-              loopActiveCap = value;
-            } else if (activeCapIdx !== -1) {
-              const value = args[activeCapIdx + 1];
-              if (!value || value.startsWith('--')) {
-                error('Missing value for --active-cap (e.g. --active-cap tdd)', ERROR_REASON ? ERROR_REASON.USAGE : undefined);
-              }
-              loopActiveCap = value;
-            }
+            const loopActiveCap = readFlag(args, '--active-cap', error, 'Missing value for --active-cap (e.g. --active-cap tdd)');
             // --runtime <r> (#2003): explicit runtime override so the config-dir
             // resolution bypasses the persisted-runtime fallback (GSD_RUNTIME →
             // config.runtime). Mirrors the --config-dir dual-form (--runtime X /
             // --runtime=X) and the capability-set --runtime precedent.
-            let loopRuntime = undefined;
-            const runtimeEqArg = args.find(arg => arg.startsWith('--runtime='));
-            const runtimeIdx = args.indexOf('--runtime');
-            if (runtimeEqArg) {
-              const value = runtimeEqArg.slice('--runtime='.length).trim();
-              if (!value) error('Missing value for --runtime', ERROR_REASON ? ERROR_REASON.USAGE : undefined);
-              loopRuntime = value;
-            } else if (runtimeIdx !== -1) {
-              const value = args[runtimeIdx + 1];
-              if (!value || value.startsWith('--')) {
-                error('Missing value for --runtime', ERROR_REASON ? ERROR_REASON.USAGE : undefined);
-              }
-              loopRuntime = value;
-            }
+            const loopRuntime = readFlag(args, '--runtime', error, 'Missing value for --runtime');
             // --after-fingerprint <phaseDir> (#5105 R2): gate out verify:post
             // steps whose declared artifact already exists in phaseDir.
-            let loopAfterFingerprint = undefined;
-            const afterFpEqArg = args.find(arg => arg.startsWith('--after-fingerprint='));
-            const afterFpIdx = args.indexOf('--after-fingerprint');
-            if (afterFpEqArg) {
-              const value = afterFpEqArg.slice('--after-fingerprint='.length).trim();
-              if (!value) error('Missing value for --after-fingerprint', ERROR_REASON ? ERROR_REASON.USAGE : undefined);
-              loopAfterFingerprint = value;
-            } else if (afterFpIdx !== -1) {
-              const value = args[afterFpIdx + 1];
-              if (!value || value.startsWith('--')) {
-                error('Missing value for --after-fingerprint', ERROR_REASON ? ERROR_REASON.USAGE : undefined);
-              }
-              loopAfterFingerprint = value;
-            }
+            const loopAfterFingerprint = readFlag(args, '--after-fingerprint', error, 'Missing value for --after-fingerprint');
             loopResolver.cmdLoopRenderHooks(cwd, args[2], raw, {
               configDir: loopConfigDir ? path.resolve(loopConfigDir) : undefined,
               activeCap: loopActiveCap,
               runtime: loopRuntime,
               afterFingerprint: loopAfterFingerprint,
+              phase: readFlag(args, '--phase', error),
+              phaseDir: readFlag(args, '--phase-dir', error),
             });
           } else {
             error(

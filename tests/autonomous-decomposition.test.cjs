@@ -29,7 +29,8 @@ const PROJECT_ROOT = path.join(__dirname, '..');
 // 40K chars ≈ 10,000 tokens — stays at the 10K ceiling; raised from 38K after
 // the #729+#853 merge added runtime-gated converge routing to the interactive
 // planning arm (both Claude-inline and other-runtime-background), adding ~1.2K chars.
-const AUTONOMOUS_SIZE_LIMIT = 40 * 1024;
+// #4030 adds two per-fence GSD_WS captures (~0.5K chars) so render-hooks keep --ws across fences.
+const AUTONOMOUS_SIZE_LIMIT = 41 * 1024;
 
 // ─── File paths ──────────────────────────────────────────────────────────────
 
