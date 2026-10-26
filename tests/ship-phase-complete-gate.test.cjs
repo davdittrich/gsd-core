@@ -53,7 +53,7 @@ describe('ship preflight: roadmap completeness gate (#5221)', { skip: SKIP }, ()
       const r = run(analyze(key.join('.'), false), 0, padded);
       const same = key.join('.') === phase.join('.');
       blocked(r, same ? 'PHASE_NOT_COMPLETE' : 'PHASE_NOT_RECORDED');
-    }), { numRuns: 25 });
+    }), { numRuns: 25, seed: 5221 });
   });
 
   test('a phase with no ROADMAP record (heading only, absent from roadmap_record) blocks PHASE_NOT_RECORDED', () => {
