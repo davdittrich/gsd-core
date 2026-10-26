@@ -1306,7 +1306,7 @@ const spliceAfter = (raw: string, at: number, eol: string, line: string): string
 
 /**
  * #5221: give a tool-created phase a ROADMAP record, so ship's fail-closed gate can read it.
- * Writes `- [ ] **Phase N: desc**` after the active milestone's checklist (for an insert: after
+ * Writes `- [ ] **Phase N: desc**` (plain `- [ ] Phase N: desc` in a plain list) after the active milestone's checklist (for an insert: after
  * phase `after`'s own entries, else before the first later entry); with no checklist, a `N. desc | Not started` progress-table row;
  * with neither, nothing. Entries inside an open <details> (shipped blocks) are not the checklist.
  */
@@ -1321,7 +1321,9 @@ function recordNewPhase(raw: string, cwd: string, id: string | number, descripti
   const entryRe = new RegExp(`^[ \\t]*${entrySrc}[^\\r\\n]*`, 'gim');
   const bullets = [...scope.matchAll(entryRe)].filter((m) => !insideOpenDetails(scope, m.index));
   const eol = raw.includes('\r\n') ? '\r\n' : '\n';
-  const entry = `- [ ] **Phase ${id}: ${description}**`;
+  // Match the checklist's own style: a plain list gets a plain entry.
+  const bold = !bullets[0] || /^[^\r\n]*?\]\s*\*\*/.test(bullets[0][0]);
+  const entry = `- [ ] ${bold ? `**Phase ${id}: ${description}**` : `Phase ${id}: ${description}`}`;
   // An id past CUSTOM_PHASE_ID_SRC's cap is written but not readable by analyze: report that, not 'checklist'.
   const kind = new RegExp(`^${entrySrc}`).test(entry) ? 'checklist' : 'none';
   if (after !== undefined) {
@@ -1967,8 +1969,8 @@ function cmdPhaseInsert(
       // templating it via detectEol(rawContent) was inert dead code. '\n'
       // matches what platformWriteSync enforces anyway.
       const bulletEntry = `\n- [ ] ${phaseLabel}`;
-      // A non-bold bullet is not an entry `roadmap analyze` reads (checklistEntrySrc needs `**`).
-      roadmapEntry = new RegExp(checklistEntrySrc(insertConvention, false, true)).test(bulletEntry) ? 'checklist' : 'none';
+      // The bullet (bold or plain, matching its neighbours) is itself the checklist entry `roadmap analyze` reads.
+      roadmapEntry = 'checklist';
 
       // #3413: was `[^\n]*`, which on CRLF content swallows the line's
       // trailing \r into the match, shifting bulletLineEnd to land BETWEEN

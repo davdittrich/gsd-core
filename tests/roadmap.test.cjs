@@ -6910,3 +6910,72 @@ describe('#5221: roadmap update-plan-progress — active milestone scope and pha
     assert.ok(out.includes('| 68 | 0/9 | Planned | - |'), 'second table untouched');
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #5221 review round: roadmap_record reader (one scan over every checklist entry, any style)
+// ─────────────────────────────────────────────────────────────────────────────
+describe('#5221: roadmap analyze roadmap_record reader', () => {
+  let tmpDir;
+  beforeEach(() => { tmpDir = createTempProject('gsd-5221-record-'); });
+  afterEach(() => { cleanup(tmpDir); });
+
+  function analyze(roadmap, config) {
+    fs.writeFileSync(path.join(tmpDir, '.planning', 'ROADMAP.md'), roadmap);
+    if (config) fs.writeFileSync(path.join(tmpDir, '.planning', 'config.json'), JSON.stringify(config));
+    const a = runGsdTools('roadmap analyze', tmpDir);
+    assert.ok(a.success, a.error);
+    return JSON.parse(a.output);
+  }
+
+  test('a custom id with a detail section is not reported in missing_phase_details', () => {
+    const out = analyze('# Roadmap\n\n- [ ] **Phase AUTH: Auth**\n\n### Phase AUTH: Auth\n**Goal**: g\n', { phase_naming: 'custom' });
+    assert.strictEqual(out.missing_phase_details, null);
+    assert.strictEqual(out.roadmap_record.AUTH, false);
+  });
+
+  test('a custom-only checklist is recorded but does not synthesize phases', () => {
+    const out = analyze('# Roadmap\n\n- [x] **Phase AUTH: Auth**\n', { phase_naming: 'custom' });
+    assert.strictEqual(out.phase_count, 0);
+    assert.strictEqual(out.roadmap_record.AUTH, true);
+  });
+
+  test('roadmap_record is order-independent: a later unticked duplicate entry fails the phase closed', () => {
+    const done = '- [x] **Phase 1: Setup**';
+    const again = '- [ ] **Phase 1: Setup (again)**';
+    for (const order of [[done, again], [again, done]]) {
+      const out = analyze(`# Roadmap\n\n${order.join('\n')}\n\n### Phase 1: Setup\n**Goal**: g\n`);
+      assert.strictEqual(out.roadmap_record['1'], false, order.join(' / '));
+    }
+  });
+
+  test('a custom id duplicated across entries fails closed in either order', () => {
+    for (const order of [['x', ' '], [' ', 'x']]) {
+      const out = analyze(`# Roadmap\n\n${order.map((c) => `- [${c}] **Phase AUTH: Auth**`).join('\n')}\n`, { phase_naming: 'custom' });
+      assert.strictEqual(out.roadmap_record.AUTH, false);
+    }
+  });
+
+  test('a non-bold checklist entry is a record, ticked or not', () => {
+    const out = analyze('# Roadmap\n\n- [x] Phase 1: Setup (completed 2026-10-01)\n- [ ] Phase 2: Next\n\n### Phase 1: Setup\n**Goal**: g\n\n### Phase 2: Next\n**Goal**: g\n');
+    assert.deepStrictEqual(out.roadmap_record, { 1: true, 2: false });
+    assert.strictEqual(out.phases[0].roadmap_complete, true);
+  });
+
+  test('a non-bold custom-id checklist entry is a record', () => {
+    const out = analyze('# Roadmap\n\n- [x] Phase AUTH: Auth\n', { phase_naming: 'custom' });
+    assert.strictEqual(out.roadmap_record.AUTH, true);
+  });
+
+  test('custom config: prose or word-prefixed Phase cells are not custom ids', () => {
+    const out = analyze([
+      '# Roadmap', '', '## Progress', '',
+      '| Phase | Plans Complete | Status | Completed |',
+      '|-------|----------------|--------|-----------|',
+      '| Phase 68 | 0/1 | Complete | - |',
+      '| Setup work | 0/1 | Not started | - |',
+      '| AUTH. Auth | 0/1 | Not started | - |',
+      '',
+    ].join('\n'), { phase_naming: 'custom' });
+    assert.deepStrictEqual(out.roadmap_record, { AUTH: false });
+  });
+});

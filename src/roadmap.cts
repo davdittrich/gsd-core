@@ -810,7 +810,7 @@ function cmdRoadmapAnalyze(cwd: string, raw: boolean): void {
   // phase-id-owner: uses the [.-] (dot-or-dash) separator variant, not the canonical dot-only token; a swap to PHASE_NUMBER_TOKEN_SOURCE would drop hyphenated phase-id matches.
   let customIds = false;
   try { customIds = loadConfigForScope(cwd)['phase_naming'] === 'custom'; } catch { /* unreadable config: numeric ids only */ }
-  const checklistPattern = new RegExp(checklistEntrySrc(convention, true, customIds), 'gi');
+  const checklistPattern = new RegExp(checklistEntrySrc(convention, true), 'gi');
   // #2761 M1: an OCCURRENCE list keyed by `occurrenceKey`, not a token->bracket
   // map. The map was first-wins on the bare token, so of two checklist entries
   // sharing a token across brackets the FIRST one's bracket id classified BOTH:
@@ -987,14 +987,12 @@ function cmdRoadmapAnalyze(cwd: string, raw: boolean): void {
     const k = foldPhaseId(token);
     roadmapRecord[k] = (roadmapRecord[k] ?? true) && done;
   };
-  for (const o of checklistOccurrences) if (!isSentinelPhase(o.token, o.bracketId)) fold(o.token, o.checked);
+  // Every entry folds (checklistOccurrences is first-wins per phase): a later unticked duplicate must fail the phase closed.
   // phase_naming: custom ids (`- [ ] **Phase AUTH: …**`, as phase add writes them) are records too.
-  const isCustomId = (t: string): boolean => customIds && !/^[A-Za-z]?\d/.test(t);
-  if (customIds) {
-    for (const m of effectiveContent.matchAll(new RegExp(checklistEntrySrc(convention, false, true), 'gi'))) {
-      if (isCustomId(m[1])) fold(m[1], /\[x\]/i.test(m[0]));
-    }
+  for (const m of effectiveContent.matchAll(new RegExp(checklistEntrySrc(convention, true, customIds), 'gi'))) {
+    if (!isSentinelPhase(m[1 + G], G ? m[1] : undefined)) fold(m[1 + G], /\[x\]/i.test(m[0]));
   }
+  const isCustomId = (t: string): boolean => customIds && !/^[A-Za-z]?\d/.test(t);
   // A phase table that does not parse (e.g. a ragged row) makes the record unknown: null, so ship stops.
   let tableUnreadable = false;
   editProgressTableSlice(rawContent, (scoped) => {
@@ -1009,7 +1007,7 @@ function cmdRoadmapAnalyze(cwd: string, raw: boolean): void {
     for (const r of table.value.rows) {
       if (wantMilestone !== null && (wantMilestone === '' || normalizeMilestoneToken(r['Milestone']) !== wantMilestone)) continue;
       const cell = (r['Phase'] ?? '').trim();
-      const token = cell.match(/^[A-Za-z]?\d\S*?(?=\.?(?:\s|$))/)?.[0] ?? cell.match(new RegExp(`^${CUSTOM_PHASE_ID_SRC}?(?=\\.?(?:\\s|$))`))?.[0];
+      const token = cell.match(/^[A-Za-z]?\d\S*?(?=\.?(?:\s|$))/)?.[0] ?? cell.match(new RegExp(`^(${CUSTOM_PHASE_ID_SRC})\\.(?=\\s|$)`))?.[1];
       if (token && (/^[A-Za-z]?\d/.test(token) ? !isSentinelPhase(token) : isCustomId(token))) fold(token, parseRoadmapStatusCell(r['Status']) === WIRE_STATUS.COMPLETE);
     }
     return scoped;
@@ -1139,7 +1137,7 @@ function insideOpenDetails(text: string, idx: number): boolean {
 const CUSTOM_PHASE_ID_SRC = '[A-Za-z][\\w-]{0,63}';
 
 /**
- * #5221: source of a `- [ ] **Phase N:` checklist entry, the one shape `roadmap analyze` reads and
+ * #5221: source of a `- [ ] **Phase N:` (bold or plain) checklist entry, the one shape `roadmap analyze` reads and
  * phase add/insert anchor on. Token is the last group; `custom` also admits a custom id before `:`.
  */
 function checklistEntrySrc(convention: string | null | undefined, capturing = false, custom = false): string {
@@ -1147,7 +1145,7 @@ function checklistEntrySrc(convention: string | null | undefined, capturing = fa
   const numeric = '[A-Za-z]?\\d+[A-Z]?(?:[.-]\\d+)*';
   // numeric must end at a word edge, else `P1-setup` matches as `P1` before the custom alternative is tried.
   const token = custom ? `(?:${numeric}(?![\\w-])|${CUSTOM_PHASE_ID_SRC}(?=:))` : numeric;
-  return `-\\s*\\[[ x]\\]\\s*\\*\\*${phaseHeadingPrefixSrcFor(PHASE_HEADING_BASELINE.LABEL_ONLY, convention, capturing)}(${token})`;
+  return `-\\s*\\[[ x]\\]\\s*(?:\\*\\*)?${phaseHeadingPrefixSrcFor(PHASE_HEADING_BASELINE.LABEL_ONLY, convention, capturing)}(${token})`;
 }
 
 function editFromPhaseTable(scoped: string, edit: (scoped: string) => string): string {
