@@ -22,7 +22,7 @@ The issue suggested persisting resolved models when `init.*` runs. A persisted c
 
 ### Decision 3 — escalation is a single-slot, unauthenticated record bounded by a 10-minute window
 
-`resolve-execution <agent> --attempt N` writes `.gsd/model-escalation-<agent>.json` when it resolves a model different from the baseline; the guard accepts that model for 10 minutes (`ESCALATION_WINDOW_MS`, `src/model-escalation.cts`, the one owner of the file shared by the CLI and the hook) and, when the record and the dispatch both carry a session id (`CLAUDE_CODE_SESSION_ID` / hook `session_id`), only in that session. That ties an escalation to the run that asked for it without a plan identity `resolve-execution` does not have. Nothing clears the record: a clear would let a sibling plan's baseline `--attempt 0` drop an in-flight escalation of the same agent type. The record is not authenticated, so it is defence in depth, not a security boundary.
+`resolve-execution <agent> --attempt N` writes `.gsd/model-escalation-<agent>.json` when it resolves a model different from the baseline on a runtime whose host takes GSD's tier aliases (`hostBehaviors.nativeModelAliases`, the gate the guard itself runs under); the guard accepts that model for 10 minutes (`ESCALATION_WINDOW_MS`, `src/model-escalation.cts`, the one owner of the file shared by the CLI and the hook) and, when the dispatch carries a session id (hook `session_id`), only if the record was written in that session (`CLAUDE_CODE_SESSION_ID`); a record without a session counts only for a dispatch without one. That ties an escalation to the run that asked for it without a plan identity `resolve-execution` does not have. Nothing clears the record: a clear would let a sibling plan's baseline `--attempt 0` drop an in-flight escalation of the same agent type. The record is not authenticated, so it is defence in depth, not a security boundary.
 
 ### Decision 4 — warn by default; deny blocks a wrong model
 
@@ -37,5 +37,5 @@ The issue suggested persisting resolved models when `init.*` runs. A persisted c
 ## Consequences
 
 - A default-on warning for every Claude Code user with a `.planning/config.json`.
-- `resolve-execution` gains a write side effect, only for an escalated model.
+- `resolve-execution` gains a write side effect, only for an escalated model on a native-alias runtime (where the guard runs).
 - The guard is Claude-only.

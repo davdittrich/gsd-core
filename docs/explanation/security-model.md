@@ -316,12 +316,13 @@ one hard block this hook owns.
 defence-in-depth: it warns by default and denies only when set to `"deny"`.
 The legitimate-escalation record `.gsd/model-escalation-<agent>.json` is
 unauthenticated, so any orchestrator that passes the same model within its
-10-minute window in the same session is allowed (when the runtime exposes a
-session id); it is a single slot per agent type, and nothing clears it before
-it expires. The check fails open on any inability to verify, so it is not a
-security boundary. A failed record write (a symlinked `.gsd`, an unwritable
-directory) is reported only as a stderr line from `resolve-execution`, so
-under `"deny"` it blocks the legitimately escalated model.
+10-minute window is allowed; when the dispatch carries a session id, only a
+record written in that session counts. It is a single slot per agent type,
+and nothing clears it before it expires. The check fails open on any
+inability to verify, so it is not a security boundary. A failed record
+write (a symlinked `.gsd` or `.gsd/.gitignore`, an unwritable directory) is
+reported only as a stderr line from `resolve-execution`, so under `"deny"`
+it blocks the legitimately escalated model.
 
 ---
 
