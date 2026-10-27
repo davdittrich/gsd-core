@@ -727,11 +727,11 @@ describe('#612 PR-2: every selector call site declares the right baseline (live 
   const EXPECTED = {
     'commands.cts': [1, 0],
     'init.cts': [0, 2],
-    'roadmap.cts': [3, 3],
+    'roadmap.cts': [3, 2],
     'validate.cts': [1, 2],
     'state.cts': [0, 3],
     'planning-snapshot.cts': [0, 2],
-    'roadmap-parser.cts': [2, 2],
+    'roadmap-parser.cts': [2, 3],
     'roadmap-upgrade.cts': [0, 1],
     // #5007 (Phase 6 / ADR-4910 §8): phase.cts became a real selector consumer
     // once its 11 grandfathered sites migrated onto phaseHeadingPrefixSrcFor /

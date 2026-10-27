@@ -1372,8 +1372,8 @@ function cmdRoadmapUpdatePlanProgress(cwd: string, phaseNum: string | null | und
     // `(completed …)` annotation on the NEXT line). A decorated bullet (emoji,
     // blockquote, link) is deliberately NOT the phase's bullet either — the
     // same narrowing #4965 made for `roadmap analyze`'s checklist reader.
-    // The lookahead only PEEKS (its `\s` may see a newline but consumes none):
-    // the label must be ended as `CHECKLIST_ID_END_SRC` says (D8), so
+    // The id end (`CHECKLIST_ID_END_SRC`) may consume a `:` or a trailing annotation,
+    // never a line end: the label must be ended as it says (D8), so
     // `Phase 2.1` / `Phase 20` are not `Phase 2`. Capture group 1 is the opening
     // `- [`, group 2 the rest of the line after the box.
     const phaseChecklistBullet = (anyState: boolean): RegExp => new RegExp(
