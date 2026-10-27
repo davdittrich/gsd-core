@@ -4,8 +4,8 @@
  *
  * Single slot per agent type: `.gsd/model-escalation-<agent>.json` holds the model
  * an escalation resolved, when, and (when known) the session that asked for it.
- * The guard honours it for ESCALATION_WINDOW_MS, only for that model and, when both
- * sides know a session id, only in that session. Unauthenticated by design: a
+ * The guard honours it for ESCALATION_WINDOW_MS, only for that model and, when the
+ * dispatch knows its session id, only if the record carries that session. Unauthenticated by design: a
  * guard against drift, not a security boundary.
  */
 
@@ -13,16 +13,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { realClock, type Clock } from './clock.cjs';
 import { retryRenameSync } from './shell-command-projection.cjs';
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-import capabilityLedgerMod = require('./capability-ledger.cjs');
-
-const { readSmallRegularFile } = capabilityLedgerMod;
+import { MAX_READ_BYTES, prepareGsdDir } from './gsd-dir.cjs';
 
 export const ESCALATION_WINDOW_MS = 10 * 60 * 1000;
 /** Tolerated clock skew for a record stamped slightly in the future. */
 export const ESCALATION_SKEW_MS = 5000;
-/** A record is a few hundred bytes; anything bigger is not ours. */
-export const MAX_READ_BYTES = 64 * 1024;
+/** Record read bound (a record is a few hundred bytes; anything bigger is not ours): the .gsd/ owner's. */
+export { MAX_READ_BYTES };
 
 /** The agent types the guard checks; also the only ones an escalation record is written for. */
 export const GUARDED_AGENT_TYPES: ReadonlySet<string> = new Set(['gsd-executor', 'gsd-verifier', 'gsd-plan-checker', 'gsd-planner']);
@@ -60,34 +57,15 @@ function writeAtomic(file: string, content: string): void {
 }
 
 /**
- * Throws when the record cannot be written. Under hooks.agent_model_guard:'deny' a missing record
- * blocks the legitimate escalated model, so the caller (recordModelEscalation) must report it.
- * The .gitignore upkeep stays best-effort: a rule that fails to land never loses the record.
+ * Throws when the record cannot be written, a symlinked `.gsd` or `.gsd/.gitignore` included
+ * (prepareGsdDir). Under hooks.agent_model_guard:'deny' a missing record blocks the legitimate
+ * escalated model, so the caller (recordModelEscalation) must report it.
  */
 export function writeEscalation(
   root: string, agentType: string, model: string, session?: string, clock: Pick<Clock, 'now'> = realClock,
 ): void {
   if (!GUARDED_AGENT_TYPES.has(agentType)) return; // also keeps agentType, a file name, from traversing
-  const dir = path.join(root, '.gsd');
-  fs.mkdirSync(dir, { recursive: true });
-  // Catches a planted .gsd symlink; racing a swap after this needs repo write access already.
-  if (fs.lstatSync(dir).isSymbolicLink()) throw new Error(`${dir} is a symlink`);
-  const ignore = path.join(dir, '.gitignore');
-  try {
-    fs.writeFileSync(ignore, '*\n', { flag: 'wx' });
-  } catch {
-    // Pre-existing (e.g. the dispatch sentinel's rules only): a bare `*` already covers the record,
-    // else add our own rule. Replace by rename so a link swapped in after the lstat is not written through.
-    // Own try: an oversized or unreadable .gitignore must not abort before the record is written.
-    try {
-      if (!fs.lstatSync(ignore).isSymbolicLink()) {
-        const cur = readSmallRegularFile(ignore, MAX_READ_BYTES) ?? '';
-        if (!/^\*\r?$/m.test(cur) && !/^\/model-escalation-\*\r?$/m.test(cur)) {
-          writeAtomic(ignore, `${cur}${cur === '' || cur.endsWith('\n') ? '' : '\n'}/model-escalation-*\n`);
-        }
-      }
-    } catch { /* leave the rules as they are */ }
-  }
+  prepareGsdDir(root, 'model escalation', ['/model-escalation-*']);
   const rec: EscalationRecord = { model, written_at: clock.now(), ...(session ? { session } : {}) };
   writeAtomic(escalationFile(root, agentType), JSON.stringify(rec));
 }
@@ -124,6 +102,6 @@ export function escalationAllows(
   if (!rec || typeof rec.model !== 'string' || !Number.isFinite(rec.written_at)) return false;
   const age = now - rec.written_at;
   if (!(age > -ESCALATION_SKEW_MS && age < ESCALATION_WINDOW_MS)) return false;
-  if (typeof rec.session === 'string' && session !== undefined && rec.session !== session) return false;
+  if (session !== undefined && rec.session !== session) return false;
   return modelFamily(rec.model) === modelFamily(passedModel);
 }
