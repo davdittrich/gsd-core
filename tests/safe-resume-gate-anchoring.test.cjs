@@ -119,6 +119,9 @@ describe('#4003 / #5164 — safe_resume_gate plan-commit lookups ask the resolve
   });
 });
 
+const NESTED_TEST_PATHS = ['crates/core/tests/scan_test.rs', 'src/__tests__/util.js', 'pkg/api/test_x.py'];
+const NESTED_NON_TEST_PATHS = ['crates/core/src/scan.rs', 'src/test_utils/factory.py', 'test_utils/foo.py'];
+
 // ─── #4379: the RED pathspec is language-agnostic, and matches at root ──────
 //
 // The pathspec IS this gate's definition of "a test file". It was JS/TS-only, so
@@ -129,8 +132,6 @@ describe('#4003 / #5164 — safe_resume_gate plan-commit lookups ask the resolve
 // These rows drive the REAL pathspec, extracted from the shipped workflow, against
 // a real git repo. Re-typing the pattern into the test would only assert that two
 // copies of a string agree; running it answers the question the gate actually asks.
-const NESTED_TEST_PATHS = ['crates/core/tests/scan_test.rs', 'src/__tests__/util.js', 'pkg/api/test_x.py'];
-
 describe('#4379 — the TDD RED pathspec is language-agnostic', () => {
   // Pull the pathspec out of the workflow rather than restating it: the thing
   // under test is what SHIPS, not a copy maintained alongside it.
@@ -153,9 +154,9 @@ describe('#4379 — the TDD RED pathspec is language-agnostic', () => {
       'tests/c.py', '__tests__/d.js',           // directory conventions
       'test_mod.py', 'mod_test.py',             // Python, outside tests/
       'lib_spec.rb', 'x_test.exs',              // Ruby, Elixir
-      ...NESTED_TEST_PATHS, // nested
+      ...NESTED_TEST_PATHS,                     // nested
       'src/impl.go', 'src/lib.rs',              // NOT tests — must never match
-      'crates/core/src/scan.rs', 'src/test_utils/factory.py', 'test_utils/foo.py',  // NOT tests, nested + root
+      ...NESTED_NON_TEST_PATHS,                 // NOT tests, nested + root
     ];
     for (const rel of files) {
       const abs = path.join(dir, rel);
@@ -195,14 +196,14 @@ describe('#4379 — the TDD RED pathspec is language-agnostic', () => {
   });
 
   test('nested tests/, __tests__/ and test_*.py match at any depth (#5181)', (t) => {
-    // git anchors a pathspec containing a slash to the repo root, so `tests/` alone
-    // misses `crates/core/tests/…`.
+    // A default-mode pathspec with a slash matches the whole path from the repo root, so
+    // `tests/` and `test_*.py` alone miss `crates/core/tests/…` and `pkg/api/test_x.py`.
     const dir = seedRepo(t);
     const hits = matched(dir, shippedRedPathspec());
     for (const rel of NESTED_TEST_PATHS) {
       assert.ok(hits.has(rel), `${rel} must match`);
     }
-    for (const rel of ['crates/core/src/scan.rs', 'src/test_utils/factory.py', 'test_utils/foo.py']) {
+    for (const rel of NESTED_NON_TEST_PATHS) {
       assert.ok(!hits.has(rel), `${rel} must NOT match`);
     }
   });
