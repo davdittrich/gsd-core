@@ -7032,3 +7032,24 @@ describe('#4192 model_overrides: fully-qualified claude IDs resolve as configure
     }
   });
 }
+
+describe('resolveModelFromConfig (#5328)', () => {
+  test('property: resolveModelFromConfig(loadConfig(cwd), cwd, agent) equals resolveModelInternal(cwd, agent)', (t) => {
+    const fc = require('./helpers/fast-check-setup.cjs');
+    const { loadConfig } = require('../gsd-core/bin/lib/config-loader.cjs');
+    const { MODEL_PROFILES } = require('../gsd-core/bin/lib/model-profiles.cjs');
+    const dir = makeTempProject();
+    t.after(() => cleanup(dir));
+    fc.assert(fc.property(
+      fc.constantFrom(...Object.keys(MODEL_PROFILES)),
+      fc.constantFrom('quality', 'balanced', 'budget', 'adaptive', 'inherit'),
+      fc.constantFrom(undefined, 'claude', 'codex'),
+      fc.constantFrom(undefined, 'omit'),
+      fc.constantFrom(undefined, 'opus', 'sonnet', 'claude-opus-4-1', 'gpt-5'),
+      (agent, model_profile, runtime, resolve_model_ids, override) => {
+        writeConfig(dir, { model_profile, ...(runtime ? { runtime } : {}), ...(resolve_model_ids ? { resolve_model_ids } : {}),
+          ...(override ? { model_overrides: { [agent]: override } } : {}) });
+        return modelResolver.resolveModelFromConfig(loadConfig(dir), dir, agent) === resolveModelInternal(dir, agent);
+      }), { numRuns: 60 });
+  });
+});
