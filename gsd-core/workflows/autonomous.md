@@ -330,8 +330,6 @@ Check `has_context`. If false → go to handle_blocker: "Discuss for phase ${PHA
 
 > Full instructions are in `gsd-core/references/autonomous-ui-design-contract.md`. Read that file now and follow it exactly.
 
-**Inputs:** `PHASE_NUM`, `PHASE_DIR` from execute_phase. Resolves whether the phase needs a UI-SPEC.md generated before planning via active `plan:pre` step hooks. Always non-blocking — proceeds to 3b regardless of outcome.
-
 Read and execute: `$HOME/.claude/gsd-core/references/autonomous-ui-design-contract.md`
 
 **3b. Plan**
@@ -582,8 +580,6 @@ Display the review result summary and score from UI-REVIEW.md if produced. Conti
 ## Smart Discuss
 
 > Full instructions are in `gsd-core/references/autonomous-smart-discuss.md`. Read that file now and follow it exactly.
-
-Smart discuss is an autonomous-optimized variant of `gsd-discuss-phase`. It proposes grey area answers in batch tables — the user accepts or overrides per area — and writes an identical CONTEXT.md to what discuss-phase produces.
 
 **Inputs:** `PHASE_NUM` from execute_phase.
 
