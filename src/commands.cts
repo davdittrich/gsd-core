@@ -54,7 +54,7 @@ import planningScopeMod = require('./planning-scope.cjs');
 const { SCOPE } = planningScopeMod;
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import modelResolverMod = require('./model-resolver.cjs');
-const { resolveModelInternal, resolveTierInternal, resolveModelForTier, resolveProviderEscalation, resolveEffortInternal, resolveFastModeInternal, resolveEffortForTier, resolveGranularityInternal, assertValidGranularityOverride } = modelResolverMod;
+const { resolveModelInternal, resolveModelFromConfig, hasNativeModelAliases, resolveTierInternal, resolveModelForTier, resolveProviderEscalation, resolveEffortInternal, resolveFastModeInternal, resolveEffortForTier, resolveGranularityInternal, assertValidGranularityOverride } = modelResolverMod;
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import agentCommandRouterMod = require('./agent-command-router.cjs');
 const { AGENT_FAILURE_CLASSES } = agentCommandRouterMod;
@@ -75,12 +75,9 @@ const { extractFrontmatter, agentScalarNeedsDoubleQuoting, escapeDoubleQuotedSca
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import modelProfiles = require('./model-profiles.cjs');
 const { MODEL_PROFILES, VALID_PHASE_TYPES } = modelProfiles;
-import { formatGsdSlash, resolveRuntime } from './runtime-slash.cjs';
+import { formatGsdSlash, resolveRuntime, resolveActiveRuntime } from './runtime-slash.cjs';
 import { realClock } from './clock.cjs';
-import { findProjectRoot } from './project-root.cjs';
 import { writeEscalation, modelFamily } from './model-escalation.cjs';
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-import worktreeSafetyMod = require('./worktree-safety.cjs');
 import { clampPercent, renderProgressBar } from './phase-lifecycle.cjs';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import planScanMod = require('./plan-scan.cjs');
@@ -602,16 +599,13 @@ function cmdResolveGranularity(cwd: string, phaseType: string | undefined, raw: 
 
 /**
  * #5328: record a model that differs from the resolved baseline so
- * hooks/lib/agent-model-check.js lets the Agent() call pass it. The root mirrors
- * resolveSentinelRoot (the CLI already receives a remapped cwd); file, validation and
- * window live in model-escalation.cts, shared with the hook.
+ * hooks/lib/agent-model-check.js lets the Agent() call pass it. `cwd` is the root the dispatcher
+ * resolved (resolveMainWorktreeCwd + findProjectRoot), the root the dispatch sentinel is written at
+ * and resolveSentinelRoot reads; file, validation and window live in model-escalation.cts.
  */
 function recordModelEscalation(cwd: string, agentType: string, model: string): void {
   try {
-    const root = fs.existsSync(path.join(cwd, '.planning'))
-      ? cwd
-      : findProjectRoot(worktreeSafetyMod.resolveWorktreeRoot(cwd).root);
-    writeEscalation(root, agentType, model, process.env['CLAUDE_CODE_SESSION_ID'] || undefined);
+    writeEscalation(cwd, agentType, model, process.env['CLAUDE_CODE_SESSION_ID'] || undefined);
   } catch (e) { process.stderr.write(`gsd: model-escalation record not written: ${(e as Error).message}\n`); } // reported, not fatal: the escalation itself proceeds; under deny the guard then blocks the model
 }
 
@@ -637,7 +631,8 @@ function cmdResolveExecution(cwd: string, agentType: string | undefined, raw: bo
   // (heavy tier) alongside effort. The FIRST-spawn tier now comes from
   // resolveModelInternal's own dynamic_routing step (#4505), so the absent-attempt
   // branch below reaches it too — this gate is only about escalation.
-  const baselineModel = resolveModelInternal(cwd, agentType);
+  // The baseline comes from the config loaded above (one load); the no-attempt branch and the record gate reuse it.
+  const baselineModel = resolveModelFromConfig(config, cwd, agentType);
   const hasAttempt = opts.attempt !== undefined && opts.attempt !== null;
   let model = hasAttempt ? resolveModelForTier(cwd, agentType, opts.attempt) : baselineModel;
 
@@ -654,10 +649,13 @@ function cmdResolveExecution(cwd: string, agentType: string | undefined, raw: bo
     escalation = { class: opts.failureClass, ...resolved };
   }
 
-  // Only an escalated model writes a record. Nothing clears one: the record is single-slot per agent
-  // type, so a sibling plan's baseline `--attempt 0` must not drop an in-flight escalation; the
-  // guard's 10-minute window bounds a stale one.
-  if (model && modelFamily(model) !== modelFamily(baselineModel)) recordModelEscalation(cwd, agentType, model);
+  // Only a model escalated past the baseline writes a record, and only where the guard runs (native tier
+  // aliases, the hook's gate). Nothing clears a record: it is single-slot per agent type, so a sibling
+  // plan's baseline `--attempt 0` must not drop an in-flight escalation; the guard's 10-minute window
+  // bounds a stale one.
+  if (model && hasNativeModelAliases(resolveActiveRuntime(config)) && modelFamily(model) !== modelFamily(baselineModel)) {
+    recordModelEscalation(cwd, agentType, model);
+  }
 
   const effortOpts: Record<string, unknown> = {};
   if (typeof opts.effortOverride === 'string') effortOpts['override'] = opts.effortOverride;
