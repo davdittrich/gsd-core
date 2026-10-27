@@ -244,8 +244,8 @@ if [ "$TDD_MODE" = "true" ]; then
     # #4379/#5181: this pathspec IS the gate's definition of "a test file". Leading-`*`
     # globs match at any depth; `:(glob)**/` covers root and nested without `*`
     # crossing `/` (so `src/test_utils/x.py` is not a test). NOT widened to ordinary
-    # source — that would make the gate pass on any in-scope commit. Rust inline #[test]: references/tdd.md
-    # § Create first test file.
+    # source — that would make the gate pass on any in-scope commit. Rust inline
+    # #[test]: references/tdd.md § Create first test file.
 
     RED_COMMIT=$(gsd_run check evaluation-scope --plan "${PHASE_NUMBER}-${PLAN_ID}" --commits-only --milestone-bound --max-commits 1 --raw --pathspec "*.test.*" --pathspec "*.spec.*" --pathspec ":(glob)**/tests/**" --pathspec ":(glob)**/__tests__/**" --pathspec "*_test.go" --pathspec ":(glob)**/test_*.py" --pathspec "*_test.py" --pathspec "*_test.exs" --pathspec "*_spec.rb" --pathspec "*_test.rb" 2>/dev/null) && RED_SCOPE_RC=0 || RED_SCOPE_RC=$?
     # Exit 69 (UNAVAILABLE) = the scope could not be resolved: that is not "missing RED commit" (#5170).
