@@ -159,14 +159,6 @@ on its `block`; route it by `onError` as a step-1 command failure. Exit `0` alwa
 delivered verdict, a blocking one included (`block: true`): a gate verb never exits non-zero to say
 "blocked".
 
-When the check invocation needs a phase argument, source the **token** from whichever the
-surrounding workflow already has in scope — `context.phase` and a workflow's own
-already-resolved `${PHASE_NUMBER}` are the identical value (same `guardedFindPhase`
-resolution), so a fresh extraction is redundant. The **directory** is NOT interchangeable the
-same way: `context.phaseDir` is project-relative (`phase-locator.cts`'s own on-disk form; resolve it against the project root for an absolute path), while
-a workflow's `${PHASE_DIR}` (from `init.phase-op` and similar) is absolute — do not treat them
-as one value in a path-construction context, only the token is guaranteed identical.
-
 ## Empty / absent `activeHooks`
 
 If `activeHooks` is absent, null, or an empty array, skip silently and continue to the next

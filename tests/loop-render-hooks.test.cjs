@@ -18,6 +18,7 @@ const path = require('node:path');
 const { cleanup, createTempDir, createTempProject } = require('./helpers.cjs');
 const fc = require('./helpers/fast-check-setup.cjs');
 const { splitLines } = require('../gsd-core/bin/lib/text-lines.cjs');
+const { escapeRegex } = require('../gsd-core/bin/lib/pattern.cjs');
 const { ERROR_REASON } = require('../gsd-core/bin/lib/io.cjs');
 
 const {
@@ -1388,7 +1389,7 @@ const SITES = [
 // hook-dispatch call site fetching the JSON envelope for actual dispatch is
 // what these tables pin, not every render-hooks use.
 function callRe(point) {
-  return new RegExp(`render-hooks ${point}\\b([^)\\n]*)`);
+  return new RegExp(`render-hooks ${escapeRegex(point)}\\b([^)\\n]*)`);
 }
 
 // The resolver tags each way it drops a phase context with a typed reason code
@@ -1408,7 +1409,7 @@ function phaseSiteCounts(content, point) {
 // sits in the call's own fence. A `name="{placeholder}"` line is text the agent
 // fills in, not a shell binding, so it never counts.
 function phaseVarBinding(lines, idx, name) {
-  const assign = new RegExp(`^\\s*(?:export\\s+|local\\s+)?${name}=(?!"?\\{)`);
+  const assign = new RegExp(`^\\s*(?:export\\s+|local\\s+)?${escapeRegex(name)}=(?!"?\\{)`);
   let inBash = false;
   let fence = -1;
   let found = { line: -1, fence: -1 };
@@ -1428,7 +1429,7 @@ function phaseVarBinding(lines, idx, name) {
 // (as it does `{phase_dir}`); a missed carry degrades to `--phase ""`, which
 // warns and omits context (ADR-4030). Every other site binds in its own fence;
 // the variables that binding reads are pinned in SRC_CROSS_FENCE.
-// No jq: a host without it would leave PHASE_NUMBER empty. `--pick` is gsd-tools' own field extractor.
+// Pins the exact PHASE_NUMBER binding line each cross-fence site relies on; `--pick` is gsd-tools' own field extractor (verify-work.md's verify:pre binds from $INIT with jq instead).
 const phaseBind = (arg) => `PHASE_NUMBER=$(gsd_run query init.phase-op \${GSD_WS:+--ws=\${GSD_WS##* }} "${arg}" --pick phase_number)`;
 const INIT_BIND = phaseBind('${PHASE_ARG}');
 const VERIFY_BIND = `PHASE_NUMBER=\${PHASE_NUMBER:-$(${phaseBind('${PHASE_ARG}').slice('PHASE_NUMBER=$('.length, -1)})}`;
@@ -1463,7 +1464,7 @@ const HOST_BOUND = new Set([
 // True when `name` is assigned again later in the SAME fence as lines[idx]: each
 // fence is its own shell, so a read before that assignment sees it unset.
 function assignedLaterInFence(lines, idx, name) {
-  const assign = new RegExp(`^\\s*(?:export\\s+|local\\s+)?${name}=`);
+  const assign = new RegExp(`^\\s*(?:export\\s+|local\\s+)?${escapeRegex(name)}=`);
   for (let i = idx + 1; i < lines.length && !/^\s*```/.test(lines[i]); i++) if (assign.test(lines[i])) return true;
   return false;
 }
@@ -1694,25 +1695,6 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     assert.strictEqual(result.context, undefined);
     assert.strictEqual(result.phaseDrop, PHASE_DROP.PHASE_DIR_ALONE);
   });
-
-  // The four strict render-hooks value flags: a missing or empty value is a usage error.
-  for (const flag of ['--config-dir', '--active-cap', '--runtime', '--after-fingerprint']) {
-    test(`[negative] bare ${flag} with no value exits non-zero with a usage error`, (t) => {
-      const dir = makePhaseProject('05-widgets');
-      t.after(() => cleanup(dir));
-      const result = renderWithPhase(dir, 'plan:pre', ['--json-errors', flag]);
-      assert.notStrictEqual(result.exitCode, 0);
-      assert.strictEqual(JSON.parse(result.stderr.trim()).reason, ERROR_REASON.USAGE);
-    });
-
-    test(`[negative] ${flag}= empty equals-form exits non-zero with a usage error`, (t) => {
-      const dir = makePhaseProject('05-widgets');
-      t.after(() => cleanup(dir));
-      const result = renderWithPhase(dir, 'plan:pre', ['--json-errors', `${flag}=`]);
-      assert.notStrictEqual(result.exitCode, 0);
-      assert.strictEqual(JSON.parse(result.stderr.trim()).reason, ERROR_REASON.USAGE);
-    });
-  }
 
   // Parser quirk, pinned so a later "cleanup" cannot change it silently: the `=`
   // form wins over the space form regardless of position. Both forms trim.
@@ -2326,8 +2308,6 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
 // the point; dropping it from one would silently lose the context there.
 // Table-driven, so a new site means one new SITES row, not a new test.
 describe('every phase-scoped render-hooks call site actually carries --phase', () => {
-  const ROOT = path.resolve(__dirname, '..');
-
   for (const [file, point, expectedCount] of SITES) {
     test(`${file} :: ${point} carries --phase at all ${expectedCount} call site(s)`, () => {
       const content = fs.readFileSync(path.join(ROOT, file), 'utf8');

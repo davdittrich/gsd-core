@@ -26,6 +26,10 @@
  *   - loop-host-contract.cjs (CANONICAL_POINTS via LOOP_HOST_CONTRACT)
  *   - capability-registry.cjs (byLoopPoint, consumed at call time)
  *   - capability-state.cjs (resolveCapabilityRuntimeState — for capabilities list)
+ *   - ./verification.cjs   (resolvePhaseArtifactFile)
+ *   - ./security.cjs       (requireSafePath, sanitizeForDisplay, tryWithinRoot, PathAcceptance)
+ *   - ./phase-locator.cjs  (guardedFindPhase)
+ *   - ./planning-workspace.cjs (planningDir)
  */
 
 import fs from 'node:fs';
@@ -537,10 +541,6 @@ interface ResolvedActiveHooks {
  * independent path: the emitted phaseDir is always the locator's own value, so
  * there is no caller path to confine, and `--phase 05 --phase-dir <another
  * in-project phase>` is rejected as incoherent.
- * resolveActiveHooksForPoint is exported, so an in-process caller can pass '' without
- * going through the CLI's `readOptionalFlag`: it reaches guardedFindPhase
- * (null for '') and gets the usual "did not match" warning. Only a phase never
- * passed (`typeof !== 'string'`) stays silent.
  */
 function resolvePhaseContext(
   cwd: string,
@@ -569,7 +569,7 @@ function resolvePhaseContext(
       drop = PHASE_DROP.ARCHIVED;
       phaseWarnings.push(
         `--phase ${JSON.stringify(phaseArg)} resolved only to an archived phase ` +
-        `(${JSON.stringify(phaseResult.directory)}, milestone ${JSON.stringify(phaseResult.archived)}); ` +
+        `(${JSON.stringify(sanitizeForDisplay(phaseResult.directory).slice(0, 80))}, milestone ${JSON.stringify(sanitizeForDisplay(phaseResult.archived).slice(0, 80))}); ` +
         'context omitted.',
       );
     } else if (phaseResult?.found) {
@@ -602,7 +602,7 @@ function resolvePhaseContext(
       if (escapes) {
         drop = PHASE_DROP.ESCAPES_ROOT;
         phaseWarnings.push(
-          `--phase ${JSON.stringify(phaseArg)} resolved to ${JSON.stringify(phaseResult.directory)}, ` +
+          `--phase ${JSON.stringify(phaseArg)} resolved to ${JSON.stringify(sanitizeForDisplay(phaseResult.directory).slice(0, 80))}, ` +
           'which escapes the project\'s .planning/phases tree (symlink or unreadable path); context omitted.',
         );
       } else if (phaseDirArg !== undefined && !sameDir()) {
@@ -749,12 +749,9 @@ function resolveActiveHooksForPoint(
   // skipped gate or a dropped #4030 phase context reaches the operator/agent
   // even when the caller only captures the `*_HOOKS_JSON` envelope. The phase
   // warnings also stay in the envelope's `warnings`, which loop-hook-dispatch.md
-  // reads to choose the ref.command phase argument. state.warnings is not written
-  // here (unlike combinedWarnings below): that channel never went to stderr.
-  for (const w of loadFailWarnings) {
-    process.stderr.write(`gsd: warning — ${w}\n`);
-  }
-  for (const w of phaseWarnings) {
+  // reads to choose the ref.command phase argument. state.warnings is only read
+  // here (into combinedWarnings below), never written to stderr.
+  for (const w of [...loadFailWarnings, ...phaseWarnings]) {
     process.stderr.write(`gsd: warning — ${w}\n`);
   }
 
