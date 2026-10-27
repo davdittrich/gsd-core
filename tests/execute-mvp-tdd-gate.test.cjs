@@ -189,6 +189,8 @@ describe('#5106: test-file conventions are one definition', () => {
     for (const sample of samples) {
       assert.equal(isTestFilePath(sample), true, `${sample} must be recognised as a test file`);
     }
-    assert.equal(isTestFilePath('placement.go'), false);
+    for (const notTest of ['placement.go', 'test_utils/foo.py', 'src/test_utils/factory.py']) {
+      assert.equal(isTestFilePath(notTest), false, `${notTest} must not be recognised as a test file`);
+    }
   });
 });
