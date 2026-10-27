@@ -629,7 +629,7 @@ function cmdResolveExecution(cwd: string, agentType: string | undefined, raw: bo
   const profile = (config['model_profile'] as string) || 'balanced';
   // #2068: resolve the model per-attempt so dynamic_routing ESCALATES the MODEL
   // (heavy tier) alongside effort. The FIRST-spawn tier now comes from
-  // resolveModelInternal's own dynamic_routing step (#4505), so the absent-attempt
+  // resolveModelFromConfig's own dynamic_routing step (#4505), so the absent-attempt
   // branch below reaches it too — this gate is only about escalation.
   // The baseline comes from the config loaded above (one load); the no-attempt branch and the record gate reuse it.
   const baselineModel = resolveModelFromConfig(config, cwd, agentType);

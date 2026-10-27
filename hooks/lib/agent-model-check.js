@@ -1,10 +1,11 @@
 'use strict';
 // hooks/lib/agent-model-check.js — #5328: does the model a model-authored
 // Agent()/Task() call passes match the one GSD resolved for that agent?
-// Baseline is resolveModelFromConfig over the workstream-aware config (what `init` reports and the workflow
-// tells the model to pass). A fresh, session-matching `resolve-execution
-// --attempt N` record (gsd-core/bin/lib/model-escalation.cjs) legitimises
-// the escalated model. Never fails closed: any inability to verify is an allow.
+// Baseline is resolveModelFromConfig over the workstream-aware config
+// (what `init` reports and the workflow tells the model to pass). A fresh,
+// session-matching `resolve-execution --attempt N` record
+// (gsd-core/bin/lib/model-escalation.cjs) legitimises the escalated model.
+// Never fails closed: any inability to verify is an allow.
 
 const path = require('path');
 const { resolveSentinelRoot } = require('./isolation-sentinel.js');

@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Preload fixture for #5328 F5: count the loadConfig calls cmdResolveExecution makes for its model
+ * Preload fixture for #5328: count the loadConfig calls cmdResolveExecution makes for its model
  * baseline: a call made directly from cmdResolveExecution, or from resolveModelInternal called
  * directly from cmdResolveExecution. Calls inside effort, fast-mode, resolveModelForTier and
  * provider-escalation resolution are not counted. Writes the count to GSD_LOAD_COUNT_FILE on exit.
