@@ -63,7 +63,6 @@ Before returning PLANNING COMPLETE:
 | `{phase_dir}` | Phase directory name | `05-user-profiles` |
 | `{phase}` | Phase prefix | `05` |
 | `{standard \| gap_closure}` | Mode flag | `standard` |
-| `{planner_model}` | `planner_model` from `init plan-phase` JSON | `opus` |
 
 ---
 
@@ -74,7 +73,6 @@ Before returning PLANNING COMPLETE:
 Task(
   prompt=filled_template,
   subagent_type="gsd-planner",
-  model="{planner_model}",  # omit this line when planner_model is "inherit" or empty (#2517)
   description="Plan Phase {phase}"
 )
 ```
@@ -84,7 +82,6 @@ Task(
 Task(
   prompt=filled_template,  # with mode: gap_closure
   subagent_type="gsd-planner",
-  model="{planner_model}",  # omit this line when planner_model is "inherit" or empty (#2517)
   description="Plan gaps for Phase {phase}"
 )
 ```
