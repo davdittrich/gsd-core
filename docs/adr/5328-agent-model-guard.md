@@ -1,6 +1,6 @@
 # ADR-5328: The Agent() Model Guard Rides the Isolation Guard, Recomputes Its Baseline, and Accepts a Bounded Escalation Record
 
-- **Status:** Accepted (2026-10-18); amended (2026-10-27) — session narrowing, native-alias write gate, baseline call
+- **Status:** Accepted (2026-10-18); amended (2026-10-27) — session narrowing, native-alias write gate, baseline call, omitted model under deny
 - **Date:** 2026-10-17
 - **Issue:** [#5328](https://github.com/open-gsd/gsd-core/issues/5328) — `enhancement`, `approved-enhancement`
 - **Builds on:** [ADR-4630](4630-dispatch-identity-and-isolation-decision-seam.md) (one owner of the dispatch decision), [ADR-3473](3473-enforcement-by-construction.md) (one owner per invariant)
@@ -24,9 +24,9 @@ The issue suggested persisting resolved models when `init.*` runs. A persisted c
 
 `resolve-execution <agent> --attempt N` writes `.gsd/model-escalation-<agent>.json` when it resolves a model different from the baseline; the guard accepts that model for 10 minutes (`ESCALATION_WINDOW_MS`, `src/model-escalation.cts`, the one owner of the file shared by the CLI and the hook) and, when the record and the dispatch both carry a session id (`CLAUDE_CODE_SESSION_ID` / hook `session_id`), only in that session. That ties an escalation to the run that asked for it without a plan identity `resolve-execution` does not have. Nothing clears the record: a clear would let a sibling plan's baseline `--attempt 0` drop an in-flight escalation of the same agent type. The record is not authenticated, so it is defence in depth, not a security boundary.
 
-### Decision 4 — warn by default; deny blocks a wrong model
+### Decision 4 — warn by default; deny blocks a wrong or omitted model
 
-`hooks.agent_model_guard`: `"warn"` (default), `"deny"`, `false`. Under `"deny"` a passed, wrong `model` blocks; an omitted `model` stays a warning, because the hook cannot see the orchestrator's model that the subagent would inherit, so it cannot tell that the omission differs. Every stock workflow spawn site passes `model=` with the resolved model, so an omission there is a hand-written dispatch. `mode` is read from the root config only (like the other `hooks.*` keys); the runtime comes from the workstream-aware `loadConfig`, the same result the expected model resolves through. Runtime gating reads the descriptor fact `hostBehaviors.nativeModelAliases` over the one runtime chain (`resolveActiveRuntime`: `GSD_RUNTIME` > `config.runtime` > install marker), never a runtime-name literal (ADR-5057 §5).
+`hooks.agent_model_guard`: `"warn"` (default), `"deny"`, `false`. Under `"deny"` an omitted `model` blocks too: no stock guarded agent pins a model in its frontmatter and every stock spawn site passes `model=` when the resolved model is concrete, so an omitted one means the subagent inherits the orchestrator's model, which is the drift #5328 reports. Runtime gating reads the descriptor fact `hostBehaviors.nativeModelAliases` over the one runtime chain (`resolveActiveRuntime`: `GSD_RUNTIME` > `config.runtime` > install marker), never a runtime-name literal (ADR-5057 §5).
 
 ## Alternatives rejected
 
@@ -40,10 +40,11 @@ The issue suggested persisting resolved models when `init.*` runs. A persisted c
 - `resolve-execution` gains a write side effect, only for an escalated model.
 - The guard is Claude-only.
 
-## Amendment (2026-10-27): session narrowing, the write gate and the baseline call
+## Amendment (2026-10-27): session narrowing, the write gate, the baseline call and the omitted model
 
-Review of [PR #5413](https://github.com/open-gsd/gsd-core/pull/5413) after acceptance changed three points. Decisions 2 and 3 and the Consequences above stand as accepted, read with these:
+Review of [PR #5413](https://github.com/open-gsd/gsd-core/pull/5413) after acceptance changed four points. Decisions 2, 3 and 4 and the Consequences above stand as accepted, read with these:
 
 - **Session narrowing (Decision 3).** When the dispatch carries a session id (hook `session_id`), only a record written in that session (`CLAUDE_CODE_SESSION_ID`) counts; a record without a session counts only for a dispatch without one. So a host whose Bash environment lacks `CLAUDE_CODE_SESSION_ID` while its hook payload carries `session_id` never has an escalation honoured.
-- **Write gate (Decision 3, Consequences).** `resolve-execution` writes the record only on a runtime whose host takes GSD's tier aliases (`hostBehaviors.nativeModelAliases`), the gate the guard itself runs under; elsewhere it creates neither `.gsd/` nor a record.
+- **Write gate (Decision 3, Consequences).** `resolve-execution` writes the record only on a runtime whose host takes GSD's tier aliases (`hostBehaviors.nativeModelAliases`), the gate the guard itself runs under; elsewhere it writes no record (the dispatch-isolation sentinel still creates `.gsd/` on every runtime).
 - **Baseline call (Decision 2).** The hook and `resolve-execution` resolve the baseline with `resolveModelFromConfig` over the config they already loaded (the workstream-aware `loadConfig`, with the workstream `init` resolves, the stored pointer included). `resolveModelInternal` is `resolveModelFromConfig(loadConfig(cwd), …)`, so the value is the one Decision 2 names.
+- **Omitted model and the mode source (Decision 4).** Under `"deny"` only a passed, wrong `model` blocks; an omitted `model` stays a warning, because the hook cannot see the orchestrator's model that the subagent would inherit, so it cannot tell that the omission differs. `mode` is read from the root config only (like the other `hooks.*` keys); the runtime comes from the workstream-aware `loadConfig`, the result the expected model resolves through.
