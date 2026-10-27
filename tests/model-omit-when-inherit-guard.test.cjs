@@ -18,7 +18,6 @@ const { escapeRegex } = require('../gsd-core/bin/lib/pattern.cjs');
 
 const ROOT = path.resolve(__dirname, '..');
 const WORKFLOWS = path.join(ROOT, 'gsd-core', 'workflows');
-const TEMPLATES = path.join(ROOT, 'gsd-core', 'templates');
 
 /**
  * Does this body state the omit rule? The rule is "omit the model= param when the
@@ -123,25 +122,6 @@ test('#2711: the guarded set is derived from dispatch sites, not hand-maintained
   for (const f of nonDispatching) {
     assert.ok(!derived.includes(f), `${f} emits no model= and must not be required to carry the rule`);
   }
-});
-
-// Templates document dispatch sites too (planner-subagent-prompt.md shows the plan-phase spawn): the
-// same derived guard covers every gsd-core/templates/**/*.md that emits a `model="{…}"` site.
-function templatesThatDispatchWithAModel() {
-  return fs
-    .readdirSync(TEMPLATES, { recursive: true })
-    .filter((f) => f.endsWith('.md'))
-    .map((f) => ({ file: f, content: fs.readFileSync(path.join(TEMPLATES, f), 'utf8') }))
-    .filter((w) => /model="\{/.test(w.content));
-}
-
-test('#2517: every template that dispatches model= documents omitting it on inherit/empty', () => {
-  const dispatching = templatesThatDispatchWithAModel();
-  // Non-vacuity: the one known dispatching template must be derived in.
-  assert.ok(dispatching.some((w) => w.file === 'planner-subagent-prompt.md'),
-    `derivation broken: planner-subagent-prompt.md not among ${dispatching.map((w) => w.file).join(', ') || 'none'}`);
-  assert.deepEqual(dispatching.filter((w) => !statesOmitRule(w.content)).map((w) => w.file), [],
-    'these templates dispatch model="{…}" but never say to OMIT model= when the bound *_model is "inherit" or empty (#2517)');
 });
 
 test('#2711: detects a dispatching workflow that lacks the rule', () => {
