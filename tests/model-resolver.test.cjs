@@ -7034,22 +7034,26 @@ describe('#4192 model_overrides: fully-qualified claude IDs resolve as configure
 }
 
 describe('resolveModelFromConfig (#5328)', () => {
-  test('property: resolveModelFromConfig(loadConfig(cwd), cwd, agent) equals resolveModelInternal(cwd, agent)', (t) => {
+  test('property: resolveModelFromConfig resolves from the config it is given, not from the cwd config file', (t) => {
     const fc = require('./helpers/fast-check-setup.cjs');
     const { loadConfig } = require('../gsd-core/bin/lib/config-loader.cjs');
     const { MODEL_PROFILES } = require('../gsd-core/bin/lib/model-profiles.cjs');
-    const dir = makeTempProject();
-    t.after(() => cleanup(dir));
-    fc.assert(fc.property(
-      fc.constantFrom(...Object.keys(MODEL_PROFILES)),
-      fc.constantFrom('quality', 'balanced', 'budget', 'adaptive', 'inherit'),
-      fc.constantFrom(undefined, 'claude', 'codex'),
-      fc.constantFrom(undefined, 'omit'),
-      fc.constantFrom(undefined, 'opus', 'sonnet', 'claude-opus-4-1', 'gpt-5'),
-      (agent, model_profile, runtime, resolve_model_ids, override) => {
-        writeConfig(dir, { model_profile, ...(runtime ? { runtime } : {}), ...(resolve_model_ids ? { resolve_model_ids } : {}),
-          ...(override ? { model_overrides: { [agent]: override } } : {}) });
-        return modelResolver.resolveModelFromConfig(loadConfig(dir), dir, agent) === resolveModelInternal(dir, agent);
-      }), { numRuns: 60 });
+    const given = makeTempProject();
+    const other = makeTempProject();
+    t.after(() => { cleanup(given); cleanup(other); });
+    const shape = fc.record({
+      model_profile: fc.constantFrom('quality', 'balanced', 'budget', 'adaptive', 'inherit'),
+      runtime: fc.constantFrom(undefined, 'claude', 'codex'),
+      override: fc.constantFrom(undefined, 'opus', 'sonnet', 'claude-opus-4-1', 'gpt-5'),
+    });
+    fc.assert(fc.property(fc.constantFrom(...Object.keys(MODEL_PROFILES)), shape, shape, fc.constantFrom(undefined, 'omit'),
+      (agent, a, b, resolve_model_ids) => {
+        // resolve_model_ids is shared: the explicit-omit check reads it from the cwd's file by design
+        const toConfig = (c) => ({ model_profile: c.model_profile, ...(c.runtime ? { runtime: c.runtime } : {}),
+          ...(resolve_model_ids ? { resolve_model_ids } : {}), ...(c.override ? { model_overrides: { [agent]: c.override } } : {}) });
+        writeConfig(given, toConfig(a));
+        writeConfig(other, toConfig(b));
+        return modelResolver.resolveModelFromConfig(loadConfig(given), other, agent) === resolveModelInternal(given, agent);
+      }), { numRuns: 80 });
   });
 });

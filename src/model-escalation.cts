@@ -4,7 +4,7 @@
  *
  * Single slot per agent type: `.gsd/model-escalation-<agent>.json` holds the model
  * an escalation resolved, when, and (when known) the session that asked for it.
- * The guard honours it for ESCALATION_WINDOW_MS, only for that model and, when the
+ * The guard honours it for ESCALATION_WINDOW_MS, only for a model of the same tier family and, when the
  * dispatch knows its session id, only if the record carries that session. Unauthenticated by design: a
  * guard against drift, not a security boundary.
  */
@@ -13,7 +13,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { realClock, type Clock } from './clock.cjs';
 import { retryRenameSync } from './shell-command-projection.cjs';
-import { MAX_READ_BYTES, prepareGsdDir } from './gsd-dir.cjs';
+import { MAX_READ_BYTES, prepareGsdDir, readSmallGsdFile } from './gsd-dir.cjs';
+import { CLAUDE_AGENT_ALIASES } from './model-catalog.cjs';
 
 export const ESCALATION_WINDOW_MS = 10 * 60 * 1000;
 /** Tolerated clock skew for a record stamped slightly in the future. */
@@ -33,10 +34,10 @@ export interface EscalationRecord {
 export const escalationFile = (root: string, agentType: string): string =>
   path.join(root, '.gsd', `model-escalation-${agentType}.json`);
 
-/** Compare at tier-alias level: `claude-sonnet-4-6` and `sonnet` are the same. */
+/** Compare at tier-alias level: `claude-sonnet-4-6` and `sonnet` are the same. The tier names are model-catalog's CLAUDE_AGENT_ALIASES. */
 export function modelFamily(model: unknown): string {
   const s = String(model).toLowerCase();
-  return /(?:^|[^a-z0-9])(opus|sonnet|haiku|fable)(?:$|[^a-z])/.exec(s)?.[1] ?? s;
+  return new RegExp(`(?:^|[^a-z0-9])(${[...CLAUDE_AGENT_ALIASES].join('|')})(?:$|[^a-z])`).exec(s)?.[1] ?? s;
 }
 
 /**
@@ -70,26 +71,13 @@ export function writeEscalation(
   writeAtomic(escalationFile(root, agentType), JSON.stringify(rec));
 }
 
-/** Parsed record, or null when absent, a symlink, non-regular, oversized or unparseable. */
+/** Parsed record, or null when absent, a symlink, non-regular, oversized or unparseable (readSmallGsdFile). */
 export function readEscalation(root: string, agentType: string): EscalationRecord | null {
-  // Own no-follow open, not the shared reader (it follows links; SKILL.md and others rely on that).
-  // O_NOFOLLOW closes the lstat-then-open race; win32 lacks it (and O_NONBLOCK), so there the lstat
-  // alone refuses a link, and a swap after it needs repo write access, which forges a record anyway.
-  const { O_RDONLY, O_NONBLOCK, O_NOFOLLOW } = fs.constants;
-  let fd: number | undefined;
   try {
-    const file = escalationFile(root, agentType);
-    if (fs.lstatSync(file).isSymbolicLink()) return null;
-    fd = fs.openSync(file, O_RDONLY | (O_NONBLOCK || 0) | (O_NOFOLLOW || 0));
-    if (!fs.fstatSync(fd).isFile()) return null; // FIFO, device
-    const buf = Buffer.alloc(MAX_READ_BYTES + 1);
-    let n = 0;
-    for (let r; n < buf.length && (r = fs.readSync(fd, buf, n, buf.length - n, n)) > 0;) n += r;
-    return n > MAX_READ_BYTES ? null : JSON.parse(buf.toString('utf8', 0, n)) as EscalationRecord;
+    const text = readSmallGsdFile(escalationFile(root, agentType));
+    return text === null ? null : JSON.parse(text) as EscalationRecord;
   } catch {
     return null;
-  } finally {
-    if (fd !== undefined) fs.closeSync(fd);
   }
 }
 

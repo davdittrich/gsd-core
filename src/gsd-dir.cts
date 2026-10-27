@@ -14,10 +14,33 @@ import { retryRenameSync } from './shell-command-projection.cjs';
 export const MAX_READ_BYTES = 64 * 1024;
 
 /**
+ * Read a small file under `.gsd/` as UTF-8: null when it is not a regular file (a FIFO, a device) or holds
+ * more than MAX_READ_BYTES, whatever fstat said before the read. Never follows a link: throws (code ELOOP)
+ * on a symlink, and any open error (ENOENT included) propagates. O_NONBLOCK keeps a planted FIFO from
+ * blocking the open. Not capability-ledger's readSmallRegularFile: that reader follows links, which its
+ * callers rely on. win32 lacks O_NOFOLLOW and O_NONBLOCK: there the lstat alone refuses a link, a swap
+ * after it needs repo write access (which can forge the file anyway), and FIFOs do not exist.
+ */
+export function readSmallGsdFile(file: string): string | null {
+  const { O_RDONLY, O_NONBLOCK, O_NOFOLLOW } = fs.constants;
+  if (fs.lstatSync(file).isSymbolicLink()) throw Object.assign(new Error(`${file} is a symlink`), { code: 'ELOOP' });
+  const fd = fs.openSync(file, O_RDONLY | (O_NONBLOCK || 0) | (O_NOFOLLOW || 0));
+  try {
+    if (!fs.fstatSync(fd).isFile()) return null;
+    const buf = Buffer.alloc(MAX_READ_BYTES + 1);
+    let n = 0;
+    for (let r; n < buf.length && (r = fs.readSync(fd, buf, n, buf.length - n, n)) > 0;) n += r;
+    return n > MAX_READ_BYTES ? null : buf.toString('utf8', 0, n);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/**
  * Create `<root>/.gsd` and make git ignore `rules` there, under the marker `# gsd-core <name>`; returns
  * the directory. Throws when `.gsd` is a symlink or resolves outside `root`, or `.gsd/.gitignore` is a
- * symlink. Any other ignore-file failure, and a `.gitignore` over MAX_READ_BYTES, leaves the rules as
- * they are: the caller's own write still happens.
+ * symlink. Any other ignore-file failure, and a `.gitignore` that is not a regular file or holds over
+ * MAX_READ_BYTES, leaves the rules as they are: the caller's own write still happens.
  */
 export function prepareGsdDir(root: string, name: string, rules: readonly string[]): string {
   const dir = path.join(root, '.gsd');
@@ -33,30 +56,22 @@ export function prepareGsdDir(root: string, name: string, rules: readonly string
     fs.writeFileSync(ignore, '*\n', { flag: 'wx' });
   } catch (seedError) {
     if ((seedError as NodeJS.ErrnoException).code !== 'EEXIST') return dir;
-    // Keep a pre-existing file; a bare `*` already ignores everything here. Read through an fd opened
-    // without following links where supported, and replace by rename, so a link swapped in after the
+    // Keep a pre-existing file; a bare `*` already ignores everything here. Read it with the one .gsd/
+    // reader (no link, no FIFO block, bounded), and replace by rename, so a link swapped in after the
     // check cannot redirect the write.
-    let fd: number | undefined;
     let tmp: string | null = null;
     try {
-      if (fs.lstatSync(ignore).isSymbolicLink()) throw new Error(linked);
-      fd = fs.openSync(ignore, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
-      const st = fs.fstatSync(fd);
-      if (!st.isFile() || st.size > MAX_READ_BYTES) return dir;
-      const current = fs.readFileSync(fd, 'utf8');
-      fs.closeSync(fd);
-      fd = undefined;
-      if (!current.includes(marker) && !/^\*\r?$/m.test(current)) {
+      const current = readSmallGsdFile(ignore);
+      if (current !== null && !current.includes(marker) && !/^\*\r?$/m.test(current)) {
         tmp = `${ignore}.tmp-${process.pid}-${crypto.randomBytes(6).toString('hex')}`;
         fs.writeFileSync(tmp, `${current}${current.endsWith('\n') ? '' : '\n'}${marker}\n${rules.join('\n')}\n`, { flag: 'wx' });
         if (fs.lstatSync(ignore).isSymbolicLink()) throw new Error(linked);
-        retryRenameSync(tmp, ignore); // D14: the guarded rename (bounded retry on a Windows lock errno)
+        retryRenameSync(tmp, ignore); // guarded rename: bounded retry on a Windows lock errno (DEFECT.WINDOWS-FS-OPS)
         tmp = null;
       }
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code === 'ELOOP' || (e as Error).message === linked) throw new Error(linked);
     } finally {
-      if (fd !== undefined) fs.closeSync(fd);
       if (tmp) { try { fs.unlinkSync(tmp); } catch { /* best-effort cleanup */ } }
     }
   }

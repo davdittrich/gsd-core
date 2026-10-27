@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const fc = require('./helpers/fast-check-setup.cjs');
 const { createTempDir, cleanup } = require('./helpers.cjs');
-const { prepareGsdDir, MAX_READ_BYTES } = require('../gsd-core/bin/lib/gsd-dir.cjs');
+const { prepareGsdDir, readSmallGsdFile, MAX_READ_BYTES } = require('../gsd-core/bin/lib/gsd-dir.cjs');
 
 const NAME = 'model escalation';
 const RULES = ['/model-escalation-*'];
@@ -57,4 +57,35 @@ test('a symlinked .gsd directory is refused and nothing is written through it', 
   fs.symlinkSync(elsewhere, path.join(root, '.gsd'));
   assert.throws(() => prepareGsdDir(root, NAME, RULES));
   assert.deepEqual(fs.readdirSync(elsewhere), []);
+});
+
+test('a .gitignore that grows past MAX_READ_BYTES after fstat is still not read past the bound', (t) => {
+  const root = createTempDir('gsd-dir-grow-');
+  t.after(() => cleanup(root));
+  fs.mkdirSync(path.join(root, '.gsd'));
+  const start = '#'.repeat(MAX_READ_BYTES + 1);
+  fs.writeFileSync(path.join(root, '.gsd', '.gitignore'), start);
+  const realFstat = fs.fstatSync;
+  t.mock.method(fs, 'fstatSync', (...args) => Object.assign(realFstat(...args), { size: 1 })); // fstat saw it small
+  prepareGsdDir(root, NAME, RULES);
+  assert.equal(fs.readFileSync(path.join(root, '.gsd', '.gitignore'), 'utf8'), start);
+});
+
+test('property: readSmallGsdFile returns a regular file whole iff it holds at most MAX_READ_BYTES (limit-1, limit, limit+1)', (t) => {
+  const root = createTempDir('gsd-dir-read-');
+  t.after(() => cleanup(root));
+  const file = path.join(root, 'f');
+  fc.assert(fc.property(fc.integer({ min: -3, max: 3 }), fc.constantFrom('a', '#', '*'), (delta, ch) => {
+    const text = ch.repeat(MAX_READ_BYTES + delta);
+    fs.writeFileSync(file, text);
+    return readSmallGsdFile(file) === (delta <= 0 ? text : null);
+  }), { numRuns: 30 });
+});
+
+test('readSmallGsdFile refuses a symlink with ELOOP', { skip: process.platform === 'win32' }, (t) => {
+  const root = createTempDir('gsd-dir-readlink-');
+  t.after(() => cleanup(root));
+  fs.writeFileSync(path.join(root, 'target'), 'x');
+  fs.symlinkSync(path.join(root, 'target'), path.join(root, 'link'));
+  assert.throws(() => readSmallGsdFile(path.join(root, 'link')), { code: 'ELOOP' });
 });
