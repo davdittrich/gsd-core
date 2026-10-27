@@ -53,11 +53,11 @@
 // gsd-executor/verifier/plan-checker/planner differs from the resolved one
 // (hooks/lib/agent-model-check.js); the isolation verdict always wins.
 //
-// Triggers on: Agent/Task tool calls with subagent_type === "gsd-executor"
+// Isolation check triggers on: Agent/Task tool calls with subagent_type === "gsd-executor"
 //   (both names accepted — #3045 MAJOR 1: only Agent was previously matched,
 //   silently inert on any host/version whose subagent tool is named Task).
 // Action: BLOCK (exit 2) when isolation should be enforced and is not
-// No-op: any tool other than Agent/Task, non-executor targets, GSD projects
+// Isolation no-op: any tool other than Agent/Task, non-executor targets, GSD projects
 //        whose resolved isolation is not harness-worktree, non-GSD projects,
 //        malformed payloads, or a dispatch that already carries the correct
 //        isolation parameter.
@@ -89,7 +89,7 @@ const { checkAgentModel } = require('./lib/agent-model-check.js');
 // that outer catch only covers payload PARSING failing before applicability
 // could even be determined (malformed stdin JSON, etc.) — the guard's real
 // fail-closed logic (a GSD project whose dispatch-isolation configuration
-// cannot be verified) is handled separately, inside evaluateDispatch/
+// cannot be verified) is handled separately, inside evaluateIsolation/
 // resolveIsolationState, and already returns a 'block' decision through the
 // normal exit-2 path rather than through this catch. So an unparseable
 // payload has nothing to enforce; allowing it preserves today's behavior
@@ -285,7 +285,7 @@ function resolveRegistryIsolation(cwd, configPath) {
   // is the sole caller of each), so one call here covers both. Throws
   // RuntimeBuildError on an unbuildable tree; the caller (resolveIsolationState)
   // already wraps this whole function in try/catch and folds any error into
-  // its fail-closed `error` result — evaluateDispatch below distinguishes a
+  // its fail-closed `error` result — evaluateIsolation below distinguishes a
   // RuntimeBuildError there so it surfaces this seam's actionable message
   // instead of being misreported as an unreadable config.json (#3050 lesson).
   ensureRuntimeBuild();
@@ -487,7 +487,7 @@ function resolveIsolationState(cwd, { clock = Date, dispatchIds = null } = {}) {
   //
   // #4594 row 15: a PRESENT, FRESH sentinel that simply does not apply to
   // THIS dispatch (identifiers disagree) is a distinct case from "absent" or
-  // "stale" — record what was discarded so evaluateDispatch can name it in a
+  // "stale" — record what was discarded so evaluateIsolation can name it in a
   // block reason instead of silently falling through to a registry-resolution
   // message that never mentions the sentinel existed.
   const sentinelDiscarded = buildSentinelDiscard(sentinel, dispatchIds);
@@ -501,15 +501,13 @@ function resolveIsolationState(cwd, { clock = Date, dispatchIds = null } = {}) {
 }
 
 /**
- * Process one PreToolUse payload (already JSON-parsed) and return the
- * decision without touching stdin/stdout/process.exit — the exported,
- * directly-testable core of this hook's logic (#3045 MAJOR: "the clock seam
- * is dead code" fix). The stdin-driven script below is now a thin adapter
- * over this function so tests can `require()` it and inject a `clock`
- * (`{now(): number}`) directly per the repo's clock-seam convention, instead
- * of racing real `Date.now()` across a spawned subprocess boundary.
+ * The isolation half of evaluateDispatch: process one PreToolUse payload (already JSON-parsed) and
+ * return the isolation decision without touching stdin/stdout/process.exit. Tests reach it through
+ * the exported evaluateDispatch and inject a `clock` (`{now(): number}`) there per the repo's
+ * clock-seam convention (#3045 MAJOR: "the clock seam is dead code" fix), instead of racing real
+ * `Date.now()` across a spawned subprocess boundary.
  *
- * Returns `{ action: 'allow' } | { action: 'block', reason: string }`.
+ * Returns `{ action: 'allow' } | { action: 'block', reason: string, ... }`.
  */
 function evaluateIsolation(data, { clock = Date } = {}) {
   if (!data || typeof data !== 'object') return { action: 'allow' };
@@ -583,8 +581,8 @@ function evaluateIsolation(data, { clock = Date } = {}) {
 }
 
 /**
- * #5328: isolation verdict first (a block always wins), then the Agent-model
- * check — warn/block on a model that differs from the resolved one.
+ * The exported, directly-testable core of this hook (#5328): the isolation verdict first (a block
+ * always wins), then the Agent-model check. Returns `{ action: 'allow' | 'warn' | 'block', ... }`.
  */
 function evaluateDispatch(data, opts = {}) {
   const iso = evaluateIsolation(data, opts);
