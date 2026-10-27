@@ -546,6 +546,7 @@ function resolvePhaseContext(
   phaseArg: string | undefined,
   phaseDirArg: string | undefined,
   projectCode: unknown,
+  phaseNaming: unknown,
 ): { context: PhaseContext | undefined; warnings: string[]; drop?: PhaseDrop } {
   let phaseContext: PhaseContext | undefined;
   let drop: PhaseDrop | undefined;
@@ -557,7 +558,7 @@ function resolvePhaseContext(
   if (phaseArg !== undefined) {
     // guardedFindPhase is typed Record<string, unknown> | null; narrow once to
     // the fields read below.
-    const phaseResult = guardedFindPhase(cwd, phaseArg, projectCode) as {
+    const phaseResult = guardedFindPhase(cwd, phaseArg, projectCode, phaseNaming) as {
       found: boolean;
       directory: string;
       phase_number: string;
@@ -704,6 +705,7 @@ function resolveActiveHooksForPoint(
     typeof options['phase'] === 'string' ? options['phase'] : undefined,
     typeof options['phaseDir'] === 'string' ? options['phaseDir'] : undefined,
     config['project_code'],
+    config['phase_naming'],
   );
 
   // ── ADR-1244 D2: load-failed capability gates FAIL OPEN with a loud warning ────
