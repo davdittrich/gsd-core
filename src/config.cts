@@ -1290,8 +1290,8 @@ function validateConfigValue(cwd: string, kp: string, parsedValue: unknown, val:
   const VALID_CONTEXT_GUARD_MODES = ['auto', 'warn', 'off'];
   if (kp === 'workflow.context_guard_mode') assertEnumValue(parsedValue, val, VALID_CONTEXT_GUARD_MODES, 'workflow.context_guard_mode');
 
-  // #5328: warn|deny|false. The hook treats any other stored value as warn.
-  if (kp === 'hooks.agent_model_guard' && parsedValue !== false) assertEnumValue(parsedValue, val, ['warn', 'deny'], 'hooks.agent_model_guard');
+  // #5328: warn|deny|false (config-set parses "false" to the boolean). The hook treats any other stored value as warn.
+  if (kp === 'hooks.agent_model_guard') assertEnumValue(parsedValue === false ? 'false' : parsedValue, val, ['warn', 'deny', 'false'], 'hooks.agent_model_guard');
 
   // Context position enum validation (#2937)
   const VALID_CONTEXT_POSITIONS = ['front', 'end'];
