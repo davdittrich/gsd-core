@@ -2579,6 +2579,14 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
     } finally {
       CLAUDE_AGENT_ALIASES.delete('zephyr');
     }
+    CLAUDE_AGENT_ALIASES.add('o.1'); // a regex metacharacter in a name must match literally
+    try {
+      assert.equal(modelFamily('claude-o.1-2'), 'o.1');
+      assert.equal(modelFamily('claude-ox1-2'), 'claude-ox1-2');
+    } finally {
+      CLAUDE_AGENT_ALIASES.delete('o.1');
+    }
+    assert.equal(modelFamily('claude-sonnet-4-6'), 'sonnet', 'the cache follows the set back');
   });
 
   test('a workstream activated only by the stored pointer decides the expected model, as init resolves it', (t) => {

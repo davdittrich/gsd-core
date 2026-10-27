@@ -15,6 +15,7 @@ import { realClock, type Clock } from './clock.cjs';
 import { retryRenameSync } from './shell-command-projection.cjs';
 import { MAX_READ_BYTES, prepareGsdDir, readSmallGsdFile } from './gsd-dir.cjs';
 import { CLAUDE_AGENT_ALIASES } from './model-catalog.cjs';
+import { escapeRegex } from './pattern.cjs';
 
 export const ESCALATION_WINDOW_MS = 10 * 60 * 1000;
 /** Tolerated clock skew for a record stamped slightly in the future. */
@@ -35,9 +36,17 @@ export const escalationFile = (root: string, agentType: string): string =>
   path.join(root, '.gsd', `model-escalation-${agentType}.json`);
 
 /** Compare at tier-alias level: `claude-sonnet-4-6` and `sonnet` are the same. The tier names are model-catalog's CLAUDE_AGENT_ALIASES. */
+// Compiled once per alias set: the set is mutable, so the regex is rebuilt only when its contents change.
+let familyKey: string | null = null;
+let familyRe = /$^/;
 export function modelFamily(model: unknown): string {
+  const key = [...CLAUDE_AGENT_ALIASES].join('\n');
+  if (key !== familyKey) {
+    familyRe = new RegExp(`(?:^|[^a-z0-9])(${[...CLAUDE_AGENT_ALIASES].map(escapeRegex).join('|')})(?:$|[^a-z])`);
+    familyKey = key;
+  }
   const s = String(model).toLowerCase();
-  return new RegExp(`(?:^|[^a-z0-9])(${[...CLAUDE_AGENT_ALIASES].join('|')})(?:$|[^a-z])`).exec(s)?.[1] ?? s;
+  return familyRe.exec(s)?.[1] ?? s;
 }
 
 /**
