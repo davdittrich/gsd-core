@@ -4697,15 +4697,16 @@ locator's, never the supplied string. This catches the mismatch a containment
 check cannot: `--phase 05 --phase-dir .planning/phases/07-other` names two
 different phases that are *both* inside the project.
 
-**Known limits:**
+**Contract at the edges:**
 - Omitting `--phase` reproduces the previous envelope exactly — no
   `context` key appears and no fallback phase is invented.
-- A token that matches no phase directory, matches more than one, or
+- A token that matches no phase directory, matches more than one, matches
+  only an archived milestone's phase, resolves outside `.planning/phases`, or
   carries a foreign project-code prefix omits `context` and appends to the
   existing `warnings` array. `--phase` degrades; it never fails a render.
 - `ship:*` is not a phase-scoped point and is unchanged (shipping runs at
-  the milestone/project level); `audit-milestone.md` and `quick.md` hold no
-  phase to pass either.
+  the milestone/project level); `audit-milestone.md`, `quick.md`,
+  `quick-batch` and the code-review reviewer lane hold no phase to pass either.
 
 ---
 

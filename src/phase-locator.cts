@@ -590,6 +590,16 @@ function getAllArchivedPhaseDirs(cwd: string): ArchivedPhaseDir[] {
   return out;
 }
 
+/** True when the resolved phase's number equals the query token, ignoring case: the exact-prefix check guardedFindPhase applies to a foreign-prefixed token. */
+function phaseInfoMatchesExactPrefix(
+  phaseInfo: Record<string, unknown> | null,
+  phase: string,
+): boolean {
+  const num = phaseInfo?.['phase_number'];
+  const numStr = typeof num === 'string' ? num : (typeof num === 'number' ? String(num) : '');
+  return numStr.toUpperCase() === phase.toUpperCase();
+}
+
 /**
  * #2056 / #2105: `findPhaseInternal` matches a phase token against on-disk
  * directories with no notion of project scope, so a token carrying a FOREIGN
@@ -603,15 +613,6 @@ function getAllArchivedPhaseDirs(cwd: string): ArchivedPhaseDir[] {
  * and routing that through the first consumer (`init.cts`) would have inverted
  * the dependency tree and closed a require cycle.
  */
-function phaseInfoMatchesExactPrefix(
-  phaseInfo: Record<string, unknown> | null,
-  phase: string,
-): boolean {
-  const num = phaseInfo?.['phase_number'];
-  const numStr = typeof num === 'string' ? num : (typeof num === 'number' ? String(num) : '');
-  return numStr.toUpperCase() === phase.toUpperCase();
-}
-
 function guardedFindPhase(
   cwd: string,
   phase: string,

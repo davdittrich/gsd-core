@@ -1570,14 +1570,18 @@ gsd capability remove my-cap --scope project          # Turn the installed overl
 ---
 
 ### `gsd-tools loop render-hooks`
-Resolve and render the active Capability hooks at a Loop Extension Point. Emits `{ point, activeHooks[], rendered, warnings?, context? }`.
+Resolve and render the active Capability hooks at a Loop Extension Point. Emits `{ point, activeHooks[], rendered, warnings?, skippedHooks?, context? }`.
 
 | Flag | Description |
 |------|-------------|
 | `<point>` | Loop Extension Point, e.g. `plan:pre` |
-| `--phase <token>` | Bare phase token (`05`, `07.5`). Adds `context: { phase, phaseDir }`, authoritative for task-local phase; omitted token means no `context` key. No match, ambiguity or foreign `project_code` prefix omits `context` with a warning. |
+| `--phase <token>` | Bare phase token (`05`, `07.5`). Adds `context: { phase, phaseDir }`, authoritative for task-local phase; omitted token means no `context` key. No match, ambiguity, a foreign `project_code` prefix, a match only in an archived milestone, or a directory outside `.planning/phases` omits `context` with a warning. |
 | `--phase-dir <dir>` | Optional cross-check against the resolved directory; requires `--phase`. A different directory omits `context` with a warning. Emitted `phaseDir` is always the resolver's. |
 | `--config-dir <path>` | Runtime config directory for surface resolution |
+| `--runtime <r>` | Override the auto-detected runtime so the config directory resolves to that runtime's home (#2003) |
+| `--active-cap <capId>` | Print only `true` or `false`: whether that capability has an active hook at `<point>` |
+| `--after-fingerprint <phaseDir>` | Move `verify:post` steps whose declared artifact already exists in `phaseDir` into `skippedHooks` (#5105) |
+| `--raw` | Raw output mode; every workflow call site passes it |
 
 ---
 

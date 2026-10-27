@@ -179,9 +179,9 @@ function roadmapPhaseMatchesExactPrefix(
   return new RegExp(`^#{2,4}\\s*Phase\\s+${escapeRegex(phase)}(?:\\b|\\s|:)`, 'i').test(section);
 }
 
-// #2104: shared helpers that wrap findPhaseInternal / getRoadmapPhaseInternal
-// with the #2056 foreign-prefix guard, so every init command gets the same
-// protection without duplicating the guard logic at each call site.
+// #2104: guardedGetRoadmapPhase wraps getRoadmapPhaseInternal with the #2056
+// foreign-prefix guard, so every init command gets the same protection; its
+// phase-directory twin, guardedFindPhase, lives in phase-locator.cts (#4030).
 function guardedGetRoadmapPhase(
   cwd: string,
   phase: string,

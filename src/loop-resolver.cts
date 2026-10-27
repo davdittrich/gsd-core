@@ -507,7 +507,7 @@ interface PhaseContext {
   phaseDir: string;
 }
 
-/** Why a supplied --phase/--phase-dir produced no context; carried beside the warning text so callers and tests branch on the code, not the prose. */
+/** Why a supplied --phase/--phase-dir produced no context. In-process callers and tests branch on this code; the CLI envelope carries only the warning text. */
 const PHASE_DROP = Object.freeze({
   ARCHIVED: 'ARCHIVED',
   ESCAPES_ROOT: 'ESCAPES_ROOT',
@@ -746,12 +746,11 @@ function resolveActiveHooksForPoint(
     }
   }
   // Emit loudly to stderr in EVERY output mode (including --active-cap), so a
-  // skipped gate or a dropped #4030 phase context is never silently invisible
-  // to the operator/agent — no host workflow reads `.warnings` back out of
-  // the `*_HOOKS_JSON` envelope it captures, so stderr is the only channel
-  // that actually surfaces these today. Deliberately excludes state.warnings
-  // (unlike combinedWarnings below): that channel predates #4030 and its own
-  // scope was never stderr — not this fix's call to widen.
+  // skipped gate or a dropped #4030 phase context reaches the operator/agent
+  // even when the caller only captures the `*_HOOKS_JSON` envelope. The phase
+  // warnings also stay in the envelope's `warnings`, which loop-hook-dispatch.md
+  // reads to choose the ref.command phase argument. state.warnings is not written
+  // here (unlike combinedWarnings below): that channel never went to stderr.
   for (const w of loadFailWarnings) {
     process.stderr.write(`gsd: warning — ${w}\n`);
   }

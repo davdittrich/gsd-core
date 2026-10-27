@@ -33,7 +33,7 @@ executes. Absent `context` means `--phase` was omitted, or it was dropped: it ma
 directory or several, matched only an archived milestone's phase, resolved to a directory
 outside the project's `.planning/phases` tree, or disagreed with `--phase-dir`; `--phase-dir`
 without `--phase` is dropped too. Every case except an omitted `--phase` appends a warning to
-`warnings` — dispatch exactly as if no phase applied, passing no phase argument.
+`warnings`. A dropped token is never passed on; `ref.command` below says when the host's own `PHASE_NUMBER` stands in.
 
 ## Dispatch rules by `kind`
 
@@ -41,6 +41,7 @@ without `--phase` is dropped too. Every case except an omitted `--phase` appends
 
 Inject `fragment.inline` verbatim into the context for the role named in `into`
 (e.g. `orchestrator`, `planner`). Do not paraphrase — the text is the product.
+`context` does not apply to a `contribution`: its fragment is injected as written.
 
 ### `step`
 
@@ -48,8 +49,8 @@ Dispatch the referenced unit. Exactly one of `ref.skill`, `ref.agent`, or `ref.c
 
 - `ref.skill` present → dispatch via the Skill tool with skill id `gsd-<ref.skill>`. When
   `context` is present, pass `context.phase` as the skill's args (e.g.
-  `args="${context.phase}"`, plus whatever else that host's own dispatch already appends —
-  this file is point-agnostic and assumes no ambient shell variable exists) — skills diverge sharply on what an omitted phase argument does: some (e.g.
+  `args="${context.phase}"`), plus whatever else that host's own dispatch already appends.
+  Skills diverge sharply on what an omitted phase argument does: some (e.g.
   `code-review`) exit with "Phase not found"; others (e.g. `validate-phase`, whose
   `argument-hint` documents "optional, defaults to last completed phase") silently fall back
   to artifact-order inference, exactly the failure mode this field exists to close.

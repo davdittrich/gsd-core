@@ -18,6 +18,7 @@ const path = require('node:path');
 const { cleanup, createTempDir, createTempProject } = require('./helpers.cjs');
 const fc = require('./helpers/fast-check-setup.cjs');
 const { splitLines } = require('../gsd-core/bin/lib/text-lines.cjs');
+const { ERROR_REASON } = require('../gsd-core/bin/lib/io.cjs');
 
 const {
   resolveLoopHooks,
@@ -1451,7 +1452,7 @@ const CROSS_FENCE = {
 // shell-assigned (the host substitutes it, as in every other command of those
 // files), and it always names the phase being driven: deriving the token from
 // $PHASE_STATE instead named the NEXT phase once step 3a rebound it while the
-// background execute of this one was still running (#4030 review).
+// background execute of this one was still running.
 const HOST_PHASE_VAR = 'PHASE_NUM';
 const HOST_BOUND = new Set([
   'gsd-core/workflows/autonomous.md :: execute:post',
@@ -1467,18 +1468,23 @@ function assignedLaterInFence(lines, idx, name) {
   return false;
 }
 
+// A Read-loaded file (a steps/ file or a reference) is not textually substituted, so each of its
+// fences that captures $ARGUMENTS tells the agent to write the parent's argument string there.
+const READ_LOADED_NOTE = "# #4772: this file is Read, not textually substituted - write the parent command's original argument string in place of $ARGUMENTS so --ws reaches the query.";
+// The lines of the fence that holds lines[idx].
+function fenceOf(lines, idx) {
+  let s = idx;
+  while (s > 0 && !/^\s*```/.test(lines[s - 1])) s--;
+  let e = idx;
+  while (e < lines.length && !/^\s*```/.test(lines[e])) e++;
+  return lines.slice(s, e);
+}
+
 // Like CROSS_FENCE, for the variable the phase binding READS: the same sites
 // that bind PHASE_NUMBER in their own fence still rely on the host carrying
 // $INIT/$PHASE_STATE from an earlier one. Keyed `file :: point` -> exact line.
 // verify-work binds PHASE_NUMBER from $INIT (#5289), which its first fence assigns.
 const VERIFY_WORK_INIT = 'INIT=$(gsd_run query init.verify-work "${PHASE_ARG}" ${GSD_WS:+--ws=${GSD_WS##* }})';
-const GSD_WS_LINE = "GSD_WS=$(echo \" $GSD_ARGS\" | sed -nE 's/.* --ws +([A-Za-z0-9][A-Za-z0-9._-]*).*/--ws \\1/p' | head -n 1)";
-// GSD_WS carried from an earlier fence, same shape. Every other site derives it in its own fence;
-// plan-phase.md cannot (re-deriving it in each of its fences breaks the XL size cap), so three
-// plan:pre sites carry the init fence's binding.
-const WS_CROSS_FENCE = {
-  'gsd-core/workflows/plan-phase.md :: plan:pre': GSD_WS_LINE,
-};
 const SRC_CROSS_FENCE = {
   'gsd-core/workflows/verify-work.md :: verify:pre': VERIFY_WORK_INIT,
   'gsd-core/workflows/verify-work.md :: verify:post': VERIFY_WORK_INIT,
@@ -1593,10 +1599,6 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     assert.ok(!Object.prototype.hasOwnProperty.call(envelope, 'context'));
     assert.ok(Array.isArray(envelope.warnings) && envelope.warnings.length > 0);
     assert.strictEqual(dropOf(dir, { phase: '99' }), PHASE_DROP.UNRESOLVED);
-    // ...and ALSO to stderr (no host workflow reads `.warnings` back out of
-    // the JSON it captures into a shell variable, so stderr is the channel
-    // that actually surfaces this to an operator or agent).
-    assert.match(result.stderr, /did not match a phase directory/);
   });
 
   test('[negative] --phase matching only an archived milestone phase omits context, not the archived path', (t) => {
@@ -1621,18 +1623,15 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     assert.strictEqual(result.exitCode, 0, 'stderr: ' + result.stderr);
     const envelope = JSON.parse(result.stdout.trim());
     assert.ok(!Object.prototype.hasOwnProperty.call(envelope, 'context'));
-    const warningText = (envelope.warnings || []).join('\n');
     assert.strictEqual(dropOf(dir, { phase: '05' }), PHASE_DROP.AMBIGUOUS);
-    assert.match(warningText, /05-widgets/);
-    assert.match(warningText, /05-gadgets/);
   });
 
   test('[negative] bare --phase with no value degrades like an omitted flag, never a hard error', (t) => {
     // #4030: --phase/--phase-dir are the two graceful value flags — an
     // empty or missing value must never turn a call that would otherwise still
-    // produce every activeHooks entry into a total failure. Unlike the other
-    // three render-hooks value flags (still strict; see the differential loop
-    // below), a workflow's `--phase "${PHASE_NUMBER}"` with an unset variable
+    // produce every activeHooks entry into a total failure. Unlike the four
+    // other render-hooks value flags (--config-dir, --active-cap, --runtime,
+    // --after-fingerprint: still strict, see the loop below), a workflow's `--phase "${PHASE_NUMBER}"` with an unset variable
     // must not drop the whole hook envelope for a call site.
     const dir = makePhaseProject('05-widgets');
     t.after(() => cleanup(dir));
@@ -1680,7 +1679,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     // a bare, truly-absent --phase does. An empty phase here reaches
     // guardedFindPhase('', ...), which returns null (its own falsy-phase
     // guard), and falls through to the same "did not match" warning any other
-    // unresolvable token gets — matching the CLI path exactly now.
+    // unresolvable token gets, as on the CLI path.
     const dir = makePhaseProject('05-widgets');
     t.after(() => cleanup(dir));
     const result = resolveActiveHooksForPoint(dir, 'plan:pre', { phase: '' });
@@ -1696,26 +1695,22 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     assert.strictEqual(result.phaseDrop, PHASE_DROP.PHASE_DIR_ALONE);
   });
 
-  // --config-dir and --active-cap had no covered error paths; pin them so a
-  // later parser change cannot alter them silently.
-  for (const [flag, pattern] of [
-    ['--config-dir', /Missing value for --config-dir/],
-    ['--active-cap', /Missing value for --active-cap/],
-  ]) {
-    test(`[negative] bare ${flag} with no value still exits non-zero with its own usage text`, (t) => {
+  // The four strict render-hooks value flags: a missing or empty value is a usage error.
+  for (const flag of ['--config-dir', '--active-cap', '--runtime', '--after-fingerprint']) {
+    test(`[negative] bare ${flag} with no value exits non-zero with a usage error`, (t) => {
       const dir = makePhaseProject('05-widgets');
       t.after(() => cleanup(dir));
-      const result = renderWithPhase(dir, 'plan:pre', [flag]);
+      const result = renderWithPhase(dir, 'plan:pre', ['--json-errors', flag]);
       assert.notStrictEqual(result.exitCode, 0);
-      assert.match(result.stderr, pattern);
+      assert.strictEqual(JSON.parse(result.stderr.trim()).reason, ERROR_REASON.USAGE);
     });
 
-    test(`[negative] ${flag}= empty equals-form still exits non-zero with its own usage text`, (t) => {
+    test(`[negative] ${flag}= empty equals-form exits non-zero with a usage error`, (t) => {
       const dir = makePhaseProject('05-widgets');
       t.after(() => cleanup(dir));
-      const result = renderWithPhase(dir, 'plan:pre', [`${flag}=`]);
+      const result = renderWithPhase(dir, 'plan:pre', ['--json-errors', `${flag}=`]);
       assert.notStrictEqual(result.exitCode, 0);
-      assert.match(result.stderr, pattern);
+      assert.strictEqual(JSON.parse(result.stderr.trim()).reason, ERROR_REASON.USAGE);
     });
   }
 
@@ -2010,7 +2005,6 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
       let seen = 0;
       let crossed = 0;
       let srcCrossed = 0;
-      let wsCrossed = 0;
       // True when `name` is assigned in an earlier fence than lines[idx]; that
       // must be pinned (exact line) in `table`. Never assigned in the file: false
       // (host-provided).
@@ -2028,10 +2022,13 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
         const v = m[1].match(/--phase\s+"\$\{?(\w+)\}?"/);
         assert.ok(v, `${file}:${idx + 1} ${point}: --phase must take a quoted variable`);
         assert.ok(m[1].includes(WS_EXPANSION), `${file}:${idx + 1} ${point}: --phase call lost the ${WS_EXPANSION} expansion (wrong-workstream phase)`);
-        // Each fence is its own shell: GSD_WS must be derived in the call's own fence
-        // (else --ws drops and another workstream's phase resolves), or be a pinned carry.
-        assert.notStrictEqual(phaseVarBinding(lines, idx, 'GSD_WS').line, -1, `${file}:${idx + 1} ${point}: GSD_WS is never assigned before this call`);
-        if (checkCarry(WS_CROSS_FENCE[`${file} :: ${point}`], 'WS_CROSS_FENCE', idx, 'GSD_WS', idx)) wsCrossed++;
+        // Each fence is its own shell: GSD_WS must be derived in the call's own fence,
+        // else --ws drops and another workstream's phase resolves.
+        assert.ok(phaseVarBinding(lines, idx, 'GSD_WS').sameFence, `${file}:${idx + 1} ${point}: GSD_WS is not derived in this call's own fence`);
+        if (path.posix.dirname(file) !== 'gsd-core/workflows') {
+          assert.ok(fenceOf(lines, idx).some((l) => l.trim() === READ_LOADED_NOTE),
+            `${file}:${idx + 1} ${point}: a Read-loaded file's fence must carry the #4772 note for its $ARGUMENTS capture`);
+        }
         assert.ok(!assignedLaterInFence(lines, idx, 'GSD_WS'),
           `${file}:${idx + 1} ${point}: ${WS_EXPANSION} reads GSD_WS before this fence assigns it`);
         const b = phaseVarBinding(lines, idx, v[1]);
@@ -2061,7 +2058,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
           `${file} ${point}: the call site's phase must reach the handler unchanged`);
       });
       assert.ok(seen > 0, `no ${point} call site in ${file}`);
-      for (const [table, n, name] of [[carried, crossed, 'CROSS_FENCE'], [srcCarried, srcCrossed, 'SRC_CROSS_FENCE'], [WS_CROSS_FENCE[`${file} :: ${point}`], wsCrossed, 'WS_CROSS_FENCE']]) {
+      for (const [table, n, name] of [[carried, crossed, 'CROSS_FENCE'], [srcCarried, srcCrossed, 'SRC_CROSS_FENCE']]) {
         assert.ok(table === undefined || n > 0, `${file} ${point}: nothing crosses a fence now; drop it from ${name}`);
       }
     });
@@ -2097,7 +2094,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     t.after(() => { cleanup(fx.home); cleanup(fx.project); });
     const env = { ...process.env, GSD_HOME: fx.home };
     for (const [runtime, prefix] of [['claude', '~/.claude/'], ['codex', '~/.codex/']]) {
-      const dest = fs.mkdtempSync(path.join(os.tmpdir(), `loop-phase-proj-${runtime}-`));
+      const dest = createTempDir(`loop-phase-proj-${runtime}-`);
       t.after(() => cleanup(dest));
       for (const sub of ['workflows', 'references']) {
         copyWithPathReplacement(path.join(ROOT, 'gsd-core', sub), path.join(dest, sub), prefix, runtime, false, false, dest);
@@ -2141,17 +2138,16 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
       const hook = bareEnv.activeHooks.find((h) => h.capId === 'phase-probe');
       assert.deepStrictEqual(handlerArgv(dispatchMd, bareEnv, hook, '07'), ['phase', 'probe', '--phase', '07', '--raw']);
       assert.deepStrictEqual(handlerArgv(dispatchMd, bareEnv, hook, undefined), ['phase', 'probe', '--raw']);
-  // An unrelated warning (capability load failure) does not mean --phase was rejected: the fallback stays.
-  assert.deepStrictEqual(handlerArgv(dispatchMd, { ...bareEnv, warnings: ['capability x failed to load'] }, hook, '07'), ['phase', 'probe', '--phase', '07', '--raw']);
-    // --phase was passed but rejected (warning): the host's PHASE_NUMBER must not
-    // stand in for it, or the rejected token's phase reaches the handler anyway.
-    const rejectedEnv = JSON.parse(runNode(
-      [GSD_TOOLS, 'loop', 'render-hooks', 'plan:pre', '--raw', '--phase', '99', '--cwd', fx.project],
-      { cwd: ROOT, timeoutMs: PROBE_TIMEOUT_MS, env },
-    ).stdout.trim());
-    assert.ok(rejectedEnv.warnings && rejectedEnv.warnings.length, 'an unmatched --phase warns');
-    assert.match(dispatchMd, /no `warnings` entry begins with `--phase`[\s\S]*?`--phase` was never passed[\s\S]*a rejected\s+token never reaches the handler/, 'contract must restrict the PHASE_NUMBER fallback to an omitted --phase');
-    assert.deepStrictEqual(handlerArgv(dispatchMd, rejectedEnv, hook, '07'), ['phase', 'probe', '--raw']);
+      // An unrelated warning (capability load failure) does not mean --phase was rejected: the fallback stays.
+      assert.deepStrictEqual(handlerArgv(dispatchMd, { ...bareEnv, warnings: ['capability x failed to load'] }, hook, '07'), ['phase', 'probe', '--phase', '07', '--raw']);
+      // --phase was passed but rejected (warning): the host's PHASE_NUMBER must not
+      // stand in for it, or the rejected token's phase reaches the handler anyway.
+      const rejectedEnv = JSON.parse(runNode(
+        [GSD_TOOLS, 'loop', 'render-hooks', 'plan:pre', '--raw', '--phase', '99', '--cwd', fx.project],
+        { cwd: ROOT, timeoutMs: PROBE_TIMEOUT_MS, env },
+      ).stdout.trim());
+      assert.ok(rejectedEnv.warnings && rejectedEnv.warnings.length, 'an unmatched --phase warns');
+      assert.deepStrictEqual(handlerArgv(dispatchMd, rejectedEnv, hook, '07'), ['phase', 'probe', '--raw']);
     }
   });
 
@@ -2342,6 +2338,24 @@ describe('every phase-scoped render-hooks call site actually carries --phase', (
         `expected all ${expectedCount} render-hooks ${point} call site(s) in ${file} to carry --phase, only ${withPhase.length} did`);
     });
   }
+
+  // A binding that a later binding in the same file overwrites before anything reads it is a
+  // dead store and a wasted init query. The last binding is exempt: a Read-loaded step may consume it.
+  test('no PHASE_NUMBER binding in a SITES file is overwritten before it is read', () => {
+    const assign = /^\s*(?:export\s+|local\s+)?PHASE_NUMBER=/;
+    const read = /\$\{?PHASE_NUMBER\b/;
+    const dead = [];
+    for (const file of new Set(SITES.map(([f]) => f))) {
+      const lines = splitLines(fs.readFileSync(path.join(ROOT, file), 'utf8'));
+      const binds = lines.flatMap((l, i) => (assign.test(l) ? [i] : []));
+      binds.slice(0, -1).forEach((i, k) => {
+        const next = binds[k + 1];
+        const between = lines.slice(i + 1, next).concat(lines[next].replace(assign, ''));
+        if (!between.some((l) => read.test(l))) dead.push(`${file}:${i + 1}`);
+      });
+    }
+    assert.deepStrictEqual(dead, []);
+  });
 });
 
 

@@ -315,6 +315,11 @@ Capability-driven dispatch, same lazy-init pattern already used elsewhere in thi
 `PLAN_PRE_HOOKS_JSON`:
 
 ```bash
+IFS= read -rd '' GSD_ARGS <<'GSD_ARGS_END' || true
+$ARGUMENTS
+GSD_ARGS_END
+GSD_ARGS=${GSD_ARGS%$'\n'}
+GSD_WS=$(echo " $GSD_ARGS" | sed -nE 's/.* --ws +([A-Za-z0-9][A-Za-z0-9._-]*).*/--ws \1/p' | head -n 1)
 if [ -z "${PLAN_PRE_HOOKS_JSON:-}" ]; then
   PLAN_PRE_HOOKS_JSON=$(gsd_run loop render-hooks plan:pre --raw --phase "${PHASE_NUMBER}" ${GSD_WS:+--ws=${GSD_WS##* }})
 fi
@@ -412,6 +417,11 @@ fi
 ```
 
 ```bash
+IFS= read -rd '' GSD_ARGS <<'GSD_ARGS_END' || true
+$ARGUMENTS
+GSD_ARGS_END
+GSD_ARGS=${GSD_ARGS%$'\n'}
+GSD_WS=$(echo " $GSD_ARGS" | sed -nE 's/.* --ws +([A-Za-z0-9][A-Za-z0-9._-]*).*/--ws \1/p' | head -n 1)
 PHASE_DESC=$(gsd_run query roadmap.get-phase "${PHASE}" --pick section)
 if [ -z "${PLAN_PRE_HOOKS_JSON:-}" ]; then
   PLAN_PRE_HOOKS_JSON=$(gsd_run loop render-hooks plan:pre --raw --phase "${PHASE_NUMBER}" ${GSD_WS:+--ws=${GSD_WS##* }})
@@ -517,6 +527,11 @@ Continue to step 5.6. Security config is passed to the planner in step 8.
 > **Config semantics (cutover fix):** `workflow.ui_phase` gates UI-SPEC *generation* (step); `workflow.ui_safety_gate` gates the *planning block* (gate). Both-on = identical to OLD §5.6. Intended change: `{ui_phase:true, ui_safety_gate:false}` now auto-generates in pipelines but does NOT block manual planning (each key controls exactly what its description says).
 
 ```bash
+IFS= read -rd '' GSD_ARGS <<'GSD_ARGS_END' || true
+$ARGUMENTS
+GSD_ARGS_END
+GSD_ARGS=${GSD_ARGS%$'\n'}
+GSD_WS=$(echo " $GSD_ARGS" | sed -nE 's/.* --ws +([A-Za-z0-9][A-Za-z0-9._-]*).*/--ws \1/p' | head -n 1)
 PLAN_PRE_HOOKS_JSON=${PLAN_PRE_HOOKS_JSON:-$(gsd_run loop render-hooks plan:pre --raw --phase "${PHASE_NUMBER}" ${GSD_WS:+--ws=${GSD_WS##* }})}
 HOOKS_JSON="$PLAN_PRE_HOOKS_JSON"
 ```
@@ -1302,9 +1317,7 @@ Offer: 1) Force proceed, 2) Provide guidance and retry, 3) Abandon
 
 ## 12.5. Plan Bounce (Optional External Refinement)
 
-**Skip if:** `--skip-bounce`, `--gaps`, or bounce not activated (`--bounce` flag or `workflow.plan_bounce` config; `--skip-bounce` always wins). Requires `workflow.plan_bounce_script` set to a valid script path — warn and skip if bounce is activated with no script configured.
-
-For each `*-PLAN.md`: back it up to `*-PLAN.pre-bounce.md`, invoke `${BOUNCE_SCRIPT}` with the plan file and `workflow.plan_bounce_passes` (default 2), validate the result's YAML frontmatter integrity, and restore from backup on either broken frontmatter or a non-zero script exit. After all plans are bounced, re-run the plan checker (step 10) on the modified plans, restoring any that fail. Commit surviving bounced plans if at least one survived (`refactor(${padded_phase}): bounce plans through external refinement`), display a `{survived}/{total}` summary, and remove all `*-PLAN.pre-bounce.md` backups. Exact banner text, messages, and commands: `gsd-core/workflows/plan-phase/detail/elaboration.md` § 12.5.
+If `--bounce` is set or `workflow.plan_bounce` is true, and neither `--skip-bounce` nor `--gaps` is set: read and execute `gsd-core/workflows/plan-phase/steps/plan-bounce.md`. Otherwise skip.
 
 ## 13. Requirements Coverage Gate
 

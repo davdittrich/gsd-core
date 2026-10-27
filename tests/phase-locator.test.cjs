@@ -1805,8 +1805,6 @@ describe('migrated exemptions behave identically (#3882 rows E1/E2)', () => {
   });
 });
 
-// ─── F. The guard — both detectors, proven fail-capable ──────────────────
-
 // ─── guardedFindPhase — the #2237 foreign-prefix guard around findPhaseInternal ───
 //
 // #4030 moved this out of init.cts and exported it, because `loop render-hooks
@@ -1856,6 +1854,8 @@ describe('guardedFindPhase (#4030)', () => {
     assert.deepStrictEqual([...result.ambiguous_matches].sort(), ['05-gadgets', '05-widgets']);
   });
 });
+
+// ─── F. The guard — both detectors, proven fail-capable ──────────────────
 
 describe('lint-phase-enumeration-drift.cjs guard (#3882 rows F1-F3)', () => {
   test('F1: detector 2 (sentinel literal) still fires on a bare 999 outside phase-id.cts', () => {
