@@ -51,7 +51,7 @@
 //
 // #5328: also warns/denies (hooks.agent_model_guard) when the model passed for
 // gsd-executor/verifier/plan-checker/planner differs from the resolved one
-// (hooks/lib/agent-model-check.js); the isolation verdict always wins.
+// (hooks/lib/agent-model-check.js); an isolation block always wins.
 //
 // Isolation check triggers on: Agent/Task tool calls with subagent_type === "gsd-executor"
 //   (both names accepted — #3045 MAJOR 1: only Agent was previously matched,

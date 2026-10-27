@@ -2880,7 +2880,7 @@ function dispatchOverlayCapabilityCommand({ command, args, cwd, raw, error, load
       written_at: Date.now(),
     };
     try {
-      // User projects do not inherit gsd-core's root .gitignore: the one .gsd/ owner creates the
+      // User projects do not inherit gsd-core's root .gitignore: prepareGsdDir (gsd-dir.cjs) creates the
       // directory (never through a symlink or out of the project) and ignores the sentinel locally.
       require('./lib/gsd-dir.cjs').prepareGsdDir(cwd, 'dispatch sentinel', [
         '/dispatch-isolation-sentinel.json',
