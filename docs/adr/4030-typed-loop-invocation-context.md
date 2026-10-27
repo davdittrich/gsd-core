@@ -14,9 +14,10 @@
 `execute:wave:post`, `execute:post`, `verify:pre`, `verify:post`). `<token>` uses the same
 bare-tolerant grammar every phase-scoped workflow already holds
 (`phase_number` from its own `init.*` query — e.g. `"05"`), not the bracket
-display form. Workstream scoping needs no new plumbing: `gsd-tools.cjs`
+display form. Workstream scoping adds no resolver of its own: `gsd-tools.cjs`
 already resolves `--ws`/`GSD_WORKSTREAM` generically for every command before
-dispatch (`resolveActiveWorkstream` / `applyResolvedWorkstreamEnv`). Each phase-scoped
+dispatch (`resolveActiveWorkstream` / `applyResolvedWorkstreamEnv`), but only when
+it is told which workstream. Each phase-scoped
 `render-hooks` call site now forwards `${GSD_WS:+--ws=${GSD_WS##* }}`, so phase
 resolution and hook activation use the invoking workstream.
 
@@ -62,7 +63,8 @@ check — is rejected too, which confinement alone could never do.
 
 `guardedFindPhase` does not throw on a missing, ambiguous, or foreign-prefixed
 phase — it returns `null`/`found: false` (with `ambiguous_matches` when more
-than one directory matches). `cmdLoopRenderHooks` mirrors `cmdInitPhaseOp`'s
+than one directory matches), or a hit that exists only in an archived
+milestone (`archived` set). `cmdLoopRenderHooks` mirrors `cmdInitPhaseOp`'s
 existing #2237 handling of that same shape: `context` is omitted and a
 warning is appended to the envelope's existing `warnings` array, not thrown
 or exited non-zero — `--phase` degrades to "no context", it does not fail
@@ -70,8 +72,10 @@ the render. Omitting `--phase` entirely preserves today's `{ point,
 activeHooks, rendered, warnings? }` shape exactly.
 
 Generic `step` dispatch (`gsd-core/references/loop-hook-dispatch.md`)
-projects `context.phase` / `context.phaseDir` into the dispatched handler's
-invocation (CLI arg, agent prompt, or command payload per handler kind). `gate`
+hands `context` to the handler by kind: a `ref.skill` gets `context.phase` as
+its args, a `ref.agent` gets `context.phase` and `context.phaseDir` in its
+prompt, and a `ref.command` gets `--phase "<context.phase>"` (never
+`context.phaseDir`). `gate`
 and `contribution` dispatch do not: a contribution is injected verbatim and
 invokes no handler.
 **Invocation context is authoritative for task-local phase identity.** A
@@ -84,8 +88,8 @@ diverges from it whenever one phase plans/verifies while another executes.
 
 - `context` appears in the `loop render-hooks` envelope only when `--phase` is
   passed and resolves. Without `--phase`, the envelope is unchanged.
-- An unresolvable, ambiguous, foreign-prefixed, escaping, or mismatched
-  `--phase`/`--phase-dir` omits `context` and appends a warning; hooks still
+- An unresolvable, ambiguous, foreign-prefixed, archived-milestone-only,
+  escaping, or mismatched `--phase`/`--phase-dir` omits `context` and appends a warning; hooks still
   dispatch and the command does not exit non-zero.
 - Handlers must treat `context` as optional and fall back to their prior
   behavior when it is absent.

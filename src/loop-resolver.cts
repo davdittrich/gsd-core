@@ -26,7 +26,7 @@
  *   - loop-host-contract.cjs (CANONICAL_POINTS via LOOP_HOST_CONTRACT)
  *   - capability-registry.cjs (byLoopPoint, consumed at call time)
  *   - capability-state.cjs (resolveCapabilityRuntimeState — for capabilities list)
- *   - ./security.cjs       (requireSafePath, sanitizeForDisplay, tryWithinRoot, PathAcceptance)
+ *   - ./security.cjs       (requireSafePath, sanitizeLabel, tryWithinRoot, PathAcceptance)
  *   - ./phase-locator.cjs  (guardedFindPhase)
  *   - ./planning-workspace.cjs (planningDir)
  */
@@ -39,7 +39,7 @@ const { output: coreOutput, error: coreError } = ioMod;
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import verificationMod = require('./verification.cjs');
 const { resolvePhaseArtifactFile } = verificationMod;
-import { requireSafePath, sanitizeForDisplay, tryWithinRoot, PathAcceptance } from './security.cjs';
+import { requireSafePath, sanitizeLabel, tryWithinRoot, PathAcceptance } from './security.cjs';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- phase-locator.cjs is an export= CommonJS module
 import phaseLocator = require('./phase-locator.cjs');
@@ -465,7 +465,7 @@ function renderLoopHooks(resolved: ResolveLoopHooksResult): string {
 /**
  * Command entry point: load registry + config, resolve + render, emit envelope.
  *
- * Envelope: { point, activeHooks, rendered }
+ * Envelope: { point, activeHooks, rendered, context?, warnings?, skippedHooks? }
  * On invalid point, emits io.error instead of throwing.
  *
  * Config note: FIX 1 replaced _loadMergedConfig (whole-config deep-merge) with a
@@ -550,6 +550,9 @@ function resolvePhaseContext(
   let phaseContext: PhaseContext | undefined;
   let drop: PhaseDrop | undefined;
   const phaseWarnings: string[] = [];
+  // One owner for every caller- or disk-derived value a warning echoes: escaped
+  // to a single line (sanitizeLabel is the filesystem-name helper) and capped.
+  const shown = (v: string): string => JSON.stringify(sanitizeLabel(v).slice(0, 80));
   if (phaseArg !== undefined) {
     // guardedFindPhase is typed Record<string, unknown> | null; narrow once to
     // the fields read below.
@@ -567,8 +570,8 @@ function resolvePhaseContext(
       // rather than pointing a hook at retired plans.
       drop = PHASE_DROP.ARCHIVED;
       phaseWarnings.push(
-        `--phase ${JSON.stringify(phaseArg)} resolved only to an archived phase ` +
-        `(${JSON.stringify(sanitizeForDisplay(phaseResult.directory).slice(0, 80))}, milestone ${JSON.stringify(sanitizeForDisplay(phaseResult.archived).slice(0, 80))}); ` +
+        `--phase ${shown(phaseArg)} resolved only to an archived phase ` +
+        `(${shown(phaseResult.directory)}, milestone ${shown(phaseResult.archived)}); ` +
         'context omitted.',
       );
     } else if (phaseResult?.found) {
@@ -601,14 +604,14 @@ function resolvePhaseContext(
       if (escapes) {
         drop = PHASE_DROP.ESCAPES_ROOT;
         phaseWarnings.push(
-          `--phase ${JSON.stringify(phaseArg)} resolved to ${JSON.stringify(sanitizeForDisplay(phaseResult.directory).slice(0, 80))}, ` +
+          `--phase ${shown(phaseArg)} resolved to ${shown(phaseResult.directory)}, ` +
           'which escapes the project\'s .planning/phases tree (symlink or unreadable path); context omitted.',
         );
       } else if (phaseDirArg !== undefined && !sameDir()) {
         drop = PHASE_DROP.DIR_MISMATCH;
         phaseWarnings.push(
-          `--phase-dir ${JSON.stringify(sanitizeForDisplay(phaseDirArg).slice(0, 80))} does not match the directory ` +
-          `--phase ${JSON.stringify(sanitizeForDisplay(phaseArg).slice(0, 80))} resolves to (${JSON.stringify(sanitizeForDisplay(phaseResult.directory).slice(0, 80))}); context omitted.`,
+          `--phase-dir ${shown(phaseDirArg)} does not match the directory ` +
+          `--phase ${shown(phaseArg)} resolves to (${shown(phaseResult.directory)}); context omitted.`,
         );
       } else {
         phaseContext = { phase: phaseResult.phase_number, phaseDir: phaseResult.directory };
@@ -619,12 +622,12 @@ function resolvePhaseContext(
       // disambiguate here either (#2237).
       drop = PHASE_DROP.AMBIGUOUS;
       phaseWarnings.push(
-        `--phase ${JSON.stringify(phaseArg)} is ambiguous: ${phaseResult.ambiguous_matches.length} ` +
-        `directories match (${phaseResult.ambiguous_matches.map((m) => JSON.stringify(sanitizeForDisplay(m).slice(0, 80))).join(', ')}); context omitted.`,
+        `--phase ${shown(phaseArg)} is ambiguous: ${phaseResult.ambiguous_matches.length} ` +
+        `directories match (${phaseResult.ambiguous_matches.map((m) => shown(m)).join(', ')}); context omitted.`,
       );
     } else {
       drop = PHASE_DROP.UNRESOLVED;
-      phaseWarnings.push(`--phase ${JSON.stringify(sanitizeForDisplay(phaseArg).slice(0, 80))} did not match a phase directory; context omitted.`);
+      phaseWarnings.push(`--phase ${shown(phaseArg)} did not match a phase directory; context omitted.`);
     }
   } else if (phaseDirArg !== undefined) {
     // Nothing to check it against; honouring it would make it the unconfined

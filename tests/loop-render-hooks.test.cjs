@@ -1357,7 +1357,7 @@ describe('ADR-1244 D2: load-failed capability gates fail OPEN with a loud warnin
 
 // ─── #4030: --phase → derived context: { phase, phaseDir } ──────────────────
 
-// {file, point, count}: how many render-hooks <point> occurrences that
+// [file, point, count] tuples: how many render-hooks <point> occurrences that
 // file has, and how many of them must carry --phase. Both counts are
 // asserted so a call site that gains a --phase-less duplicate is caught
 // too, not just a wholesale removal.
@@ -1381,12 +1381,7 @@ const SITES = [
   ['gsd-core/references/autonomous-ui-design-contract.md', 'plan:pre', 1],
 ];
 
-// Counts `render-hooks <point>` call sites in a workflow file and how many carry
-// --phase. --active-cap lines are excluded: that mode returns only 'true'/'false'
-// for one capability's activation (unaffected by phase) and never reads `context`
-// (#4030) — a
-// hook-dispatch call site fetching the JSON envelope for actual dispatch is
-// what these tables pin, not every render-hooks use.
+// Matches one `render-hooks <point>` call site and captures its argument tail.
 function callRe(point) {
   return new RegExp(`render-hooks ${escapeRegex(point)}\\b([^)\\n]*)`);
 }
@@ -1397,6 +1392,12 @@ function dropOf(dir, opts) {
   return resolveActiveHooksForPoint(dir, 'plan:pre', opts).phaseDrop;
 }
 
+// Collects the `render-hooks <point>` call sites in a workflow file and how
+// many carry --phase. --active-cap lines are excluded: that mode returns only
+// 'true'/'false' for one capability's activation (unaffected by phase) and
+// never reads `context` (#4030); a hook-dispatch call site fetching the JSON
+// envelope for actual dispatch is what these tables pin, not every
+// render-hooks use.
 function phaseSiteCounts(content, point) {
   const bare = splitLines(content).map((l) => !l.includes('--active-cap') && l.match(callRe(point))).filter(Boolean);
   return { bare, withPhase: bare.filter((m) => /--phase /.test(m[1])) };
@@ -1490,8 +1491,6 @@ const SRC_CROSS_FENCE = {
   'gsd-core/workflows/verify-work.md :: verify:post': VERIFY_WORK_INIT,
 };
 
-// Turn the tail of a render-hooks call line into argv, substituting a real
-// token for the phase variable and the fingerprint path.
 const WS_EXPANSION = '${GSD_WS:+--ws=${GSD_WS##* }}';
 // Value level: the expansion must yield the bare workstream name (last word of GSD_WS) or nothing.
 test('[unit] WS_EXPANSION expands GSD_WS to --ws=<name>, and to nothing when unset', () => {
@@ -1500,6 +1499,8 @@ test('[unit] WS_EXPANSION expands GSD_WS to --ws=<name>, and to nothing when uns
   assert.strictEqual(sh({ GSD_WS: 'a b' }), '--ws=b');
   assert.strictEqual(sh({}), '');
 });
+// Turn the tail of a render-hooks call line into argv, substituting a real
+// token for the phase variable and the fingerprint path.
 function callArgv(rest) {
   return (rest
     .replace(WS_EXPANSION, '') // unset GSD_WS expands to nothing
@@ -1630,9 +1631,8 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     // #4030: --phase/--phase-dir are the two graceful value flags — an
     // empty or missing value must never turn a call that would otherwise still
     // produce every activeHooks entry into a total failure. Unlike the four
-    // other render-hooks value flags (--config-dir, --active-cap, --runtime,
-    // --after-fingerprint: still strict, see the loop below), a workflow's `--phase "${PHASE_NUMBER}"` with an unset variable
-    // must not drop the whole hook envelope for a call site.
+    // other render-hooks value flags, a workflow's `--phase "${PHASE_NUMBER}"`
+    // with an unset variable must not drop the whole hook envelope for a call site.
     const dir = makePhaseProject('05-widgets');
     t.after(() => cleanup(dir));
     const result = renderWithPhase(dir, 'plan:pre', ['--phase', '--raw']);
@@ -1810,7 +1810,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     ['traversal', '../../etc'],
     ['traversal with a real phase suffix', '../05-widgets'],
     ['absolute-path substitution', '/etc'],
-    ['absolute path into the real phases dir', '/tmp/.planning/phases/05-widgets'],
+    ['absolute path to a phase-shaped dir outside the project', '/tmp/.planning/phases/05-widgets'],
   ]) {
     test(`[hostile] --phase ${label} resolves nothing and never escapes the project`, (t) => {
       const dir = makePhaseProject('05-widgets');
@@ -2164,7 +2164,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     const dir = makePhaseProject('05-widgets');
     t.after(() => cleanup(dir));
     const pad = fc.stringMatching(/^[ \t]{0,3}$/);
-    fc.assert(fc.property(fc.boolean(), pad, pad, fc.stringMatching(/^[a-zA-Z0-9._=-]{0,8}$/), (eq, l, r, junk) => {
+    fc.assert(fc.property(fc.boolean(), pad, pad, fc.stringMatching(/^[a-zA-Z0-9._=-]{0,8}$/).filter((j) => !/^phase=/.test(j)), (eq, l, r, junk) => {
       const padded = `${l}05${r}`;
       const ok = renderWithPhase(dir, 'plan:pre', eq ? [`--phase=${padded}`, '--raw'] : ['--phase', padded, '--raw']);
       assert.strictEqual(ok.exitCode, 0, ok.stderr);
@@ -2412,6 +2412,51 @@ describe('cmdLoopRenderHooks --phase confinement and --phase-dir identity (#4030
     const out = runText(dir, ['--phase', '9' + 'q'.repeat(200)]);
     assert.ok(!out.includes('q'.repeat(100)), 'the token must be truncated');
   });
+
+  // Every echoed value in an ARCHIVED / ESCAPES_ROOT warning is a JSON string
+  // capped at 80 characters with no control characters. Decode them and assert
+  // on length and character class, never on prose.
+  const echoed = (out) => JSON.parse(out.trim()).warnings.flatMap(
+    (w) => [...w.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => JSON.parse(`"${m[1]}"`)));
+  const hasControl = (v) => [...v].some((c) => { const n = c.codePointAt(0); return n <= 0x1f || (n >= 0x7f && n <= 0x9f); });
+  const archivedProject = (t, name) => {
+    const dir = mk(t);
+    fs.mkdirSync(path.join(dir, '.planning', 'milestones', 'v1.0-phases', name), { recursive: true });
+    return dir;
+  };
+  const escapingProject = (t, name) => {
+    const dir = createTempDir('loop-phase-conf-');
+    const outside = createTempDir('loop-phase-outside-');
+    t.after(() => { cleanup(dir); cleanup(outside); });
+    fs.mkdirSync(path.join(outside, name), { recursive: true });
+    fs.mkdirSync(path.join(dir, '.planning'), { recursive: true });
+    fs.symlinkSync(outside, path.join(dir, '.planning', 'phases'), 'dir');
+    return dir;
+  };
+  const branches = [
+    ['ARCHIVED', archivedProject, PHASE_DROP.ARCHIVED, {}],
+    ['ESCAPES_ROOT', escapingProject, PHASE_DROP.ESCAPES_ROOT, { skip: symlinkSkip }],
+  ];
+  for (const [label, project, drop, opts] of branches) {
+    for (const n of [79, 80, 81, 200]) {
+      test(`[bva] ${label} echoes the --phase token capped at 80 (token length ${n})`, opts, (t) => {
+        const name = '05-' + 'a'.repeat(n - 3);
+        const dir = project(t, name);
+        assert.strictEqual(dropOf(dir, { phase: name }), drop);
+        const values = echoed(runText(dir, ['--phase', name]));
+        assert.strictEqual(values[0].length, Math.min(n, 80));
+        assert.ok(values.every((v) => v.length <= 80));
+      });
+    }
+    test(`[hostile] ${label} echoes no control characters`, opts, (t) => {
+      const name = '05-a\u001b[31m\nb';
+      let dir;
+      try { dir = project(t, name); } catch { t.skip('FS refuses control characters'); return; }
+      assert.strictEqual(dropOf(dir, { phase: name }), drop);
+      const values = echoed(runText(dir, ['--phase', name]));
+      assert.ok(values.length > 0 && values.every((v) => !hasControl(v)), 'echoed values must be single-line and escaped');
+    });
+  }
 
   // 0/1/2 directory matches x --phase-dir (match | mismatch)
   test('[bva] 0 matches + --phase-dir: warning, no context', (t) => {
