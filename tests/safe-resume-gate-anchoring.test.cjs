@@ -196,8 +196,8 @@ describe('#4379 — the TDD RED pathspec is language-agnostic', () => {
   });
 
   test('nested tests/, __tests__/ and test_*.py match at any depth (#5181)', (t) => {
-    // A default-mode pathspec with a slash matches the whole path from the repo root, so
-    // `tests/` and `test_*.py` alone miss `crates/core/tests/…` and `pkg/api/test_x.py`.
+    // Default-mode pathspecs match the whole path from the repo root: `tests/` is a root-anchored
+    // prefix and `test_*.py` only matches paths starting `test_`, so nested files need `:(glob)**/`.
     const dir = seedRepo(t);
     const hits = matched(dir, shippedRedPathspec());
     for (const rel of NESTED_TEST_PATHS) {
