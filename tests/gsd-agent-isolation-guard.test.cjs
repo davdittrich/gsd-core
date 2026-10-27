@@ -2112,7 +2112,8 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
 
   test('property: family() recovers a tier token between non-letter delimiters and never inside a word', () => {
     const { modelFamily: family } = require('../gsd-core/bin/lib/model-escalation.cjs');
-    const tiers = fc.constantFrom('opus', 'sonnet', 'haiku', 'fable');
+    const { CLAUDE_AGENT_ALIASES } = require('../gsd-core/bin/lib/model-catalog.cjs');
+    const tiers = fc.constantFrom(...CLAUDE_AGENT_ALIASES);
     const lead = fc.constantFrom('', '-', '.', '_', ' ', '/', ':', 'claude-', '9-');
     const tail = fc.constantFrom('', '-4-6', '.1', '45', '_x', ' 2', '[1m]');
     fc.assert(fc.property(tiers, lead, tail, fc.boolean(), (tier, l, r, upper) => {
@@ -2358,7 +2359,7 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
     assert.equal(fs.lstatSync(path.join(project, '.gsd', '.gitignore')).isFIFO(), true, 'the FIFO is left as it was');
   });
 
-  test('one .gsd reader: readEscalation and prepareGsdDir give the same verdict per file kind', (t) => {
+  test('one .gsd reader: readEscalation and prepareGsdDir give the same verdict at the size limit', (t) => {
     setup(t);
     const { readSmallGsdFile, prepareGsdDir, MAX_READ_BYTES } = require('../gsd-core/bin/lib/gsd-dir.cjs');
     const esc = require('../gsd-core/bin/lib/model-escalation.cjs');

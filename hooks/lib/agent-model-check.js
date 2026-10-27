@@ -64,7 +64,7 @@ function checkAgentModel(data, { clock } = {}) {
     const { mode, skip } = readGuardMode(root, esc.MAX_READ_BYTES);
     if (skip || mode === false) return ALLOW;
 
-    // The workstream `init` resolves (CLI > GSD_WORKSTREAM > stored pointer, read-only peek, as the
+    // The workstream `init` resolves (GSD_WORKSTREAM > stored pointer, read-only peek, as the
     // gsd-tools dispatcher and gsd-statusline do), carried in GSD_WORKSTREAM into loadConfig and
     // planningDir; the caller's environment is restored in `finally`.
     const store = require('../../gsd-core/bin/lib/active-workstream-store.cjs');

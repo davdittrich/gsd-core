@@ -35,10 +35,10 @@ export interface EscalationRecord {
 export const escalationFile = (root: string, agentType: string): string =>
   path.join(root, '.gsd', `model-escalation-${agentType}.json`);
 
-/** Compare at tier-alias level: `claude-sonnet-4-6` and `sonnet` are the same. The tier names are model-catalog's CLAUDE_AGENT_ALIASES. */
 // Compiled once per alias set: the set is mutable, so the regex is rebuilt only when its contents change.
 let familyKey: string | null = null;
 let familyRe = /$^/;
+/** Compare at tier-alias level: `claude-sonnet-4-6` and `sonnet` are the same. The tier names are model-catalog's CLAUDE_AGENT_ALIASES. */
 export function modelFamily(model: unknown): string {
   const key = [...CLAUDE_AGENT_ALIASES].join('\n');
   if (key !== familyKey) {
