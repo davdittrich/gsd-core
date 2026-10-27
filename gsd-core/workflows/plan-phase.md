@@ -1317,7 +1317,7 @@ Offer: 1) Force proceed, 2) Provide guidance and retry, 3) Abandon
 
 ## 12.5. Plan Bounce (Optional External Refinement)
 
-If `--bounce` is set or `workflow.plan_bounce` is true, and neither `--skip-bounce` nor `--gaps` is set: read and execute `gsd-core/workflows/plan-phase/steps/plan-bounce.md`. Otherwise skip.
+If `--bounce` or `workflow.plan_bounce` is on and not `--skip-bounce`/`--gaps`: read and execute `gsd-core/workflows/plan-phase/steps/plan-bounce.md`.
 
 ## 13. Requirements Coverage Gate
 
