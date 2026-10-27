@@ -39,6 +39,7 @@ import path from 'node:path';
 import { locateFrontmatterFence } from './frontmatter-fence.cjs';
 // pattern.cjs is a leaf module (escapeRegex only), so this adds no cycle.
 import { escapeRegex } from './pattern.cjs';
+import { updateBullet } from './markdown-sectionizer.cjs';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import phaseIdModule = require('./phase-id.cjs');
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -595,6 +596,16 @@ function isStateJsonPublishPath(cwd: string, rel: string): boolean {
     fs.existsSync(path.join(cwd, '.planning', project, x)));
 }
 
+/**
+ * Tick the first line-anchored unchecked row for `planId` in `text` (the
+ * `phase complete` / `roadmap update-plan-progress` bullet flip): a bullet
+ * mutation through `updateBullet`, so never a fenced line or mid-line match.
+ */
+function tickAnchoredPlanRow(text: string, planId: string): string {
+  const row = planRowPattern(planId, { anchored: true });
+  return updateBullet(text, (_bulletText, rawLine) => row.test(rawLine), (rawLine) => rawLine.replace(row, '$1x$2'));
+}
+
 export = {
   toPosixPath,
   isStateJsonPublishPath,
@@ -613,4 +624,5 @@ export = {
   findOrphanSummaries,
   summaryPairsWithAnyPlan,
   planRowPattern,
+  tickAnchoredPlanRow,
 };

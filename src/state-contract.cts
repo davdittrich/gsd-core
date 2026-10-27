@@ -136,7 +136,6 @@ interface Owners {
   platformReadSync: typeof import('./shell-command-projection.cjs')['platformReadSync'];
   platformWriteSync: typeof import('./shell-command-projection.cjs')['platformWriteSync'];
   execGit: typeof import('./shell-command-projection.cjs')['execGit'];
-  gitLocationEnvUnset: typeof import('./shell-command-projection.cjs')['GIT_LOCATION_ENV_UNSET'];
   resolveCommitDocsReadOnly: typeof import('./config-loader.cjs')['resolveCommitDocsReadOnly'];
   locateProgressTable: typeof import('./phase-lifecycle.cjs')['locateProgressTable'];
   isSentinelPhaseId: typeof import('./phase-id.cjs')['isSentinelPhaseId'];
@@ -178,7 +177,6 @@ function owners(): Owners {
     platformReadSync: shellCommandProjectionMod.platformReadSync,
     platformWriteSync: shellCommandProjectionMod.platformWriteSync,
     execGit: shellCommandProjectionMod.execGit,
-    gitLocationEnvUnset: shellCommandProjectionMod.GIT_LOCATION_ENV_UNSET,
     resolveCommitDocsReadOnly: configLoaderMod.resolveCommitDocsReadOnly,
     locateProgressTable: phaseLifecycleMod.locateProgressTable,
     isSentinelPhaseId: phaseIdMod.isSentinelPhaseId,
@@ -414,7 +412,7 @@ function excludeStateJson(planningDir: string, execGit: Owners['execGit']): void
   // Short bound: this runs on every boundary command's hot path.
   // The prefix goes last: stdout is trimmed, and a non-empty prefix ends in `/`, so only an
   // empty prefix (planning dir is the git root) loses its line; a leading space survives.
-  const revParse = execGit(['rev-parse', '--git-path', 'info/exclude', '--show-prefix'], { cwd: planningDir, env: owners().gitLocationEnvUnset, timeout: 5_000 });
+  const revParse = execGit(['rev-parse', '--git-path', 'info/exclude', '--show-prefix'], { cwd: planningDir, timeout: 5_000 });
   const [excludeRel, prefix = ''] = splitLines(String(revParse.stdout));
   if (revParse.exitCode !== 0 || !excludeRel) return;
   const exclude = path.resolve(planningDir, excludeRel);

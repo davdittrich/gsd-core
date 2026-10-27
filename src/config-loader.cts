@@ -23,7 +23,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { execGit, GIT_LOCATION_ENV_UNSET, platformWriteSync, platformReadSync } from './shell-command-projection.cjs';
+import { execGit, platformWriteSync, platformReadSync } from './shell-command-projection.cjs';
 // #4717: runtime-identity fill — env rung + per-install marker rung.
 import { readInstallRuntimeMarker } from './runtime-slash.cjs';
 import { resolveGsdHome } from './runtime-homes.cjs';
@@ -236,15 +236,15 @@ interface ParsedConfig {
 
 const _gitIgnoredCache = new Map<string, boolean>();
 
-function isGitIgnored(cwd: string, targetPath: string): boolean {
+function isGitIgnored(cwd: string, targetPath: string, env?: Record<string, string>): boolean {
   // #2206: strip trailing slashes — `git check-ignore` has a quirk where a
   // CRLF .gitignore with blank lines falsely reports a trailing-slash path
   // (e.g. `.planning/`) as ignored. Normalizing here protects every call site.
   const normalized = targetPath.replace(/\/+$/, '');
-  const key = cwd + '::' + normalized;
+  const key = cwd + '::' + normalized + (env ? '::env:' + JSON.stringify(Object.entries(env).sort()) : '');
   if (_gitIgnoredCache.has(key)) return _gitIgnoredCache.get(key)!;
   // --no-index checks .gitignore rules regardless of whether the file is tracked.
-  const result = execGit(['check-ignore', '-q', '--no-index', '--', normalized], { cwd, env: GIT_LOCATION_ENV_UNSET });
+  const result = execGit(['check-ignore', '-q', '--no-index', '--', normalized], { cwd, env });
   const ignored = result.exitCode === 0;
   _gitIgnoredCache.set(key, ignored);
   return ignored;
