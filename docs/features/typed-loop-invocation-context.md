@@ -25,11 +25,13 @@ about what this call is scoped to.
 `context` is **authoritative for task-local phase identity** — a capability
 must prefer it over `STATE.current_phase` or artifact inference when both
 are available. All 20 phase-scoped call sites now pass the phase they are
-operating on, across `plan-phase.md`, `execute-phase.md`, `verify-work.md`,
-`secure-phase.md`, `validate-phase.md`, `discuss-phase.md`, `autonomous.md`
-and `code-review-fix.md`, and `gsd-core/references/loop-hook-dispatch.md`
-tells every `step` / `gate` dispatch how to project it onto the unit it
-invokes.
+operating on, across `plan-phase.md`, `execute-phase.md`,
+`execute-phase/steps/verify-phase-goal.md`, `verify-work.md`, `secure-phase.md`,
+`validate-phase.md`, `discuss-phase.md`, `autonomous.md`,
+`autonomous-ui-design-contract.md` and `code-review-fix.md`, and
+`gsd-core/references/loop-hook-dispatch.md` tells every `step` dispatch how to
+project it onto the unit it invokes (`gate` and `contribution` dispatch do not
+project it).
 
 **The resolver derives the directory; a supplied one is only ever a check.**
 `--phase` takes the bare token every workflow already holds (`"05"`,

@@ -26,7 +26,6 @@
  *   - loop-host-contract.cjs (CANONICAL_POINTS via LOOP_HOST_CONTRACT)
  *   - capability-registry.cjs (byLoopPoint, consumed at call time)
  *   - capability-state.cjs (resolveCapabilityRuntimeState — for capabilities list)
- *   - ./verification.cjs   (resolvePhaseArtifactFile)
  *   - ./security.cjs       (requireSafePath, sanitizeForDisplay, tryWithinRoot, PathAcceptance)
  *   - ./phase-locator.cjs  (guardedFindPhase)
  *   - ./planning-workspace.cjs (planningDir)
@@ -608,8 +607,8 @@ function resolvePhaseContext(
       } else if (phaseDirArg !== undefined && !sameDir()) {
         drop = PHASE_DROP.DIR_MISMATCH;
         phaseWarnings.push(
-          `--phase-dir ${JSON.stringify(phaseDirArg)} does not match the directory ` +
-          `--phase ${JSON.stringify(phaseArg)} resolves to (${JSON.stringify(phaseResult.directory)}); context omitted.`,
+          `--phase-dir ${JSON.stringify(sanitizeForDisplay(phaseDirArg).slice(0, 80))} does not match the directory ` +
+          `--phase ${JSON.stringify(sanitizeForDisplay(phaseArg).slice(0, 80))} resolves to (${JSON.stringify(sanitizeForDisplay(phaseResult.directory).slice(0, 80))}); context omitted.`,
         );
       } else {
         phaseContext = { phase: phaseResult.phase_number, phaseDir: phaseResult.directory };
@@ -625,7 +624,7 @@ function resolvePhaseContext(
       );
     } else {
       drop = PHASE_DROP.UNRESOLVED;
-      phaseWarnings.push(`--phase ${JSON.stringify(phaseArg)} did not match a phase directory; context omitted.`);
+      phaseWarnings.push(`--phase ${JSON.stringify(sanitizeForDisplay(phaseArg).slice(0, 80))} did not match a phase directory; context omitted.`);
     }
   } else if (phaseDirArg !== undefined) {
     // Nothing to check it against; honouring it would make it the unconfined
@@ -646,8 +645,10 @@ function resolvePhaseContext(
  * or its rendering at all).
  *
  * Throws on an invalid `point` (mirrors `resolveLoopHooks`); callers convert to their own error
- * channel. Emits the same loud stderr load-failure warnings `cmdLoopRenderHooks` always has,
- * regardless of caller — a skipped gate must never be silently invisible.
+ * channel. `options.phase` / `options.phaseDir` (#4030) are resolved by `resolvePhaseContext` into
+ * the returned `context` (and `phaseDrop` when the token is dropped). Emits the same loud stderr
+ * warnings `cmdLoopRenderHooks` always has, regardless of caller — load failures plus dropped
+ * phase context; a skipped gate must never be silently invisible.
  */
 function resolveActiveHooksForPoint(
   cwd: string,

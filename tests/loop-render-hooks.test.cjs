@@ -19,7 +19,6 @@ const { cleanup, createTempDir, createTempProject } = require('./helpers.cjs');
 const fc = require('./helpers/fast-check-setup.cjs');
 const { splitLines } = require('../gsd-core/bin/lib/text-lines.cjs');
 const { escapeRegex } = require('../gsd-core/bin/lib/pattern.cjs');
-const { ERROR_REASON } = require('../gsd-core/bin/lib/io.cjs');
 
 const {
   resolveLoopHooks,
@@ -1384,8 +1383,8 @@ const SITES = [
 
 // Counts `render-hooks <point>` call sites in a workflow file and how many carry
 // --phase. --active-cap lines are excluded: that mode returns only 'true'/'false'
-// for one capability's activation (unaffected by phase), never reads `context`,
-// and deliberately does not combine with --phase (#4030) — a
+// for one capability's activation (unaffected by phase) and never reads `context`
+// (#4030) — a
 // hook-dispatch call site fetching the JSON envelope for actual dispatch is
 // what these tables pin, not every render-hooks use.
 function callRe(point) {
@@ -1674,9 +1673,8 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
   });
 
   test('[negative] resolveActiveHooksForPoint called in-process with phase: \'\' warns the same way', (t) => {
-    // dispatch-step (gsd-tools.cjs) calls resolveActiveHooksForPoint directly,
-    // bypassing readOptionalFlag entirely — this exported function is its own
-    // boundary and must not silently swallow an explicit empty string the way
+    // This exported function is its own boundary (an in-process caller does not
+    // go through readOptionalFlag) and must not silently swallow an explicit empty string the way
     // a bare, truly-absent --phase does. An empty phase here reaches
     // guardedFindPhase('', ...), which returns null (its own falsy-phase
     // guard), and falls through to the same "did not match" warning any other
@@ -2338,7 +2336,6 @@ describe('every phase-scoped render-hooks call site actually carries --phase', (
   });
 });
 
-
 // #4030: confinement by realpath, same-directory by dev+ino, boundary rows.
 describe('cmdLoopRenderHooks --phase confinement and --phase-dir identity (#4030)', () => {
   const symlinkSkip = process.platform === 'win32' ? 'directory symlinks require elevation on Windows' : false;
@@ -2381,18 +2378,39 @@ describe('cmdLoopRenderHooks --phase confinement and --phase-dir identity (#4030
     assert.strictEqual(dropOf(dir, { phase: '07' }), PHASE_DROP.ESCAPES_ROOT);
   });
 
-  test('[hostile] ambiguous directory names are JSON-escaped in the warning', (t) => {
+  // Structural property of the emitted JSON text (no prose matching): raw
+  // control bytes never reach the envelope, and on-disk or caller-supplied
+  // values are capped.
+  const runText = (dir, args) => {
+    const r = runNode([GSD_TOOLS, 'loop', 'render-hooks', 'plan:pre', '--cwd', dir, ...args, '--raw'],
+      { cwd: ROOT, timeoutMs: PROBE_TIMEOUT_MS });
+    assert.strictEqual(r.exitCode, 0, 'stderr: ' + r.stderr);
+    return r.stdout;
+  };
+
+  test('[hostile] ambiguous directory names carry no raw control bytes in the envelope', (t) => {
     let dir;
     try { dir = mk(t, '08-a\u001b[31mred', '08-b\nspoof'); } catch { t.skip('FS refuses control characters'); return; }
-    const w = (run(dir, ['--phase', '08']).warnings || []).join('\n');
-    assert.ok(!w.includes('\u001b') && !w.includes('\nspoof'), 'raw control bytes must not reach the warning');
-    assert.match(w, /\\u001b|\\n/);
+    const out = runText(dir, ['--phase', '08']);
+    assert.ok(!out.includes('\u001b') && !out.includes('\nspoof'), 'raw control bytes must not reach the envelope');
   });
 
-  test('[hostile] a very long ambiguous directory name is capped in the warning', (t) => {
+  test('[hostile] a very long ambiguous directory name is capped in the envelope', (t) => {
     const dir = mk(t, '08-' + 'a'.repeat(200), '08-b');
-    const w = (run(dir, ['--phase', '08']).warnings || []).join('\n');
-    assert.ok(!w.includes('a'.repeat(100)), 'the on-disk name must be truncated');
+    assert.ok(!runText(dir, ['--phase', '08']).includes('a'.repeat(100)), 'the on-disk name must be truncated');
+  });
+
+  test('[hostile] DIR_MISMATCH caps the on-disk name and the supplied --phase-dir', (t) => {
+    const dir = mk(t, '08-' + 'a'.repeat(200));
+    const out = runText(dir, ['--phase', '08', '--phase-dir', 'z'.repeat(200)]);
+    assert.ok(!out.includes('a'.repeat(100)) && !out.includes('z'.repeat(100)), 'both echoed values must be truncated');
+    assert.strictEqual(dropOf(dir, { phase: '08', phaseDir: 'z'.repeat(200) }), PHASE_DROP.DIR_MISMATCH);
+  });
+
+  test('[hostile] UNRESOLVED caps the supplied --phase token', (t) => {
+    const dir = mk(t, '01-x');
+    const out = runText(dir, ['--phase', '9' + 'q'.repeat(200)]);
+    assert.ok(!out.includes('q'.repeat(100)), 'the token must be truncated');
   });
 
   // 0/1/2 directory matches x --phase-dir (match | mismatch)

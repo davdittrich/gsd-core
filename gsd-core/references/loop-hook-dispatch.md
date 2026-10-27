@@ -41,7 +41,7 @@ without `--phase` is dropped too. Every case except an omitted `--phase` appends
 
 Inject `fragment.inline` verbatim into the context for the role named in `into`
 (e.g. `orchestrator`, `planner`). Do not paraphrase — the text is the product.
-`context` does not apply to a `contribution`: its fragment is injected as written.
+`context` does not apply to a `contribution`: its fragment is injected as written, no handler is invoked, and nothing carries the phase.
 
 ### `step`
 

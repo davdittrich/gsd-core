@@ -69,9 +69,11 @@ or exited non-zero — `--phase` degrades to "no context", it does not fail
 the render. Omitting `--phase` entirely preserves today's `{ point,
 activeHooks, rendered, warnings? }` shape exactly.
 
-Generic `step`/`gate`/`contribution` dispatch (`gsd-core/references/loop-hook-dispatch.md`)
+Generic `step` dispatch (`gsd-core/references/loop-hook-dispatch.md`)
 projects `context.phase` / `context.phaseDir` into the dispatched handler's
-invocation (CLI arg, agent prompt, or command payload per handler kind).
+invocation (CLI arg, agent prompt, or command payload per handler kind). `gate`
+and `contribution` dispatch do not: a contribution is injected verbatim and
+invokes no handler.
 **Invocation context is authoritative for task-local phase identity.** A
 capability MUST use it over `STATE.current_phase` or artifact-order/mtime
 inference when both are available — `STATE.current_phase` is project lifecycle
