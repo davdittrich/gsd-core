@@ -89,3 +89,32 @@ test('readSmallGsdFile refuses a symlink with ELOOP', { skip: process.platform =
   fs.symlinkSync(path.join(root, 'target'), path.join(root, 'link'));
   assert.throws(() => readSmallGsdFile(path.join(root, 'link')), { code: 'ELOOP' });
 });
+
+test('parity: readSmallGsdFile and capability-ledger readSmallRegularFile refuse the same file kinds', (t) => {
+  const { readSmallRegularFile } = require('../gsd-core/bin/lib/capability-ledger.cjs');
+  const root = createTempDir('gsd-dir-parity-');
+  t.after(() => cleanup(root));
+  const at = (name) => path.join(root, name);
+  fs.writeFileSync(at('limit'), 'a'.repeat(MAX_READ_BYTES));
+  fs.writeFileSync(at('over'), 'a'.repeat(MAX_READ_BYTES + 1));
+  fs.mkdirSync(at('dir'));
+  // Same text at the limit.
+  assert.equal(readSmallGsdFile(at('limit')), readSmallRegularFile(at('limit'), MAX_READ_BYTES));
+  // Shared refusals: readSmallGsdFile returns null, readSmallRegularFile throws (its contract).
+  for (const name of ['over', 'dir']) {
+    assert.equal(readSmallGsdFile(at(name)), null, name);
+    assert.throws(() => readSmallRegularFile(at(name), MAX_READ_BYTES), name);
+  }
+});
+
+test('parity: both bounded readers refuse a FIFO without blocking', { skip: process.platform === 'win32' }, (t) => {
+  const { readSmallRegularFile } = require('../gsd-core/bin/lib/capability-ledger.cjs');
+  const { runHook } = require('./helpers/process-seam.cjs');
+  const { PROBE_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
+  const root = createTempDir('gsd-dir-fifo-');
+  t.after(() => cleanup(root));
+  const fifo = path.join(root, 'fifo');
+  if (runHook(fifo, [], { interpreter: 'mkfifo', timeoutMs: PROBE_TIMEOUT_MS }).exitCode !== 0) return t.skip('mkfifo unavailable');
+  assert.equal(readSmallGsdFile(fifo), null);
+  assert.throws(() => readSmallRegularFile(fifo, MAX_READ_BYTES));
+});
