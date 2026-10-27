@@ -519,10 +519,9 @@ function resolveTierInternal(cwd: string, agentType: string): string {
   return resolveTierFromConfig(loadConfig(cwd), agentType);
 }
 
-// The model for `agentType` under an already-loaded `config` (what loadConfig(cwd) returns); `cwd` still
-// locates the project for the explicit-omit check. A caller holding the config (resolve-execution's
-// baseline, the #5328 hook) passes it instead of loading it again.
-function resolveModelFromConfig(config: Record<string, unknown>, cwd: string, agentType: string): string {
+// `loadOptions` reaches loadConfig: a read-only caller (the #5328 hook) passes `{ persist: false }`.
+function resolveModelInternal(cwd: string, agentType: string, loadOptions: Record<string, unknown> = {}): string {
+  const config = loadConfig(cwd, loadOptions);
 
   // 1. Per-agent override (#2041: map Claude full IDs → Agent-tool aliases on
   // the claude runtime, mirroring the model_policy path #1144; non-Claude
@@ -707,10 +706,6 @@ function resolveModelFromConfig(config: Record<string, unknown>, cwd: string, ag
   }
 
   return alias!;
-}
-
-function resolveModelInternal(cwd: string, agentType: string): string {
-  return resolveModelFromConfig(loadConfig(cwd), cwd, agentType);
 }
 
 const VALID_GRANULARITIES = new Set(['coarse', 'standard', 'fine']);
@@ -1117,7 +1112,6 @@ export = {
   CLAUDE_AGENT_ALIASES,
   resolveModelPolicy,
   resolveModelInternal,
-  resolveModelFromConfig,
   resolveTierInternal,
   resolveTierFromConfig,
   hasNativeModelAliases,

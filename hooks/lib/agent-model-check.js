@@ -1,7 +1,7 @@
 'use strict';
 // hooks/lib/agent-model-check.js — #5328: does the model a model-authored
 // Agent()/Task() call passes match the one GSD resolved for that agent?
-// Baseline is resolveModelFromConfig over the workstream-aware config
+// Baseline is resolveModelInternal over the workstream-aware config
 // (what `init` reports and the workflow tells the model to pass). A fresh,
 // session-matching `resolve-execution --attempt N` record
 // (gsd-core/bin/lib/model-escalation.cjs) legitimises the escalated model.
@@ -76,7 +76,7 @@ function checkAgentModel(data, { clock } = {}) {
       // Only where the host resolves the tier aliases GSD resolves to, over the one runtime chain
       // (GSD_RUNTIME > config.runtime > marker), from the config the expected model resolves through.
       if (!resolver.hasNativeModelAliases(require('../../gsd-core/bin/lib/runtime-slash.cjs').resolveActiveRuntime(config))) return ALLOW;
-      const expected = resolver.resolveModelFromConfig(config, root, type);
+      const expected = resolver.resolveModelInternal(root, type, { persist: false });
       if (!expected || expected === 'inherit') return ALLOW;
 
       const passed = typeof toolInput.model === 'string' ? toolInput.model : '';

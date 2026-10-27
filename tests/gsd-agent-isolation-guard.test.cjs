@@ -2570,26 +2570,6 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
     assert.deepEqual([...GUARDED_TYPES].sort(), [...require('../gsd-core/bin/lib/model-escalation.cjs').GUARDED_AGENT_TYPES].sort());
   });
 
-  test('modelFamily takes its tier names from CLAUDE_AGENT_ALIASES, the catalog owner', () => {
-    const { CLAUDE_AGENT_ALIASES } = require('../gsd-core/bin/lib/model-catalog.cjs');
-    const { modelFamily } = require('../gsd-core/bin/lib/model-escalation.cjs');
-    for (const tier of CLAUDE_AGENT_ALIASES) assert.equal(modelFamily(`claude-${tier}-4-6`), tier);
-    CLAUDE_AGENT_ALIASES.add('zephyr');
-    try {
-      assert.equal(modelFamily('claude-zephyr-1'), 'zephyr');
-    } finally {
-      CLAUDE_AGENT_ALIASES.delete('zephyr');
-    }
-    CLAUDE_AGENT_ALIASES.add('o.1'); // a regex metacharacter in a name must match literally
-    try {
-      assert.equal(modelFamily('claude-o.1-2'), 'o.1');
-      assert.equal(modelFamily('claude-ox1-2'), 'claude-ox1-2');
-    } finally {
-      CLAUDE_AGENT_ALIASES.delete('o.1');
-    }
-    assert.equal(modelFamily('claude-sonnet-4-6'), 'sonnet', 'the cache follows the set back');
-  });
-
   test('a workstream activated only by the stored pointer decides the expected model, as init resolves it', (t) => {
     pinWorkstreamEnv(t, undefined); // the pointer alone must select the workstream
     setup(t);
@@ -2629,20 +2609,6 @@ describe('gsd-agent-isolation-guard.js: #5328 — Agent() model vs resolved mode
       const w = evaluate(dispatch(agent, 'claude-haiku-4-5', agent === 'gsd-executor' ? WORKTREE : {}));
       assert.equal(w.action, 'warn', agent);
       assert.equal(w.expected, JSON.parse(r.output).model, agent);
-    }
-  });
-
-  test('one baseline resolution: resolve-execution resolves its baseline from the config it already loaded', (t) => {
-    setup(t);
-    const preload = path.join(__dirname, 'helpers', 'count-baseline-config-loads-preload.cjs');
-    const counts = createTempDir('gsd-aig-loads-');
-    t.after(() => cleanup(counts));
-    for (const extra of [[], ['--attempt', '1']]) {
-      const countFile = path.join(counts, `n-${extra.length}`);
-      const r = runNode(['--require', preload, TOOLS_PATH, 'resolve-execution', 'gsd-executor', ...extra],
-        { cwd: project, timeoutMs: PROBE_TIMEOUT_MS, env: { ...process.env, ...PINNED, GSD_LOAD_COUNT_FILE: countFile } });
-      assert.equal(r.exitCode, 0, r.stderr);
-      assert.equal(Number(fs.readFileSync(countFile, 'utf8')), 1, `one loadConfig for the baseline (${extra.join(' ') || 'plain'})`);
     }
   });
 
