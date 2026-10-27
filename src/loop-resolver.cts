@@ -550,8 +550,9 @@ function resolvePhaseContext(
   let phaseContext: PhaseContext | undefined;
   let drop: PhaseDrop | undefined;
   const phaseWarnings: string[] = [];
-  // One owner for every caller- or disk-derived value a warning echoes: escaped
-  // to a single line (sanitizeLabel is the filesystem-name helper) and capped.
+  // One owner for every caller- or disk-derived value a warning echoes:
+  // sanitizeLabel escapes C0, DEL and C1 control characters (U+2028/U+2029 and
+  // bidi controls pass through), then the value is capped at 80 characters.
   const shown = (v: string): string => JSON.stringify(sanitizeLabel(v).slice(0, 80));
   if (phaseArg !== undefined) {
     // guardedFindPhase is typed Record<string, unknown> | null; narrow once to

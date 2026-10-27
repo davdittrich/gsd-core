@@ -8,8 +8,8 @@
 
 ## Decision
 
-`cmdLoopRenderHooks` (`src/loop-resolver.cts`) accepts one new optional flag,
-`--phase <token>`, supplied by the invoking workflow at phase-scoped points
+`cmdLoopRenderHooks` (`src/loop-resolver.cts`) accepts two new optional flags, `--phase <token>` and
+`--phase-dir` (a cross-check only; see below). `--phase` is supplied by the invoking workflow at phase-scoped points
 (`discuss:pre`, `discuss:post`, `plan:pre`, `plan:post`, `execute:wave:pre`,
 `execute:wave:post`, `execute:post`, `verify:pre`, `verify:post`). `<token>` uses the same
 bare-tolerant grammar every phase-scoped workflow already holds
@@ -48,7 +48,7 @@ stands in). Any spelling
 of the same directory matches — relative, absolute, `./`-prefixed, `..`
 segments, a symlinked spelling, or a different case on a case-insensitive
 volume — and no per-platform case folding is guessed. Sibling commands accept
-absolute paths (`resolvePath`, `src/check-command-router.cts`), so a caller
+absolute paths (`resolveContainedPath`, `src/gate-phase-context.cts`), so a caller
 following that convention must not silently lose its context. The value emitted
 is always the locator's, so this is a comparison convenience, not a second
 path source. A stat failure is a mismatch. When it matches, the envelope is
@@ -168,7 +168,7 @@ Maintainer rulings recorded in review `60fee2ba299b` (2026-10-18):
 
 ## Scope notes
 
-- Points that are not phase-scoped pass no `--phase`: `ship:pre`/`ship:post` run per release; `quick.md` (`plan:pre`, `execute:post`) and `quick-batch/steps/planner-wave.md` (`plan:pre`) are task-scoped with no phase; `audit-milestone.md` (`verify:post`) is milestone-scoped. `code-review.md`'s `REVIEWER_POINT` call reads only `contribution` fragments for the reviewer, which never consume `context`, and the reviewer-lane `dispatch-step` verb resolves its own hook only to read `supportsReviewerLanes`; neither needs a phase.
+- Points that pass no `--phase`: `ship:pre`/`ship:post` are not given `--phase` by this change (`ship.md` takes its own phase argument); `quick.md` (`plan:pre`, `execute:post`) and `quick-batch/steps/planner-wave.md` (`plan:pre`) are task-scoped with no phase; `audit-milestone.md` (`verify:post`) is milestone-scoped. `code-review.md`'s `REVIEWER_POINT` call reads only `contribution` fragments for the reviewer, which never consume `context`, and the reviewer-lane `dispatch-step` verb resolves its own hook only to read `supportsReviewerLanes`; neither needs a phase.
 - Each fenced bash block may run as its own shell (it does in Claude Code). A call site whose phase variable is bound in an earlier fence relies on the dispatching agent carrying the resolved token, as it carries `{phase_dir}`; the test suite lists those sites with the exact binding each relies on (`CROSS_FENCE`), and the variables a binding reads from an earlier fence (`SRC_CROSS_FENCE`). `autonomous` `execute:post`/`verify:post` and the UI contract pass the driver's loop variable `${PHASE_NUM}`, which the host substitutes (`HOST_BOUND`). `GSD_WS` is derived from the `GSD_ARGS` capture in every call's own fence, so `--ws` never drops; a fence in a Read-loaded file (a `steps/` file or a reference) carries the #4772 note to write the parent command's argument string in place of `$ARGUMENTS`. The `init.*` bindings read the phase with `--pick phase_number`; `verify-work` keeps its `jq` read of its own `$INIT` (#5289). A missed carry or an empty phase becomes `--phase ""`, warns on stderr and omits `context` (ruling (a)); `loop-hook-dispatch.md` then passes no phase argument (the host's `PHASE_NUMBER` fills in only when `--phase` was never passed, never for a rejected token). Only the `ref.command` branch of `loop-hook-dispatch.md` is behaviourally exercised (the `[projection]` test builds the handler argv); the `ref.skill` and `ref.agent` branches stay prose, and the tests only pin that their phase instructions survive the Claude and Codex projections. Call sites add no `[ -n "$PHASE_NUMBER" ]` guard: the warning is the signal, and skipping the call would drop the hooks.
 
 ## Revisit if

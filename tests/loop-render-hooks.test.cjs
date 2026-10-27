@@ -1617,13 +1617,14 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     assert.strictEqual(dropOf(dir, { phase: '05' }), PHASE_DROP.ARCHIVED);
   });
 
-  test('[bva] --phase matching two directories (ambiguous) omits context, warns with both names, exits 0 not thrown', (t) => {
+  test('[bva] --phase matching two directories (ambiguous) omits context with AMBIGUOUS drop and a warning, exits 0 not thrown', (t) => {
     const dir = makePhaseProject('05-widgets', '05-gadgets');
     t.after(() => cleanup(dir));
     const result = renderWithPhase(dir, 'plan:pre', ['--phase', '05', '--raw']);
     assert.strictEqual(result.exitCode, 0, 'stderr: ' + result.stderr);
     const envelope = JSON.parse(result.stdout.trim());
     assert.ok(!Object.prototype.hasOwnProperty.call(envelope, 'context'));
+    assert.ok(Array.isArray(envelope.warnings) && envelope.warnings.length > 0);
     assert.strictEqual(dropOf(dir, { phase: '05' }), PHASE_DROP.AMBIGUOUS);
   });
 
@@ -1748,7 +1749,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     t.after(() => cleanup(dir));
     const result = renderWithPhase(dir, 'plan:pre', ['--phase', '02', '--active-cap', 'tdd']);
     assert.strictEqual(result.exitCode, 0, 'stderr: ' + result.stderr);
-    assert.match(result.stdout, /^(true|false)\n$/);
+    assert.strictEqual(typeof JSON.parse(result.stdout.trim()), 'boolean');
   });
 
   test('[hostile] a foreign-project-code-prefixed --phase token does not reopen #2237 — guardedFindPhase rejects it same as init.*', (t) => {
@@ -2378,44 +2379,15 @@ describe('cmdLoopRenderHooks --phase confinement and --phase-dir identity (#4030
     assert.strictEqual(dropOf(dir, { phase: '07' }), PHASE_DROP.ESCAPES_ROOT);
   });
 
-  // Structural property of the emitted JSON text (no prose matching): raw
-  // control bytes never reach the envelope, and on-disk or caller-supplied
-  // values are capped.
+  // Every echoed value in a warning is a JSON string capped at 80 characters
+  // with no control characters. Decode the envelope and each quoted value, and
+  // assert on length and code points, never on prose or raw stdout bytes.
   const runText = (dir, args) => {
     const r = runNode([GSD_TOOLS, 'loop', 'render-hooks', 'plan:pre', '--cwd', dir, ...args, '--raw'],
       { cwd: ROOT, timeoutMs: PROBE_TIMEOUT_MS });
     assert.strictEqual(r.exitCode, 0, 'stderr: ' + r.stderr);
     return r.stdout;
   };
-
-  test('[hostile] ambiguous directory names carry no raw control bytes in the envelope', (t) => {
-    let dir;
-    try { dir = mk(t, '08-a\u001b[31mred', '08-b\nspoof'); } catch { t.skip('FS refuses control characters'); return; }
-    const out = runText(dir, ['--phase', '08']);
-    assert.ok(!out.includes('\u001b') && !out.includes('\nspoof'), 'raw control bytes must not reach the envelope');
-  });
-
-  test('[hostile] a very long ambiguous directory name is capped in the envelope', (t) => {
-    const dir = mk(t, '08-' + 'a'.repeat(200), '08-b');
-    assert.ok(!runText(dir, ['--phase', '08']).includes('a'.repeat(100)), 'the on-disk name must be truncated');
-  });
-
-  test('[hostile] DIR_MISMATCH caps the on-disk name and the supplied --phase-dir', (t) => {
-    const dir = mk(t, '08-' + 'a'.repeat(200));
-    const out = runText(dir, ['--phase', '08', '--phase-dir', 'z'.repeat(200)]);
-    assert.ok(!out.includes('a'.repeat(100)) && !out.includes('z'.repeat(100)), 'both echoed values must be truncated');
-    assert.strictEqual(dropOf(dir, { phase: '08', phaseDir: 'z'.repeat(200) }), PHASE_DROP.DIR_MISMATCH);
-  });
-
-  test('[hostile] UNRESOLVED caps the supplied --phase token', (t) => {
-    const dir = mk(t, '01-x');
-    const out = runText(dir, ['--phase', '9' + 'q'.repeat(200)]);
-    assert.ok(!out.includes('q'.repeat(100)), 'the token must be truncated');
-  });
-
-  // Every echoed value in an ARCHIVED / ESCAPES_ROOT warning is a JSON string
-  // capped at 80 characters with no control characters. Decode them and assert
-  // on length and character class, never on prose.
   const echoed = (out) => JSON.parse(out.trim()).warnings.flatMap(
     (w) => [...w.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => JSON.parse(`"${m[1]}"`)));
   const hasControl = (v) => [...v].some((c) => { const n = c.codePointAt(0); return n <= 0x1f || (n >= 0x7f && n <= 0x9f); });
@@ -2433,6 +2405,9 @@ describe('cmdLoopRenderHooks --phase confinement and --phase-dir identity (#4030
     fs.symlinkSync(outside, path.join(dir, '.planning', 'phases'), 'dir');
     return dir;
   };
+  const ambiguousProject = (t, name) => mk(t, name, '05-b');
+  const unresolvedProject = (t) => mk(t, '01-x');
+  const mismatchProject = (t, name) => mk(t, name);
   const branches = [
     ['ARCHIVED', archivedProject, PHASE_DROP.ARCHIVED, {}],
     ['ESCAPES_ROOT', escapingProject, PHASE_DROP.ESCAPES_ROOT, { skip: symlinkSkip }],
@@ -2457,6 +2432,47 @@ describe('cmdLoopRenderHooks --phase confinement and --phase-dir identity (#4030
       assert.ok(values.length > 0 && values.every((v) => !hasControl(v)), 'echoed values must be single-line and escaped');
     });
   }
+
+  const NAME = (n) => '05-' + 'a'.repeat(n - 3);
+  for (const n of [79, 80, 81, 200]) {
+    test(`[bva] AMBIGUOUS echoes each candidate name capped at 80 (name length ${n})`, (t) => {
+      const dir = ambiguousProject(t, NAME(n));
+      assert.strictEqual(dropOf(dir, { phase: '05' }), PHASE_DROP.AMBIGUOUS);
+      const values = echoed(runText(dir, ['--phase', '05']));
+      assert.ok(values.some((v) => v.length === Math.min(n, 80)));
+      assert.ok(values.every((v) => v.length <= 80));
+    });
+    test(`[bva] DIR_MISMATCH echoes --phase-dir capped at 80 (value length ${n})`, (t) => {
+      const dir = mismatchProject(t, NAME(n));
+      const args = { phase: '05', phaseDir: 'z'.repeat(n) };
+      assert.strictEqual(dropOf(dir, args), PHASE_DROP.DIR_MISMATCH);
+      const values = echoed(runText(dir, ['--phase', '05', '--phase-dir', args.phaseDir]));
+      assert.strictEqual(values[0].length, Math.min(n, 80));
+      assert.ok(values.every((v) => v.length <= 80));
+    });
+    test(`[bva] UNRESOLVED echoes the --phase token capped at 80 (token length ${n})`, (t) => {
+      const token = '9' + 'q'.repeat(n - 1);
+      const dir = unresolvedProject(t);
+      assert.strictEqual(dropOf(dir, { phase: token }), PHASE_DROP.UNRESOLVED);
+      const values = echoed(runText(dir, ['--phase', token]));
+      assert.strictEqual(values[0].length, Math.min(n, 80));
+      assert.ok(values.every((v) => v.length <= 80));
+    });
+  }
+  test('[hostile] AMBIGUOUS echoes no control characters (checked after JSON.parse)', (t) => {
+    let dir;
+    try { dir = ambiguousProject(t, '05-a\u001b[31m\nb'); } catch { t.skip('FS refuses control characters'); return; }
+    assert.strictEqual(dropOf(dir, { phase: '05' }), PHASE_DROP.AMBIGUOUS);
+    const values = echoed(runText(dir, ['--phase', '05']));
+    assert.ok(values.length > 0 && values.every((v) => !hasControl(v)), 'echoed values must be escaped');
+  });
+  test('[hostile] UNRESOLVED and DIR_MISMATCH echo no control characters', (t) => {
+    const token = '9a\u001b[31m\nb';
+    const unresolved = echoed(runText(unresolvedProject(t), ['--phase', token]));
+    assert.ok(unresolved.length > 0 && unresolved.every((v) => !hasControl(v)));
+    const mismatch = echoed(runText(mismatchProject(t, '05-x'), ['--phase', '05', '--phase-dir', token]));
+    assert.ok(mismatch.length > 0 && mismatch.every((v) => !hasControl(v)));
+  });
 
   // 0/1/2 directory matches x --phase-dir (match | mismatch)
   test('[bva] 0 matches + --phase-dir: warning, no context', (t) => {

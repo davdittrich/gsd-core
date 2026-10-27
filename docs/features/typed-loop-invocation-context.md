@@ -59,6 +59,6 @@ different phases that are *both* inside the project.
   only an archived milestone's phase, resolves outside `.planning/phases`, or
   carries a foreign project-code prefix omits `context` and appends to the
   existing `warnings` array. `--phase` degrades; it never fails a render.
-- `ship:*` is not a phase-scoped point and is unchanged (shipping runs at
-  the milestone/project level); `audit-milestone.md`, `quick.md`,
+- `ship:pre`/`ship:post` are not given `--phase` by this change (`ship.md`
+  resolves its own phase argument); `audit-milestone.md`, `quick.md`,
   `quick-batch` and the code-review reviewer lane hold no phase to pass either.
