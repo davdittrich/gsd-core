@@ -1478,8 +1478,10 @@ function replaceInCurrentMilestone(
  *  with every bare <details> block and every fenced code block hidden; the record reader and every checklist writer share it. */
 function editActiveChecklist(content: string, cwd: string | undefined, edit: (region: string) => string): string {
   const start = activeScopeStart(content, cwd);
-  const end = currentMilestoneRawRanges(content, cwd)?.primary.end;
-  const stop = end !== undefined && end > start ? end : content.length;
+  const ranges = currentMilestoneRawRanges(content, cwd);
+  // A closed heading (stale STATE naming a shipped milestone) bounds nothing: run to EOF, as activeScopeStart does.
+  const open = ranges !== null && !isClosedMilestoneHeading(content.slice(ranges.primary.start).split('\n', 1)[0]);
+  const stop = open && ranges.primary.end > start ? ranges.primary.end : content.length;
   return content.slice(0, start)
     + editOutsideShippedBlocks(content.slice(start, stop), (outside) => editOutsideFences(outside, edit))
     + content.slice(stop);
