@@ -581,6 +581,9 @@ function planRowPattern(planId: string, opts: { anchored?: boolean; anyState?: b
   );
 }
 
+/** Files whose presence marks `.planning/<name>/` as a project directory (see `isStateJsonPublishPath`). */
+const PLANNING_PROJECT_MARKERS = Object.freeze(['STATE.md', 'ROADMAP.md', 'PROJECT.md', 'config.json', 'phases', 'workstreams']);
+
 /**
  * True when `rel` (a path relative to `cwd`) is a file `publishStateContract` writes:
  * `.planning[/<project>][/workstreams/<ws>]/state.json`. The project segment is free text, so
@@ -592,7 +595,7 @@ function isStateJsonPublishPath(cwd: string, rel: string): boolean {
   if (!m) return false;
   const project = m[1];
   if (project === undefined) return true;
-  return ['STATE.md', 'ROADMAP.md', 'PROJECT.md', 'config.json', 'phases'].some((x) =>
+  return PLANNING_PROJECT_MARKERS.some((x) =>
     fs.existsSync(path.join(cwd, '.planning', project, x)));
 }
 
@@ -609,6 +612,7 @@ function tickAnchoredPlanRow(text: string, planId: string): string {
 export = {
   toPosixPath,
   isStateJsonPublishPath,
+  PLANNING_PROJECT_MARKERS,
   normalizeLineEndings,
   detectSubRepos,
   extractOneLinerFromBody,

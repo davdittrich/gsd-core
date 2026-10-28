@@ -559,4 +559,44 @@ describe('state.json never dirties the tree (#5505)', () => {
     git(tmpDir, 'check-ignore', '-q', `${rel}/state.json`);
     assert.strictEqual(git(tmpDir, 'status', '--porcelain', '--', `${rel}/state.json`), '');
   });
+
+  test('commit --files of only the ignored, untracked state.json commits nothing and reports it skipped', (t) => {
+    const { tmpDir, rel } = boundary(t);
+    const out = JSON.parse(runGsdTools(['commit', 'docs: only', '--files', `${rel}/state.json`], tmpDir).output);
+    assert.strictEqual(out.committed, false);
+    assert.strictEqual(out.reason, 'nothing_to_commit');
+    assert.deepStrictEqual(out.skipped_files, [`${rel}/state.json`]);
+  });
+});
+
+// F3 parity: whatever the publisher writes, isStateJsonPublishPath must recognise (W031 and `commit --files` rely on it).
+describe('publisher output satisfies isStateJsonPublishPath (#5505)', () => {
+  const { publishStateContract } = require('../gsd-core/bin/lib/state-contract.cjs');
+  const { isStateJsonPublishPath } = require('../gsd-core/bin/lib/core-utils.cjs');
+  const scopes = {
+    none: {},
+    project: { project: 'proj', projectDoc: true },
+    workstream: { ws: 'ws1' },
+    'project+workstream': { project: 'proj', ws: 'ws1', projectDoc: true },
+    'workstreams-only project': { project: 'proj', ws: 'ws1' },
+  };
+  for (const [name, { project, ws, projectDoc }] of Object.entries(scopes)) {
+    test(`publisherOutputIsAPublishPath:${name}`, (t) => {
+      const tmpDir = createTempProject();
+      const prior = { GSD_PROJECT: process.env.GSD_PROJECT, GSD_WORKSTREAM: process.env.GSD_WORKSTREAM };
+      t.after(() => {
+        for (const [k, v] of Object.entries(prior)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+        cleanup(tmpDir);
+      });
+      if (project) process.env.GSD_PROJECT = project; else delete process.env.GSD_PROJECT;
+      if (ws) process.env.GSD_WORKSTREAM = ws; else delete process.env.GSD_WORKSTREAM;
+      const base = path.join(tmpDir, '.planning', ...(project ? [project] : []));
+      fs.mkdirSync(path.join(base, ...(ws ? ['workstreams', ws] : [])), { recursive: true });
+      if (projectDoc) fs.writeFileSync(path.join(base, 'STATE.md'), '# State\n');
+      assert.strictEqual(publishStateContract(tmpDir).published, true);
+      const written = path.join(base, ...(ws ? ['workstreams', ws] : []), 'state.json');
+      assert.ok(fs.existsSync(written), 'publisher wrote state.json');
+      assert.strictEqual(isStateJsonPublishPath(tmpDir, path.relative(tmpDir, written)), true);
+    });
+  }
 });
