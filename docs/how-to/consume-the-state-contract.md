@@ -211,7 +211,7 @@ with the exact command for the paths it found, e.g.
 removal; the file stays on disk, rerunning it is a no-op, and `--repair` never
 runs it for you. A teammate whose tracked copy is modified (the usual case) cannot pull that commit
 (`Your local changes ... would be overwritten by merge`): they run
-`git checkout -- <path>` (or stash) first, and the next boundary regenerates the file. With `planning.commit_docs` false (or `.planning/` already ignored) GSD does not touch `.git/info/exclude`.
+`git checkout -- <path>` (or stash) first, and the next boundary regenerates the file. With `planning.commit_docs` false, or `.planning/` ignored and a usable `config.json` present, GSD does not touch `.git/info/exclude`.
 If you keep `.planning/` out of your repo entirely, see
 [Keep planning docs out of a shared repo](keep-planning-docs-private.md).
 
