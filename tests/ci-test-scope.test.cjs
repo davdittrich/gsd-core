@@ -41,8 +41,7 @@ describe('ci-test-scope.cjs', () => {
 
   test('a product path that selects no Windows-hint tests keeps full_matrix false next to a template doc (#5427)', () => {
     const r = scopeFor(['agents/x.md', 'CONTRIBUTING.md']);
-    assert.deepStrictEqual([r.product_changed, r.full_matrix], [true, scopeFor(['agents/x.md']).full_matrix]);
-    assert.strictEqual(r.full_matrix, false);
+    assert.deepStrictEqual([r.product_changed, r.full_matrix], [true, false]);
   });
 
   test('template doc + product file keeps product_changed and full_matrix (#5427)', () => {

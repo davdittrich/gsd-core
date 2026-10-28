@@ -641,12 +641,12 @@ function classify(files, reachabilityDeps = {}) {
         // on Windows. The predicate below requires BOTH the hint AND tier
         // membership (via reachesConformanceTierOrSeam, the same fail-safe
         // reachability helper used elsewhere in this file, so error/uncertainty
-        // behavior stays identical). Measured: over the RULES entries this
+        // behavior stays identical). Measured: over the 16 RULES entries this
         // narrowed form fires on the same rules as the un-narrowed form today
         // (no behavior change now, correct-by-construction going forward). The
         // broader alternative — escalate on ANY tier member a rule pulls in,
         // ignoring the filename hint — was measured and rejected: it fires on
-        // most rules, newly escalating most ordinary product-code PRs
+        // 14 of 16 rules, newly escalating most ordinary product-code PRs
         // (src/, agents/, commands/, hooks/, skills/, config paths). Only one
         // rule's escalation is live today: 'portability lint rules (ADR-1703)'.
         // Four others already had fullMatrix: true (no-op here), and 'inert
