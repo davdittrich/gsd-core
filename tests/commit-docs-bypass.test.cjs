@@ -1317,7 +1317,7 @@ describe('#3587 per-phase commit_docs override', () => {
             cleanup(cwd);
           }
         }),
-        { numRuns: 30 },
+        { numRuns: 30, seed: 5505 },
       );
     });
   });
