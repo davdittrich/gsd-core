@@ -55,6 +55,7 @@ const path = require('node:path');
 const fc = require('fast-check');
 
 const { createTempProject, createTempDir, cleanup } = require('./helpers.cjs');
+const { stubEnv } = require('./helpers/env-guard.cjs');
 
 const {
   buildStateContract,
@@ -1296,15 +1297,11 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
   test('ignoresInheritedGitDirEnv', (t) => {
     const tmpDir = createTempGitProject();
     const other = createTempGitProject();
-    const prior = process.env.GIT_DIR;
-    t.after(() => {
-      if (prior === undefined) delete process.env.GIT_DIR; else process.env.GIT_DIR = prior;
-      cleanup(tmpDir); cleanup(other);
-    });
+    t.after(() => { cleanup(tmpDir); cleanup(other); });
     const before = fs.readFileSync(excludeOf(other), 'utf8');
-    process.env.GIT_DIR = path.join(other, '.git');
+    const restoreGitDir = stubEnv(t, 'GIT_DIR', path.join(other, '.git'));
     publishStateContract(tmpDir, fixedDeps());
-    if (prior === undefined) delete process.env.GIT_DIR; else process.env.GIT_DIR = prior;
+    restoreGitDir();
     assert.ok(lines(excludeOf(tmpDir)).includes('/.planning/state.json'));
     assert.strictEqual(fs.readFileSync(excludeOf(other), 'utf8'), before);
   });
@@ -1315,13 +1312,9 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
       const { isGitIgnored } = require('../gsd-core/bin/lib/config-loader.cjs');
       const tmpDir = createTempGitProject();
       const other = createTempGitProject();
-      const prior = process.env.GIT_DIR;
-      t.after(() => {
-        if (prior === undefined) delete process.env.GIT_DIR; else process.env.GIT_DIR = prior;
-        cleanup(tmpDir); cleanup(other);
-      });
+      t.after(() => { cleanup(tmpDir); cleanup(other); });
       fs.appendFileSync(excludeOf(cwdIgnores ? tmpDir : other), '.planning\n');
-      process.env.GIT_DIR = path.join(other, '.git');
+      stubEnv(t, 'GIT_DIR', path.join(other, '.git'));
       assert.strictEqual(isGitIgnored(tmpDir, '.planning'), expected);
     });
   }
@@ -1331,17 +1324,13 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
     test(`commitDocsGateIgnoresInheritedGitDir:${name}`, (t) => {
       const tmpDir = createTempGitProject();
       const other = createTempGitProject();
-      const prior = process.env.GIT_DIR;
-      t.after(() => {
-        if (prior === undefined) delete process.env.GIT_DIR; else process.env.GIT_DIR = prior;
-        cleanup(tmpDir); cleanup(other);
-      });
+      t.after(() => { cleanup(tmpDir); cleanup(other); });
       fs.writeFileSync(path.join(planningDirOf(tmpDir), 'config.json'), '{}'); // no config at all skips the ignore tier, as loadConfig does
       fs.appendFileSync(excludeOf(cwdIgnores ? tmpDir : other), '.planning\n');
       const before = fs.readFileSync(excludeOf(tmpDir), 'utf8');
-      process.env.GIT_DIR = path.join(other, '.git');
+      const restoreGitDir = stubEnv(t, 'GIT_DIR', path.join(other, '.git'));
       publishStateContract(tmpDir, fixedDeps());
-      delete process.env.GIT_DIR;
+      restoreGitDir();
       // .planning ignored in the cwd repo means commit_docs is off: its exclude stays untouched.
       assert.strictEqual(lines(excludeOf(tmpDir)).includes('/.planning/state.json'), !cwdIgnores);
       if (cwdIgnores) assert.strictEqual(fs.readFileSync(excludeOf(tmpDir), 'utf8'), before);
@@ -1394,6 +1383,16 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
     publishStateContract(linked, fixedDeps());
     git(linked, 'check-ignore', '-q', '.planning/state.json');
     assert.strictEqual(lines(excludeOf(tmpDir)).filter((l) => l === '/.planning/state.json').length, 1);
+  });
+
+  // The read-check-append is not atomic across linked worktrees: a racing second append leaves a duplicate line, which git reads as one rule.
+  test('aDuplicatedExcludeEntryIsHarmless', (t) => {
+    const tmpDir = createTempGitProject();
+    t.after(() => cleanup(tmpDir));
+    fs.appendFileSync(excludeOf(tmpDir), '/.planning/state.json\n/.planning/state.json\n');
+    publishStateContract(tmpDir, fixedDeps());
+    git(tmpDir, 'check-ignore', '-q', '.planning/state.json');
+    assert.strictEqual(lines(excludeOf(tmpDir)).filter((l) => l === '/.planning/state.json').length, 2);
   });
 
   test('anExplicitNegationOfTheEntryIsLeftAlone', (t) => {
@@ -1455,6 +1454,8 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
     unusableOwnConfigUnderWs: { ws: 'ws1', root: {}, ownRaw: '{ not json' },
     unusableRootConfigUnderWs: { ws: 'ws1', rootRaw: '{ not json', own: { commit_docs: true } },
     absentWsDir: { ws: 'ws1', root: {}, noWsDir: true },
+    // GSD_PROJECT + GSD_WORKSTREAM with no workstream config: loadConfig falls back to the PROJECT's config, not the planning root's.
+    projectWsConfigAbsent: { project: 'proj', ws: 'ws1', root: { commit_docs: false }, noOwnConfig: true },
   };
   const put = (file, obj, raw) => {
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -1463,11 +1464,9 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
   for (const [name, shape] of Object.entries(gateShapes)) {
     test(`commitDocsGateMatchesLoadConfig:${name}`, (t) => {
       const tmpDir = createTempGitProject();
-      const prior = process.env.GSD_WORKSTREAM;
-      t.after(() => {
-        if (prior === undefined) delete process.env.GSD_WORKSTREAM; else process.env.GSD_WORKSTREAM = prior;
-        cleanup(tmpDir);
-      });
+      t.after(() => cleanup(tmpDir));
+      stubEnv(t, 'GSD_PROJECT', shape.project);
+      stubEnv(t, 'GSD_WORKSTREAM', shape.ws);
       const planning = planningDirOf(tmpDir);
       if (shape.root || shape.rootRaw) put(path.join(planning, 'config.json'), shape.root, shape.rootRaw);
       if (shape.subRepo) {
@@ -1475,9 +1474,10 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
         git(path.join(tmpDir, 'sub'), 'init', '-q');
       }
       if (shape.ignored) fs.appendFileSync(excludeOf(tmpDir), '.planning\n');
-      if (shape.ws) {
-        if (!shape.noWsDir) put(path.join(planning, 'workstreams', shape.ws, 'config.json'), shape.own, shape.ownRaw);
-        process.env.GSD_WORKSTREAM = shape.ws;
+      if (shape.ws && !shape.noWsDir) {
+        const wsDir = path.join(planning, ...(shape.project ? [shape.project] : []), 'workstreams', shape.ws);
+        if (shape.noOwnConfig) fs.mkdirSync(wsDir, { recursive: true });
+        else put(path.join(wsDir, 'config.json'), shape.own, shape.ownRaw);
       }
       const expected = Boolean(require('../gsd-core/bin/lib/config-loader.cjs').loadConfig(tmpDir, { persist: false }).commit_docs);
       publishStateContract(tmpDir, fixedDeps());
@@ -1488,7 +1488,7 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
     });
   }
 
-  test('aBoundaryCommandSpawnsAtMostSixGitCalls', (t) => {
+  test('aBoundaryCommandSpawnsExactlyTheDocumentedGitCalls', (t) => {
     const tmpDir = createTempGitProject();
     t.after(() => cleanup(tmpDir));
     fs.writeFileSync(path.join(planningDirOf(tmpDir), 'STATE.md'), '# State\n');

@@ -135,7 +135,7 @@ interface Owners {
   platformReadSync: typeof import('./shell-command-projection.cjs')['platformReadSync'];
   platformWriteSync: typeof import('./shell-command-projection.cjs')['platformWriteSync'];
   excludeFromGit: typeof import('./git-info-exclude.cjs')['excludeFromGit'];
-  resolveCommitDocsReadOnly: typeof import('./config-loader.cjs')['resolveCommitDocsReadOnly'];
+  loadConfig: typeof import('./config-loader.cjs')['loadConfig'];
   locateProgressTable: typeof import('./phase-lifecycle.cjs')['locateProgressTable'];
   isSentinelPhaseId: typeof import('./phase-id.cjs')['isSentinelPhaseId'];
   parsePhaseFromProse: typeof import('./phase-id.cjs')['parsePhaseFromProse'];
@@ -177,7 +177,7 @@ function owners(): Owners {
     platformReadSync: shellCommandProjectionMod.platformReadSync,
     platformWriteSync: shellCommandProjectionMod.platformWriteSync,
     excludeFromGit: gitInfoExcludeMod.excludeFromGit,
-    resolveCommitDocsReadOnly: configLoaderMod.resolveCommitDocsReadOnly,
+    loadConfig: configLoaderMod.loadConfig,
     locateProgressTable: phaseLifecycleMod.locateProgressTable,
     isSentinelPhaseId: phaseIdMod.isSentinelPhaseId,
     parsePhaseFromProse: phaseIdMod.parsePhaseFromProse,
@@ -437,8 +437,8 @@ export function publishStateContract(cwd: string, deps?: StateContractDeps): { p
     try {
       // commit_docs false (explicit, or .planning already ignored) means the user keeps
       // planning out of git: leave the enclosing repo's exclude alone. loadConfig's own
-      // resolution, read-only: loadConfig would migrate config files and warn on stderr.
-      if (owners().resolveCommitDocsReadOnly(cwd)) {
+      // resolution, with `persist: false, quiet: true` so it neither migrates config files nor warns on stderr.
+      if (owners().loadConfig(cwd, { persist: false, quiet: true })['commit_docs']) {
         owners().excludeFromGit(path.dirname(statePath), 'state.json');
       }
     } catch {

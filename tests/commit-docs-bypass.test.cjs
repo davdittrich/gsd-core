@@ -1290,9 +1290,12 @@ describe('#3587 per-phase commit_docs override', () => {
       );
     });
 
-    // The publisher's read-only resolution must equal loadConfig's commit_docs for every config shape (#5505).
-    test('F2: resolveCommitDocsReadOnly equals loadConfig().commit_docs', () => {
-      const { loadConfig, resolveCommitDocsReadOnly } = require('../gsd-core/bin/lib/config-loader.cjs');
+    // The state-contract publisher's exclude gate is loadConfig's commit_docs for every config shape (#5505):
+    // one reader, and `quiet` changes only stderr, never the value.
+    test('F2: the state-contract exclude gate equals loadConfig().commit_docs', () => {
+      const { loadConfig } = require('../gsd-core/bin/lib/config-loader.cjs');
+      const { publishStateContract } = require('../gsd-core/bin/lib/state-contract.cjs');
+      const { splitLines } = require('../gsd-core/bin/lib/text-lines.cjs');
       const valueArb = fc.oneof(fc.constant(undefined), fc.boolean(), fc.string({ maxLength: 4 }), fc.integer({ min: -1, max: 2 }));
       fc.assert(
         fc.property(valueArb, valueArb, fc.boolean(), fc.boolean(), (flat, nested, hasConfig, ignored) => {
@@ -1305,7 +1308,11 @@ describe('#3587 per-phase commit_docs override', () => {
               fs.writeFileSync(path.join(cwd, '.planning', 'config.json'), JSON.stringify(cfg));
             }
             if (ignored) fs.appendFileSync(path.join(cwd, '.git', 'info', 'exclude'), '.planning\n');
-            assert.deepStrictEqual(resolveCommitDocsReadOnly(cwd), loadConfig(cwd, { persist: false }).commit_docs);
+            const expected = loadConfig(cwd, { persist: false }).commit_docs;
+            assert.deepStrictEqual(loadConfig(cwd, { persist: false, quiet: true }).commit_docs, expected);
+            assert.strictEqual(publishStateContract(cwd).published, true);
+            const exclude = splitLines(fs.readFileSync(path.join(cwd, '.git', 'info', 'exclude'), 'utf8'));
+            assert.strictEqual(exclude.includes('/.planning/state.json'), Boolean(expected));
           } finally {
             cleanup(cwd);
           }
