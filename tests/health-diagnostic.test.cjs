@@ -616,15 +616,18 @@ describe('health repair — GSD_PROJECT scoping (#3749)', () => {
 
 describe('W031 remedy under bash (#5505)', () => {
   const { spawnSync } = require('node:child_process');
-  const { gitOrThrow } = require('./helpers/git-fixture.cjs');
+  const { gitOrThrow, isFsLegalName } = require('./helpers/git-fixture.cjs');
+  const { resolveInterpreter } = require('./helpers/process-seam.cjs');
   const { GIT_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
-  const hasBash = spawnSync('bash', ['-c', 'true'], { timeout: GIT_TIMEOUT_MS }).status === 0;
+  const bash = resolveInterpreter('bash');
+  const hasBash = bash !== null && spawnSync(bash, ['-c', 'true'], { timeout: GIT_TIMEOUT_MS }).status === 0;
 
   test('W031 remedy untracks exactly the tracked paths under bash', { skip: !hasBash }, (t) => {
     const cwd = createTempGitProject('gsd-5505-w031-bash-');
     t.after(() => cleanup(cwd));
-    // '*' is a legal project name: unquoted-literal, its pathspec would also match the unrelated intel/state.json.
-    const projects = ['my proj', "it's", 'a\nb', 'plain', '*'];
+    // '*' is a legal POSIX project name: unquoted-literal, its pathspec would also match the unrelated intel/state.json.
+    // Names Windows rejects ('*', newline) run only where the filesystem accepts them.
+    const projects = ['my proj', "it's", 'a\nb', 'plain', '*'].filter(isFsLegalName);
     const rels = [];
     for (const name of projects) {
       for (const file of ['state.json', 'STATE.md']) {
@@ -642,7 +645,7 @@ describe('W031 remedy under bash (#5505)', () => {
     const w031 = RULES.find((r) => r.code === 'W031');
     const [diagnostic] = w031.check(buildPlanningSnapshot(cwd));
     const command = /`(git --literal-pathspecs rm [^`]*)`/.exec(diagnostic.remedy.args.command)[1];
-    const run = spawnSync('bash', ['-c', command], { cwd, encoding: 'utf8', timeout: GIT_TIMEOUT_MS });
+    const run = spawnSync(bash, ['-c', command], { cwd, encoding: 'utf8', timeout: GIT_TIMEOUT_MS });
     assert.equal(run.status, 0, run.stderr);
 
     const tracked = gitOrThrow(['ls-files', '-z'], { cwd }).split('\0').filter(Boolean);

@@ -42,7 +42,8 @@ const path = require('node:path');
 const childProcess = require('node:child_process');
 
 const { createTempDir, createTempGitProject, cleanup } = require('../helpers.cjs');
-const { gitOrThrow } = require('../helpers/git-fixture.cjs');
+const { gitOrThrow, isFsLegalName } = require('../helpers/git-fixture.cjs');
+const { resolveInterpreter } = require('../helpers/process-seam.cjs');
 const { GIT_TIMEOUT_MS } = require('../helpers/timeouts.cjs');
 
 const configValidation = require('../../gsd-core/bin/lib/health-diagnostic-rules/config-validation.cjs');
@@ -904,7 +905,7 @@ describe('W031 — derived state.json still tracked by git', () => {
     );
   });
 
-  test('W031 escapes control characters in a tracked name: no raw newline in the message, ANSI-C quoting in the command', (t) => {
+  test('W031 escapes control characters in a tracked name: no raw newline in the message, ANSI-C quoting in the command', { skip: !isFsLegalName('\n') && 'Windows rejects a newline in a file name' }, (t) => {
     const cwd = createTempGitProject('gsd-5505-w031-ctrl-');
     t.after(() => cleanup(cwd));
     trackStateJson(cwd, ['.planning/a\nb/state.json', '.planning/a\nb/STATE.md']);
@@ -1026,14 +1027,15 @@ describe('W031 — derived state.json still tracked by git', () => {
   test('W031 property: quoted remedy round-trips through bash', (t) => {
     const fc = require('fast-check');
     const { spawnSync } = require('node:child_process');
-    if (spawnSync('bash', ['-c', 'true'], { timeout: GIT_TIMEOUT_MS }).status !== 0) { t.skip('bash unavailable'); return; }
+    const bash = resolveInterpreter('bash');
+    if (bash === null || spawnSync(bash, ['-c', 'true'], { timeout: GIT_TIMEOUT_MS }).status !== 0) { t.skip('bash unavailable'); return; }
     const alphabet = ['a', 'Z', '0', ' ', "'", '\\', '"', '$', '\n', '\t', '\x1b', '\x7f', '\u0085', '\u009f', 'é', '-', '/'];
     fc.assert(
       fc.property(fc.array(fc.constantFrom(...alphabet), { minLength: 1, maxLength: 8 }), (chars) => {
         const name = chars.join('');
         const [diagnostic] = ruleFor('W031').check({ stateJsonTracked: { value: [name], scope: SCOPE.COMPLETE, reason: 'ok' } });
         const quoted = /-- (.*)` once/s.exec(diagnostic.remedy.args.command)[1];
-        const out = spawnSync('bash', ['-c', `printf %s ${quoted}`], { encoding: 'utf8', timeout: GIT_TIMEOUT_MS });
+        const out = spawnSync(bash, ['-c', `printf %s ${quoted}`], { encoding: 'utf8', timeout: GIT_TIMEOUT_MS });
         return out.status === 0 && out.stdout === name;
       }),
       { numRuns: 100, seed: 5505 },
