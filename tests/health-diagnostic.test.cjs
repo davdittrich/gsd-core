@@ -611,3 +611,40 @@ describe('health repair — GSD_PROJECT scoping (#3749)', () => {
       'config.json must not move into the workstream dir');
   });
 });
+
+// ─── W031 remedy (#5505): the pasted command untracks exactly the tracked paths ──
+
+describe('W031 remedy under bash (#5505)', () => {
+  const { spawnSync } = require('node:child_process');
+  const { gitOrThrow } = require('./helpers/git-fixture.cjs');
+  const { GIT_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
+  const hasBash = spawnSync('bash', ['-c', 'true'], { timeout: GIT_TIMEOUT_MS }).status === 0;
+
+  test('W031 remedy untracks exactly the tracked paths under bash', { skip: !hasBash }, (t) => {
+    const cwd = createTempGitProject('gsd-5505-w031-bash-');
+    t.after(() => cleanup(cwd));
+    const projects = ['my proj', "it's", 'a\nb', 'plain'];
+    const rels = [];
+    for (const name of projects) {
+      for (const file of ['state.json', 'STATE.md']) {
+        const rel = `.planning/${name}/${file}`;
+        fs.mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true });
+        fs.writeFileSync(path.join(cwd, rel), '{}\n');
+        rels.push(rel);
+      }
+    }
+    gitOrThrow(['add', '-f', '-A'], { cwd });
+    gitOrThrow(['commit', '-q', '-m', 'track'], { cwd });
+
+    const w031 = RULES.find((r) => r.code === 'W031');
+    const [diagnostic] = w031.check(buildPlanningSnapshot(cwd));
+    const command = /`(git rm [^`]*)`/.exec(diagnostic.remedy.args.command)[1];
+    const run = spawnSync('bash', ['-c', command], { cwd, encoding: 'utf8', timeout: GIT_TIMEOUT_MS });
+    assert.equal(run.status, 0, run.stderr);
+
+    const tracked = gitOrThrow(['ls-files', '-z'], { cwd }).split('\0').filter(Boolean);
+    assert.ok(!tracked.some((f) => f.endsWith('/state.json')), `still tracked: ${tracked}`);
+    assert.equal(tracked.filter((f) => f.endsWith('/STATE.md')).length, projects.length);
+    for (const rel of rels) assert.ok(fs.existsSync(path.join(cwd, rel)), `${rel} stays on disk`);
+  });
+});

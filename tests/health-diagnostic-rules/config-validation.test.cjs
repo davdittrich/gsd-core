@@ -43,6 +43,7 @@ const childProcess = require('node:child_process');
 
 const { createTempDir, createTempGitProject, cleanup } = require('../helpers.cjs');
 const { gitOrThrow } = require('../helpers/git-fixture.cjs');
+const { GIT_TIMEOUT_MS } = require('../helpers/timeouts.cjs');
 
 const configValidation = require('../../gsd-core/bin/lib/health-diagnostic-rules/config-validation.cjs');
 const { RULES } = configValidation;
@@ -942,29 +943,55 @@ describe('W031 — derived state.json still tracked by git', () => {
     assert.ok(diagnostic.message.startsWith('.planning/proj/state.json, .planning/proj/workstreams/ws1/state.json'), diagnostic.message);
   });
 
-  // Property: for any single-segment name, `.planning/<name>/state.json` is a publish path
-  // exactly when `<name>` holds a planning file (the matcher has no reserved-name list to drift).
-  test('W031 property: a project-scoped state.json is named iff its directory holds a planning file', (t) => {
+  // Property: for any single-segment name, `.planning/<name>[/workstreams/ws1]/state.json` is a publish path
+  // exactly when `<name>` holds a marker file or directory from the owner's own export (a workstream
+  // directory is itself the `workstreams` marker); the matcher has no reserved-name list to drift.
+  test('W031 property: publish-path matcher over the owner\'s markers', (t) => {
     const fc = require('fast-check');
+    const { PLANNING_PROJECT_MARKERS } = require('../../gsd-core/bin/lib/core-utils.cjs');
     const cwd = createTempGitProject('gsd-5505-w031-prop-');
     t.after(() => cleanup(cwd));
     fc.assert(
       fc.property(
         fc.stringMatching(/^[a-z][a-z0-9_-]{0,11}$/).filter((n) => n !== 'workstreams'),
+        fc.subarray([...PLANNING_PROJECT_MARKERS]),
         fc.boolean(),
-        (name, hasMarker) => {
+        (name, markers, ws) => {
           const dir = path.join(cwd, '.planning', name);
           cleanup(dir);
-          fs.mkdirSync(dir, { recursive: true });
-          fs.writeFileSync(path.join(dir, 'state.json'), '{}\n');
-          if (hasMarker) fs.writeFileSync(path.join(dir, 'STATE.md'), '# s\n');
+          const rel = ws ? `.planning/${name}/workstreams/ws1/state.json` : `.planning/${name}/state.json`;
+          fs.mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true });
+          fs.writeFileSync(path.join(cwd, rel), '{}\n');
+          for (const m of markers) {
+            if (m === 'phases' || m === 'workstreams') fs.mkdirSync(path.join(dir, m), { recursive: true });
+            else fs.writeFileSync(path.join(dir, m), '# s\n');
+          }
           gitOrThrow(['add', '-f', '--', `.planning/${name}`], { cwd });
-          const named = ruleFor('W031').check(buildPlanningSnapshot(cwd)).some((d) => d.message.includes(`.planning/${name}/state.json`));
+          const named = ruleFor('W031').check(buildPlanningSnapshot(cwd)).some((d) => d.message.includes(rel));
           gitOrThrow(['rm', '-rq', '--cached', '--', `.planning/${name}`], { cwd });
-          return named === hasMarker;
+          return named === (markers.length > 0 || ws);
         },
       ),
-      { numRuns: 20, seed: 5505 },
+      { numRuns: 40, seed: 5505 },
+    );
+  });
+
+  // Property: the quoted remedy argument is read back by bash as exactly the tracked name
+  // (U+0080-U+009F as the UTF-8 bytes git tracks, C0/DEL, quotes and backslashes included).
+  test('W031 property: quoted remedy round-trips through bash', (t) => {
+    const fc = require('fast-check');
+    const { spawnSync } = require('node:child_process');
+    if (spawnSync('bash', ['-c', 'true'], { timeout: GIT_TIMEOUT_MS }).status !== 0) { t.skip('bash unavailable'); return; }
+    const alphabet = ['a', 'Z', '0', ' ', "'", '\\', '"', '$', '\n', '\t', '\x1b', '\x7f', '\u0085', '\u009f', 'é', '-', '/'];
+    fc.assert(
+      fc.property(fc.array(fc.constantFrom(...alphabet), { minLength: 1, maxLength: 8 }), (chars) => {
+        const name = chars.join('');
+        const [diagnostic] = ruleFor('W031').check({ stateJsonTracked: [name] });
+        const quoted = /-- (.*)` once/s.exec(diagnostic.remedy.args.command)[1];
+        const out = spawnSync('bash', ['-c', `printf %s ${quoted}`], { encoding: 'utf8', timeout: GIT_TIMEOUT_MS });
+        return out.status === 0 && out.stdout === name;
+      }),
+      { numRuns: 100, seed: 5505 },
     );
   });
 

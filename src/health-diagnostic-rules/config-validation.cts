@@ -58,10 +58,10 @@ type PlanningSnapshot = ReturnType<typeof planningSnapshotMod.buildPlanningSnaps
 import healthDiagnosticMod = require('../health-diagnostic-types.cjs');
 const { SEVERITY, REMEDY_ACTION, REMEDY_RISK, adviseRemedy } = healthDiagnosticMod;
 type Diagnostic = healthDiagnosticMod.Diagnostic;
-import { sanitizeLabel } from '../security.cjs';
 type Rule = healthDiagnosticMod.Rule;
 
 import { VALID_PROFILES, VALID_TIERS, VALID_PHASE_TYPES } from '../model-catalog.cjs';
+import { sanitizeLabel } from '../security.cjs';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import planningScopeMod = require('../planning-scope.cjs');
@@ -322,12 +322,16 @@ function checkW029(snapshot: PlanningSnapshot): Diagnostic[] {
 function checkW031(snapshot: PlanningSnapshot): Diagnostic[] {
   const paths = snapshot.stateJsonTracked;
   if (!paths || paths.length === 0) return [];
+  // ANSI-C quoting: `\\` and `'` backslashed, C1 characters as their UTF-8 bytes (what git tracks),
+  // every other character through sanitizeLabel so C0/DEL keep their `\n`, `\t`, `\x1b` forms.
+  const ansiC = (p: string): string =>
+    `$'${[...p].map((ch) => ch === '\\' || ch === "'" ? `\\${ch}` : /[\u0080-\u009f]/.test(ch) ? [...Buffer.from(ch)].map((b) => `\\x${b.toString(16)}`).join('') : sanitizeLabel(ch)).join('')}'`;
   // Tracked names are repository content and health output is read by agents: escape control
   // characters in the message, and quote the pasted command (POSIX single quotes; `$'..'` for a
   // name with control characters) so it pastes as-is.
   const quote = (p: string): string => {
     if (/^[\w./-]+$/.test(p)) return p;
-    if (/\p{Cc}/u.test(p)) return `$'${sanitizeLabel(p.replace(/[\\']/g, '\\$&'))}'`;
+    if (/\p{Cc}/u.test(p)) return ansiC(p);
     return `'${p.replace(/'/g, `'\\''`)}'`;
   };
   const args = paths.map(quote).join(' ');
@@ -337,7 +341,7 @@ function checkW031(snapshot: PlanningSnapshot): Diagnostic[] {
       severity: SEVERITY.WARNING,
       message: `${paths.map(sanitizeLabel).join(', ')} is tracked by git, but it is a derived cache rewritten at every boundary command — the tracked copy stays modified and /gsd-ship refuses the dirty tree`,
       remedy: adviseRemedy(
-        `Run \`git rm --cached --ignore-unmatch -- ${args}\` once and commit the removal; the file stays on disk and GSD's .git/info/exclude entry keeps it ignored from then on (quoting is POSIX-shell; in PowerShell or cmd quote paths yourself)`,
+        `Run \`git rm --cached --ignore-unmatch -- ${args}\` once and commit the removal; the file stays on disk and GSD's .git/info/exclude entry keeps it ignored from then on`,
       ),
     },
   ];
