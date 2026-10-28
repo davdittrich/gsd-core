@@ -207,7 +207,8 @@ every boundary and `/gsd-ship` refuses the dirty tree. GSD never changes your
 index; `/gsd-health` (`validate health`) reports such a copy as warning `W031`
 with the exact command for the paths it found, e.g.
 `git --literal-pathspecs rm --cached --ignore-unmatch -- .planning/state.json`
-(or `.planning/workstreams/<name>/state.json`). Run it once and commit the
+(or `.planning/workstreams/<name>/state.json`, `.planning/<project>/state.json`,
+`.planning/<project>/workstreams/<name>/state.json`). Run it once and commit the
 removal; the file stays on disk, rerunning it is a no-op, and `--repair` never
 runs it for you. A teammate whose tracked copy is modified (the usual case)
 cannot pull that commit (`Your local changes ... would be overwritten by
