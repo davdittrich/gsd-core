@@ -657,7 +657,9 @@ const COVERED = {
   'state-contract': {
     cjs: 'gsd-core/bin/lib/state-contract.cjs',
     excludeTests: ['state-contract.test.cjs'],
-    minScore: 65,
+    // CI run 40672548395 (job 122762928837, PR #5550): measured 70.50%. Floor =
+    // floor(70.50) - 1 = 69.
+    minScore: 69,
   },
   // #4998 review (trek-e 5563202317 Nit 6, 5608265301 Minor 4): the STATE.md and
   // planning-document field readers and writers #4998 grew.
