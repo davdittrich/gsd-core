@@ -1035,7 +1035,8 @@ describe('W031 — derived state.json still tracked by git', () => {
         const name = chars.join('');
         const [diagnostic] = ruleFor('W031').check({ stateJsonTracked: { value: [name], scope: SCOPE.COMPLETE, reason: 'ok' } });
         const quoted = /-- (.*)` once/s.exec(diagnostic.remedy.args.command)[1];
-        const out = spawnSync(bash, ['-c', `printf %s ${quoted}`], { encoding: 'utf8', timeout: GIT_TIMEOUT_MS });
+        // The script goes in on stdin: Windows re-quotes argv for a child process, which mangles a newline next to a backslash.
+        const out = spawnSync(bash, ['-s'], { input: `printf %s ${quoted}`, encoding: 'utf8', timeout: GIT_TIMEOUT_MS });
         return out.status === 0 && out.stdout === name;
       }),
       { numRuns: 100, seed: 5505 },
