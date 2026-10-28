@@ -3,7 +3,7 @@
  * file: append an anchored entry to the enclosing repo's `info/exclude` (#5551).
  *
  * Used for files GSD writes under `.planning/` that are per-machine state, not
- * project content (the milestone claim). A copy that is already tracked is left
+ * project content (the milestone claim and the derived `state.json`, #5505). A copy that is already tracked is left
  * alone — an exclude entry never untracks, and migrating it is the user's call.
  *
  * Best-effort by contract: never throws. Ignoring is optional, so no failure
@@ -30,13 +30,15 @@ export function excludeFromGit(dir: string, filename: string): void {
     if (/[\r\n]/.test(dir)) return;
     // The prefix goes last: stdout is trimmed, and a non-empty prefix ends in `/`, so only an
     // empty prefix (dir is the git root) loses its line; a leading space survives.
-    const revParse = execGit(['rev-parse', '--git-path', 'info/exclude', '--show-prefix'], { cwd: dir });
+    // runs on every boundary command's hot path
+    const revParse = execGit(['rev-parse', '--git-path', 'info/exclude', '--show-prefix'], { cwd: dir, timeout: 5_000 });
     const [excludeRel, prefix = ''] = splitLines(String(revParse.stdout));
     if (revParse.exitCode !== 0 || !excludeRel) return;
     const exclude = path.resolve(dir, excludeRel);
     const entry = `/${escapeGitignore(prefix)}${escapeGitignore(filename)}`;
     const existing = fs.existsSync(exclude) ? fs.readFileSync(exclude, 'utf8') : '';
-    if (splitLines(existing).includes(entry)) return;
+    const present = splitLines(existing);
+    if (present.includes(entry) || present.includes(`!${entry}`)) return; // an earlier !entry is the user's choice to track the file (last match wins)
     fs.mkdirSync(path.dirname(exclude), { recursive: true });
     fs.appendFileSync(exclude, (existing && !existing.endsWith('\n') ? '\n' : '') + entry + '\n');
   } catch {

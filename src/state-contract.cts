@@ -40,8 +40,8 @@
  * diff/event stream, a config toggle, milestone-scoping of `phases[]`. This
  * module answers "where is this project right now" and nothing else — a
  * request for document *contents* belongs to `planning.inspect`. (Its one side
- * effect beyond the snapshot: `excludeStateJson` keeps state.json out of git via
- * `.git/info/exclude`, REQ-SC-04.)
+ * effect beyond the snapshot: `excludeFromGit` (git-info-exclude.cts) keeps state.json out of git via
+ * `.git/info/exclude`, REQ-SC-05.)
  *
  * REQUIRE-CYCLE HAZARD (the single most important implementation
  * constraint). `src/state.cts` imports THIS module, and `src/smart-entry.cts`
@@ -74,7 +74,6 @@ import fs from 'node:fs';
 // documented `state.cjs -> state-contract.cjs -> smart-entry.cjs -> state.cjs`
 // require cycle the file header warns about.
 import { WIRE_STATUS, parseRoadmapStatusCell } from './phase-status.cjs';
-import { splitLines } from './text-lines.cjs';
 
 // ─── Public wire vocabulary ────────────────────────────────────────────────
 
@@ -135,7 +134,7 @@ interface Owners {
   planningPaths: typeof import('./planning-workspace.cjs')['planningPaths'];
   platformReadSync: typeof import('./shell-command-projection.cjs')['platformReadSync'];
   platformWriteSync: typeof import('./shell-command-projection.cjs')['platformWriteSync'];
-  execGit: typeof import('./shell-command-projection.cjs')['execGit'];
+  excludeFromGit: typeof import('./git-info-exclude.cjs')['excludeFromGit'];
   resolveCommitDocsReadOnly: typeof import('./config-loader.cjs')['resolveCommitDocsReadOnly'];
   locateProgressTable: typeof import('./phase-lifecycle.cjs')['locateProgressTable'];
   isSentinelPhaseId: typeof import('./phase-id.cjs')['isSentinelPhaseId'];
@@ -170,13 +169,14 @@ function owners(): Owners {
   const stateDocumentMod = require('./state-document.cjs') as typeof import('./state-document.cjs');
   const frontmatterMod = require('./frontmatter.cjs') as typeof import('./frontmatter.cjs');
   const configLoaderMod = require('./config-loader.cjs') as typeof import('./config-loader.cjs');
+  const gitInfoExcludeMod = require('./git-info-exclude.cjs') as typeof import('./git-info-exclude.cjs');
   const smartEntryMod = require('./smart-entry.cjs') as typeof import('./smart-entry.cjs');
   /* eslint-enable @typescript-eslint/no-require-imports */
   _owners = {
     planningPaths: planningWorkspaceMod.planningPaths,
     platformReadSync: shellCommandProjectionMod.platformReadSync,
     platformWriteSync: shellCommandProjectionMod.platformWriteSync,
-    execGit: shellCommandProjectionMod.execGit,
+    excludeFromGit: gitInfoExcludeMod.excludeFromGit,
     resolveCommitDocsReadOnly: configLoaderMod.resolveCommitDocsReadOnly,
     locateProgressTable: phaseLifecycleMod.locateProgressTable,
     isSentinelPhaseId: phaseIdMod.isSentinelPhaseId,
@@ -390,37 +390,6 @@ export function buildStateContract(cwd: string, deps?: StateContractDeps): State
   };
 }
 
-// Linked worktrees share one exclude file; read-then-append is not atomic across them, so a racing
-// pair may append the entry twice. Git treats duplicate lines as one, so no lock.
-function ensureExcluded(exclude: string, entry: string): void {
-  const existing = fs.existsSync(exclude) ? fs.readFileSync(exclude, 'utf8') : '';
-  // An earlier `!entry` is the user's choice to track the file; appending would override it (last match wins).
-  const present = splitLines(existing);
-  if (present.includes(entry) || present.includes(`!${entry}`)) return;
-  fs.mkdirSync(path.dirname(exclude), { recursive: true });
-  fs.appendFileSync(exclude, (existing && !existing.endsWith('\n') ? '\n' : '') + entry + '\n');
-}
-
-/**
- * state.json is a derived cache (#5505): ignore it via the repo-local
- * info/exclude (never a tracked file). A copy already tracked is left alone;
- * migrating it is the user's call. Best-effort; callers swallow throws.
- */
-function excludeStateJson(planningDir: string, execGit: Owners['execGit']): void {
-  // gitignore cannot express a newline in a pattern, and git's line output could not be split.
-  if (/[\r\n]/.test(planningDir)) return;
-  // Short bound: this runs on every boundary command's hot path.
-  // The prefix goes last: stdout is trimmed, and a non-empty prefix ends in `/`, so only an
-  // empty prefix (planning dir is the git root) loses its line; a leading space survives.
-  const revParse = execGit(['rev-parse', '--git-path', 'info/exclude', '--show-prefix'], { cwd: planningDir, timeout: 5_000 });
-  const [excludeRel, prefix = ''] = splitLines(String(revParse.stdout));
-  if (revParse.exitCode !== 0 || !excludeRel) return;
-  const exclude = path.resolve(planningDir, excludeRel);
-  // Escape gitignore metacharacters in the directory prefix.
-  const entry = `/${prefix.replace(/[\\*?[]/g, '\\$&')}state.json`;
-  ensureExcluded(exclude, entry);
-}
-
 /**
  * Publish the state-contract snapshot to `<planning>/state.json`. NEVER
  * throws — for any input, ever (acceptance criterion 3: the parent boundary
@@ -440,7 +409,7 @@ function excludeStateJson(planningDir: string, execGit: Owners['execGit']): void
  */
 export function publishStateContract(cwd: string, deps?: StateContractDeps): { published: boolean; reason: string } {
   try {
-    const { planningPaths, platformWriteSync, execGit } = owners();
+    const { planningPaths, platformWriteSync } = owners();
     // Resolve the planning root BEFORE anything else. A resolution failure
     // (invalid GSD_WORKSTREAM/GSD_PROJECT segment — the #2245 shape) means no
     // write was ever attempted, so it must map to `no_planning_dir`, not
@@ -470,7 +439,7 @@ export function publishStateContract(cwd: string, deps?: StateContractDeps): { p
       // planning out of git: leave the enclosing repo's exclude alone. loadConfig's own
       // resolution, read-only: loadConfig would migrate config files and warn on stderr.
       if (owners().resolveCommitDocsReadOnly(cwd)) {
-        excludeStateJson(path.dirname(statePath), execGit);
+        owners().excludeFromGit(path.dirname(statePath), 'state.json');
       }
     } catch {
       // REQ-SC-04: ignoring is optional; never perturb the publish result.

@@ -1406,6 +1406,16 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
     assert.strictEqual(fs.readFileSync(exclude, 'utf8'), before);
   });
 
+  test('bothExcludeCallersHonourAnExplicitNegation', (t) => {
+    const tmpDir = createTempGitProject();
+    t.after(() => cleanup(tmpDir));
+    const exclude = excludeOf(tmpDir);
+    fs.appendFileSync(exclude, '!/.planning/x\n');
+    const before = fs.readFileSync(exclude, 'utf8');
+    require('../gsd-core/bin/lib/git-info-exclude.cjs').excludeFromGit(planningDirOf(tmpDir), 'x');
+    assert.strictEqual(fs.readFileSync(exclude, 'utf8'), before);
+  });
+
   test('planningRootIsTheGitRoot', (t) => {
     const tmpDir = createTempProject();
     t.after(() => cleanup(tmpDir));
@@ -1441,6 +1451,14 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
     rootFlatFalseWsNestedTrue: { ws: 'ws1', root: { commit_docs: false }, own: { planning: { commit_docs: true } } },
     rootTrueWsAbsent: { ws: 'ws1', root: { commit_docs: true }, own: {} },
     wsOnlyFalse: { ws: 'ws1', root: {}, own: { commit_docs: false } },
+    legacyMultiRepoWithSubRepo: { root: { multiRepo: true }, subRepo: true },
+    unusableOwnConfigUnderWs: { ws: 'ws1', root: {}, ownRaw: '{ not json' },
+    unusableRootConfigUnderWs: { ws: 'ws1', rootRaw: '{ not json', own: { commit_docs: true } },
+    absentWsDir: { ws: 'ws1', root: {}, noWsDir: true },
+  };
+  const put = (file, obj, raw) => {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, raw ?? JSON.stringify(obj));
   };
   for (const [name, shape] of Object.entries(gateShapes)) {
     test(`commitDocsGateMatchesLoadConfig:${name}`, (t) => {
@@ -1451,18 +1469,47 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
         cleanup(tmpDir);
       });
       const planning = planningDirOf(tmpDir);
-      if (shape.root) fs.writeFileSync(path.join(planning, 'config.json'), JSON.stringify(shape.root));
+      if (shape.root || shape.rootRaw) put(path.join(planning, 'config.json'), shape.root, shape.rootRaw);
+      if (shape.subRepo) {
+        fs.mkdirSync(path.join(tmpDir, 'sub'));
+        git(path.join(tmpDir, 'sub'), 'init', '-q');
+      }
       if (shape.ignored) fs.appendFileSync(excludeOf(tmpDir), '.planning\n');
       if (shape.ws) {
-        fs.mkdirSync(path.join(planning, 'workstreams', shape.ws), { recursive: true });
-        fs.writeFileSync(path.join(planning, 'workstreams', shape.ws, 'config.json'), JSON.stringify(shape.own));
+        if (!shape.noWsDir) put(path.join(planning, 'workstreams', shape.ws, 'config.json'), shape.own, shape.ownRaw);
         process.env.GSD_WORKSTREAM = shape.ws;
       }
       const expected = Boolean(require('../gsd-core/bin/lib/config-loader.cjs').loadConfig(tmpDir, { persist: false }).commit_docs);
       publishStateContract(tmpDir, fixedDeps());
-      assert.strictEqual(lines(excludeOf(tmpDir)).some((l) => l.endsWith('state.json')), expected);
+      // The entry is derived from the path the publisher itself writes; with no workstream directory it writes nothing.
+      const published = path.join(require('../gsd-core/bin/lib/planning-workspace.cjs').planningPaths(tmpDir).planning, 'state.json');
+      const entry = '/' + path.relative(tmpDir, published).replace(/\\/g, '/');
+      assert.deepStrictEqual(lines(excludeOf(tmpDir)).filter((l) => l.endsWith('state.json')), expected && fs.existsSync(published) ? [entry] : []);
     });
   }
+
+  test('aBoundaryCommandSpawnsAtMostSixGitCalls', (t) => {
+    const tmpDir = createTempGitProject();
+    t.after(() => cleanup(tmpDir));
+    fs.writeFileSync(path.join(planningDirOf(tmpDir), 'STATE.md'), '# State\n');
+    fs.writeFileSync(path.join(planningDirOf(tmpDir), 'config.json'), '{}');
+    git(tmpDir, 'add', '-A');
+    git(tmpDir, 'commit', '-q', '-m', 'planning');
+    const childProcess = require('node:child_process');
+    let gitCalls = 0;
+    for (const fn of ['spawnSync', 'execFileSync']) {
+      const real = childProcess[fn];
+      t.mock.method(childProcess, fn, function (cmd, ...rest) {
+        if (path.basename(String(cmd)).replace(/\.exe$/, '') === 'git') gitCalls += 1;
+        return real.call(this, cmd, ...rest);
+      });
+    }
+    assert.strictEqual(publishStateContract(tmpDir).published, true);
+    const doc = fs.readFileSync(path.join(__dirname, '..', 'docs', 'features', 'machine-readable-state-contract-planningstatejson.md'), 'utf8');
+    const words = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
+    const stated = words.indexOf(/up to (\w+) bounded git calls/.exec(doc)[1]) + 1;
+    assert.strictEqual(gitCalls, stated);
+  });
 
   test('publishLeavesALegacyConfigUnrewritten', (t) => {
     const tmpDir = createTempGitProject();
