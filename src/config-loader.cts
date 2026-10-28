@@ -684,7 +684,11 @@ function _applyDetectedSubRepos(cfg: ParsedConfig, norms: NormalizationEntry[], 
   }
 }
 
-/** The one commit_docs resolution: explicit key (flat, then planning.*), else false when .planning/ is git-ignored, else the default. */
+/**
+ * commit_docs from a parsed config: explicit value (flat, then planning.*), else false when .planning/ is git-ignored, else the default.
+ * Shared by loadConfig and resolveCommitDocsReadOnly. resolveCommitDocsPolicy (commands.cts) is the commit-time gate on the
+ * loaded value, with its own phase-override and ignore-veto tiers.
+ */
 function _resolveCommitDocs(parsed: Record<string, unknown>, planningIgnored: () => boolean): unknown {
   const explicit = _getConfigValue(parsed, 'commit_docs', { section: 'planning', field: 'commit_docs' });
   if (explicit !== undefined) return explicit;

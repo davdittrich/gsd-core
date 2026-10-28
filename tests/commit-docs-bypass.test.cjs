@@ -1289,6 +1289,30 @@ describe('#3587 per-phase commit_docs override', () => {
         ),
       );
     });
+
+    // The publisher's read-only resolution must equal loadConfig's commit_docs for every config shape (#5505).
+    test('F2: resolveCommitDocsReadOnly equals loadConfig().commit_docs', () => {
+      const { loadConfig, resolveCommitDocsReadOnly } = require('../gsd-core/bin/lib/config-loader.cjs');
+      const valueArb = fc.oneof(fc.constant(undefined), fc.boolean(), fc.string({ maxLength: 4 }), fc.integer({ min: -1, max: 2 }));
+      fc.assert(
+        fc.property(valueArb, valueArb, fc.boolean(), fc.boolean(), (flat, nested, hasConfig, ignored) => {
+          const cwd = createTempGitProject();
+          try {
+            if (hasConfig) {
+              const cfg = {};
+              if (flat !== undefined) cfg.commit_docs = flat;
+              if (nested !== undefined) cfg.planning = { commit_docs: nested };
+              fs.writeFileSync(path.join(cwd, '.planning', 'config.json'), JSON.stringify(cfg));
+            }
+            if (ignored) fs.appendFileSync(path.join(cwd, '.git', 'info', 'exclude'), '.planning\n');
+            assert.deepStrictEqual(resolveCommitDocsReadOnly(cwd), loadConfig(cwd, { persist: false }).commit_docs);
+          } finally {
+            cleanup(cwd);
+          }
+        }),
+        { numRuns: 30 },
+      );
+    });
   });
 });
   });
