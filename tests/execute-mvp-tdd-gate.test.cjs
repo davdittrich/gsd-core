@@ -178,12 +178,12 @@ describe('#5106: test-file conventions are one definition', () => {
     const workflowSpecs = [...line.matchAll(/--pathspec "([^"]{1,80})"/g)].map(m => m[1]);
     assert.deepEqual([...workflowSpecs].sort(), [...TEST_FILE_PATHSPECS].sort(),
       'the workflow pathspec list and TEST_FILE_PATHSPECS must be the same set');
-    // And the router recognises a literal root and nested sample of every convention.
+    // And the router recognizes a literal root and nested sample of every convention.
     const samples = {
       '*.test.*': ['a.test.js', 'nested/a.test.js'],
       '*.spec.*': ['a.spec.js', 'nested/a.spec.js'],
-      ':(glob)**/tests/**': ['tests/x.js', 'nested/tests/x.js'],
-      ':(glob)**/__tests__/**': ['__tests__/x.js', 'nested/__tests__/x.js'],
+      ':(glob)**/tests/**': ['tests/x.js', 'nested/tests/x.js', 'crates/core/tests/sub/x.rs'],
+      ':(glob)**/__tests__/**': ['__tests__/x.js', 'nested/__tests__/x.js', 'src/__tests__/sub/y.js'],
       '*_test.go': ['a_test.go', 'nested/a_test.go'],
       ':(glob)**/test_*.py': ['test_a.py', 'nested/test_a.py'],
       '*_test.py': ['a_test.py', 'nested/a_test.py'],
@@ -194,10 +194,13 @@ describe('#5106: test-file conventions are one definition', () => {
     assert.deepEqual(Object.keys(samples).sort(), [...TEST_FILE_PATHSPECS].sort(),
       'one root and one nested sample per TEST_FILE_PATHSPECS entry, keyed by spec');
     for (const sample of Object.values(samples).flat()) {
-      assert.equal(isTestFilePath(sample), true, `${sample} must be recognised as a test file`);
+      assert.equal(isTestFilePath(sample), true, `${sample} must be recognized as a test file`);
     }
-    for (const notTest of ['placement.go', 'test_utils/foo.py', 'src/test_utils/factory.py']) {
-      assert.equal(isTestFilePath(notTest), false, `${notTest} must not be recognised as a test file`);
+    for (const notTest of [
+      'placement.go', 'test_utils/foo.py', 'src/test_utils/factory.py',
+      'mytests/a.js', 'src/contests/b.js', 'src/__tests__x/a.js',
+    ]) {
+      assert.equal(isTestFilePath(notTest), false, `${notTest} must not be recognized as a test file`);
     }
   });
 });

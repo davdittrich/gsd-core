@@ -119,8 +119,14 @@ describe('#4003 / #5164 — safe_resume_gate plan-commit lookups ask the resolve
   });
 });
 
-const NESTED_TEST_PATHS = ['crates/core/tests/scan_test.rs', 'src/__tests__/util.js', 'pkg/api/test_x.py'];
-const NESTED_NON_TEST_PATHS = ['crates/core/src/scan.rs', 'src/test_utils/factory.py', 'test_utils/foo.py'];
+const NESTED_TEST_PATHS = [
+  'crates/core/tests/scan_test.rs', 'crates/core/tests/sub/x.rs',
+  'src/__tests__/util.js', 'src/__tests__/sub/y.js', 'pkg/api/test_x.py',
+];
+const NESTED_NON_TEST_PATHS = [
+  'crates/core/src/scan.rs', 'src/test_utils/factory.py', 'test_utils/foo.py',
+  'mytests/a.js', 'src/contests/b.js', 'src/__tests__x/a.js',
+];
 
 // ─── #4379: the RED pathspec is language-agnostic, and matches at root ──────
 //
