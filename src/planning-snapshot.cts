@@ -175,7 +175,7 @@ interface PlanningSnapshot {
   planningTracked: { value: { tracked: boolean; ignored: boolean }; scope: Scope; reason: string };
   // #5505: tracked copies of the derived state.json at the paths publishStateContract
   // writes (`.planning[/<project>][/workstreams/<ws>]/state.json`); backs W031.
-  // Read from planningTracked's own ls-files output; empty when that probe degraded.
+  // Asked of git directly (bounded output), so a large tracked tree cannot hide it.
   stateJsonTracked: string[];
   // ─── Phase 11 (#3309) "Rule table organization" additions ─────────────────
   // The design doc's own "Rule table organization" table and prose disagree
@@ -610,7 +610,7 @@ const PLANNING_TRACKED_GIT_TIMEOUT_MS = 10_000;
  * a `Rule.check(snapshot)` may perform no ambient I/O, so this `git ls-files`
  * probe lives here, in the snapshot builder, not the rule).
  *
- * `tracked` runs `git ls-files -z -- .planning` through the module's own
+ * `tracked` runs `git ls-files -- .planning` through the module's own
  * injected `execGit` seam: non-empty stdout means at least one path under
  * `.planning/` is in the INDEX — worktree presence is irrelevant (a path
  * tracked in the index but deleted on disk still counts; that is what "the
@@ -660,9 +660,9 @@ const PLANNING_TRACKED_GIT_TIMEOUT_MS = 10_000;
  * detected BEFORE the generic `exitCode !== 0` branch below, so this case
  * never reaches (and never pays for) the `rev-parse` structural probe.
  */
-function buildPlanningTrackedField(cwd: string, trackedOut: string[]): { value: { tracked: boolean; ignored: boolean }; scope: Scope; reason: string } {
+function buildPlanningTrackedField(cwd: string): { value: { tracked: boolean; ignored: boolean }; scope: Scope; reason: string } {
   try {
-    const result = execGit(['ls-files', '-z', '--', '.planning'], { cwd, timeout: PLANNING_TRACKED_GIT_TIMEOUT_MS });
+    const result = execGit(['ls-files', '--', '.planning'], { cwd, timeout: PLANNING_TRACKED_GIT_TIMEOUT_MS });
     if (result.timedOut) {
       return { value: { tracked: false, ignored: false }, scope: SCOPE.UNREADABLE, reason: 'git_timed_out' };
     }
@@ -678,14 +678,24 @@ function buildPlanningTrackedField(cwd: string, trackedOut: string[]): { value: 
       const reason = probe.exitCode === 0 ? 'git_list_failed' : 'not_a_git_repo';
       return { value: { tracked: false, ignored: false }, scope: SCOPE.UNREADABLE, reason };
     }
-    // `-z`: unquoted paths (core.quotePath), so W031 can match them exactly.
-    const files = result.stdout.split('\0').filter(Boolean);
-    trackedOut.push(...files);
-    const tracked = files.length > 0;
+    const tracked = result.stdout.trim().length > 0;
     const ignored = isGitIgnored(cwd, '.planning/');
     return { value: { tracked, ignored }, scope: SCOPE.COMPLETE, reason: 'ok' };
   } catch {
     return { value: { tracked: false, ignored: false }, scope: SCOPE.UNREADABLE, reason: 'exception' };
+  }
+}
+
+/** Pathspecs matching every file `publishStateContract` can write (see `isStateJsonPublishPath`). */
+const STATE_JSON_PATHSPECS = [':(glob).planning/state.json', ':(glob).planning/*/state.json', ':(glob).planning/workstreams/*/state.json', ':(glob).planning/*/workstreams/*/state.json'];
+
+/** Tracked copies of the derived state.json (#5505); `[]` when git cannot answer. */
+function buildStateJsonTracked(cwd: string): string[] {
+  try {
+    const r = execGit(['ls-files', '-z', '--', ...STATE_JSON_PATHSPECS], { cwd, timeout: PLANNING_TRACKED_GIT_TIMEOUT_MS });
+    return r.exitCode === 0 ? r.stdout.split('\0').filter((f) => f && isStateJsonPublishPath(cwd, f)) : [];
+  } catch {
+    return [];
   }
 }
 
@@ -1336,9 +1346,6 @@ function buildPlanningSnapshot(cwd: string): PlanningSnapshot {
     allPhaseDirNames.scope,
   );
 
-  const trackedPlanningFiles: string[] = [];
-  const planningTracked = buildPlanningTrackedField(cwd, trackedPlanningFiles);
-
   return {
     cwd: path.resolve(cwd),
     milestone,
@@ -1351,8 +1358,8 @@ function buildPlanningSnapshot(cwd: string): PlanningSnapshot {
     config: buildConfigField(cwd),
     agentInstall: buildAgentInstallField(cwd),
     worktreeHealth: buildWorktreeHealthField(cwd),
-    planningTracked,
-    stateJsonTracked: trackedPlanningFiles.filter((f) => isStateJsonPublishPath(cwd, f)),
+    planningTracked: buildPlanningTrackedField(cwd),
+    stateJsonTracked: buildStateJsonTracked(cwd),
     projectSections: buildProjectSectionsField(cwd),
     statePhaseTokens: stateFields.statePhaseTokens,
     stateStatus: stateFields.stateStatus,

@@ -1946,10 +1946,15 @@ describe('planningTracked field (#3586, matrix rows A1-A12)', () => {
 
     const originalSpawnSync = childProcess.spawnSync;
     let lsFilesCalls = 0;
+    let stateJsonLsFilesCalls = 0;
     let revParseProbeCalls = 0;
     t.mock.method(childProcess, 'spawnSync', (cmd, args, opts) => {
       if (cmd === 'git' && Array.isArray(args)) {
-        if (args.includes('ls-files')) lsFilesCalls += 1;
+        // planningTracked's listing carries no `:(glob)` pathspec; stateJsonTracked's does.
+        if (args.includes('ls-files')) {
+          if (args.some((a) => String(a).startsWith(':(glob)'))) stateJsonLsFilesCalls += 1;
+          else lsFilesCalls += 1;
+        }
         if (args.includes('rev-parse') && args.includes('--is-inside-work-tree')) revParseProbeCalls += 1;
       }
       return originalSpawnSync.call(childProcess, cmd, args, opts);
@@ -1957,7 +1962,8 @@ describe('planningTracked field (#3586, matrix rows A1-A12)', () => {
 
     const snap = buildPlanningSnapshot(cwd);
     assert.strictEqual(snap.planningTracked.scope, SCOPE.COMPLETE);
-    assert.strictEqual(lsFilesCalls, 1, 'ls-files must run exactly once on the happy path');
+    assert.strictEqual(lsFilesCalls, 1, 'ls-files for planningTracked must run exactly once on the happy path');
+    assert.strictEqual(stateJsonLsFilesCalls, 1, 'ls-files for stateJsonTracked must run exactly once');
     assert.strictEqual(
       revParseProbeCalls,
       0,
@@ -1987,5 +1993,29 @@ describe('planningTracked field (#3586, matrix rows A1-A12)', () => {
       scope: SCOPE.COMPLETE,
       reason: 'ok_truncated',
     });
+  });
+
+  test('stateJsonTracked survives an ENOBUFS listing', (t) => {
+    const cwd = createTempGitProject('gsd-5505-enobufs-');
+    t.after(() => cleanup(cwd));
+    const files = ['.planning/state.json', '.planning/workstreams/ws1/state.json'];
+    for (const f of files) {
+      fs.mkdirSync(path.dirname(path.join(cwd, f)), { recursive: true });
+      fs.writeFileSync(path.join(cwd, f), '{}\n');
+      gitOrThrow(['add', '-f', f], { cwd });
+    }
+    commitAll(cwd, 'track derived state');
+    // Only the whole-.planning listing (no `:(glob)` pathspec) overflows.
+    const originalSpawnSync = childProcess.spawnSync;
+    t.mock.method(childProcess, 'spawnSync', (cmd, args, opts) => {
+      if (Array.isArray(args) && args.includes('ls-files') && !args.some((a) => String(a).startsWith(':(glob)'))) {
+        return { status: null, stdout: '', stderr: '', signal: null, error: Object.assign(new Error('spawnSync git ENOBUFS'), { code: 'ENOBUFS' }) };
+      }
+      return originalSpawnSync.call(childProcess, cmd, args, opts);
+    });
+
+    const snap = buildPlanningSnapshot(cwd);
+    assert.strictEqual(snap.planningTracked.reason, 'ok_truncated');
+    assert.deepStrictEqual([...snap.stateJsonTracked].sort(), files);
   });
 });
