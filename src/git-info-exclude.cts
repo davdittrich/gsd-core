@@ -36,6 +36,7 @@ export function excludeFromGit(dir: string, filename: string): void {
     if (revParse.exitCode !== 0 || !excludeRel) return;
     const exclude = path.resolve(dir, excludeRel);
     const entry = `/${escapeGitignore(prefix)}${escapeGitignore(filename)}`;
+    // read-check-append is not atomic: linked worktrees share this file, so a racing publish can append a duplicate line, which git reads as one.
     const existing = fs.existsSync(exclude) ? fs.readFileSync(exclude, 'utf8') : '';
     const present = splitLines(existing);
     if (present.includes(entry) || present.includes(`!${entry}`)) return; // an earlier !entry is the user's choice to track the file (last match wins)

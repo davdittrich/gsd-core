@@ -206,12 +206,16 @@ that is already tracked, so a copy you committed before stays modified after
 every boundary and `/gsd-ship` refuses the dirty tree. GSD never changes your
 index; `/gsd-health` (`validate health`) reports such a copy as warning `W031`
 with the exact command for the paths it found, e.g.
-`git rm --cached --ignore-unmatch -- .planning/state.json`
+`git --literal-pathspecs rm --cached --ignore-unmatch -- .planning/state.json`
 (or `.planning/workstreams/<name>/state.json`). Run it once and commit the
 removal; the file stays on disk, rerunning it is a no-op, and `--repair` never
-runs it for you. A teammate whose tracked copy is modified (the usual case) cannot pull that commit
-(`Your local changes ... would be overwritten by merge`): they run
-`git checkout -- <path>` (or stash) first, and the next boundary regenerates the file. With `planning.commit_docs` false, or `.planning/` ignored and a usable `config.json` present, GSD does not touch `.git/info/exclude`.
+runs it for you. A teammate whose tracked copy is modified (the usual case)
+cannot pull that commit (`Your local changes ... would be overwritten by
+merge`): they run `git checkout -- <path>` (or stash) first, and the next
+boundary regenerates the file. When `commit_docs` resolves to false (set as
+`commit_docs` or `planning.commit_docs`, or `.planning/` ignored while a usable
+`config.json` sets neither), GSD does not touch `.git/info/exclude`; an
+explicit `commit_docs: true` still gets the entry on an ignored `.planning/`.
 If you keep `.planning/` out of your repo entirely, see
 [Keep planning docs out of a shared repo](keep-planning-docs-private.md).
 
