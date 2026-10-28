@@ -462,7 +462,6 @@ describe('state.json never dirties the tree (#5505)', () => {
     fs.mkdirSync(dir, { recursive: true });
     const rel = path.relative(tmpDir, dir).split(path.sep).join('/');
     fs.writeFileSync(path.join(dir, 'STATE.md'), STATE_MD);
-    fs.writeFileSync(path.join(tmpDir, '.gitignore'), 'milestone.lock\n'); // unrelated lock artifact, out of #5505 scope
     if (preTracked) fs.writeFileSync(path.join(dir, 'state.json'), '{}\n');
     git(tmpDir, 'add', '-A');
     git(tmpDir, 'commit', '-q', '-m', 'seed');
@@ -494,7 +493,7 @@ describe('state.json never dirties the tree (#5505)', () => {
     const w031 = (cwd) => JSON.parse(runGsdTools(['validate', 'health'], cwd).output).warnings.find((w) => w.code === 'W031');
     const warning = w031(tmpDir);
     assert.ok(warning, 'validate health must report W031');
-    assert.ok(warning.fix.includes(`\`git rm --cached --ignore-unmatch -- ${p}\``), warning.fix);
+    assert.ok(warning.fix.includes(`\`git --literal-pathspecs rm --cached --ignore-unmatch -- ${p}\``), warning.fix);
 
     const fresh = boundary(t, { wsName: 'ws1' });
     assert.ok(fs.existsSync(path.join(fresh.tmpDir, p)), 'excluded copy is present');
@@ -569,7 +568,7 @@ describe('state.json never dirties the tree (#5505)', () => {
   });
 });
 
-// F3 parity: whatever the publisher writes, isStateJsonPublishPath must recognise (W031 and `commit --files` rely on it).
+// Whatever the publisher writes, isStateJsonPublishPath must recognise (W031 and `commit --files` rely on it).
 describe('publisher output satisfies isStateJsonPublishPath (#5505)', () => {
   const { publishStateContract } = require('../gsd-core/bin/lib/state-contract.cjs');
   const { isStateJsonPublishPath } = require('../gsd-core/bin/lib/core-utils.cjs');

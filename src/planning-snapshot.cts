@@ -175,8 +175,10 @@ interface PlanningSnapshot {
   planningTracked: { value: { tracked: boolean; ignored: boolean }; scope: Scope; reason: string };
   // #5505: tracked copies of the derived state.json at the paths publishStateContract
   // writes (`.planning[/<project>][/workstreams/<ws>]/state.json`); backs W031.
-  // Asked of git directly (bounded output), so a large tracked tree cannot hide it.
-  stateJsonTracked: string[];
+  // Asked of git directly (bounded output), so a large tracked tree cannot hide it. Carries
+  // scope + reason like `planningTracked`, so a listing git could not answer is not read as
+  // "nothing tracked".
+  stateJsonTracked: { value: string[]; scope: Scope; reason: string };
   // ─── Phase 11 (#3309) "Rule table organization" additions ─────────────────
   // The design doc's own "Rule table organization" table and prose disagree
   // on the count: the table lists EIGHT rows (through `planningRootFiles`,
@@ -689,13 +691,15 @@ function buildPlanningTrackedField(cwd: string): { value: { tracked: boolean; ig
 /** Pathspecs matching every file `publishStateContract` can write (see `isStateJsonPublishPath`). */
 const STATE_JSON_PATHSPECS = [':(glob).planning/state.json', ':(glob).planning/*/state.json', ':(glob).planning/workstreams/*/state.json', ':(glob).planning/*/workstreams/*/state.json'];
 
-/** Tracked copies of the derived state.json (#5505); `[]` when git cannot answer. */
-function buildStateJsonTracked(cwd: string): string[] {
+/** Tracked copies of the derived state.json (#5505); a listing git cannot answer is UNREADABLE, not empty. */
+function buildStateJsonTracked(cwd: string): { value: string[]; scope: Scope; reason: string } {
   try {
     const r = execGit(['ls-files', '-z', '--', ...STATE_JSON_PATHSPECS], { cwd, timeout: PLANNING_TRACKED_GIT_TIMEOUT_MS });
-    return r.exitCode === 0 ? r.stdout.split('\0').filter((f) => f && isStateJsonPublishPath(cwd, f)) : [];
+    if (r.timedOut) return { value: [], scope: SCOPE.UNREADABLE, reason: 'git_timed_out' };
+    if (r.exitCode !== 0) return { value: [], scope: SCOPE.UNREADABLE, reason: 'git_list_failed' };
+    return { value: r.stdout.split('\0').filter((f) => f && isStateJsonPublishPath(cwd, f)), scope: SCOPE.COMPLETE, reason: 'ok' };
   } catch {
-    return [];
+    return { value: [], scope: SCOPE.UNREADABLE, reason: 'exception' };
   }
 }
 

@@ -62,6 +62,7 @@ type Rule = healthDiagnosticMod.Rule;
 
 import { VALID_PROFILES, VALID_TIERS, VALID_PHASE_TYPES } from '../model-catalog.cjs';
 import { sanitizeLabel } from '../security.cjs';
+import { escapeSingleQuotedShellLiteral } from '../shell-command-projection.cjs';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import planningScopeMod = require('../planning-scope.cjs');
@@ -317,11 +318,14 @@ function checkW029(snapshot: PlanningSnapshot): Diagnostic[] {
 // it in .git/info/exclude, but an exclude cannot hide a tracked file: a copy
 // committed earlier is left modified, so /gsd-ship's clean-tree preflight
 // refuses. ADVISE-only, like W029: GSD never untracks files for you. The fix
-// uses --ignore-unmatch so rerunning it is a no-op.
+// uses --ignore-unmatch so rerunning it is a no-op, and --literal-pathspecs so a tracked
+// directory named with `*`, `?` or `[` untracks only itself, never a sibling's state.json.
 
 function checkW031(snapshot: PlanningSnapshot): Diagnostic[] {
-  const paths = snapshot.stateJsonTracked;
-  if (!paths || paths.length === 0) return [];
+  const field = snapshot.stateJsonTracked;
+  // A listing git could not answer is not "nothing tracked": it stays silent like W029's unreadable scope.
+  if (!field || field.scope !== SCOPE.COMPLETE || field.value.length === 0) return [];
+  const paths = field.value;
   // ANSI-C quoting: `\\` and `'` backslashed, C1 characters as their UTF-8 bytes (what git tracks),
   // every other character through sanitizeLabel so C0/DEL keep their `\n`, `\t`, `\x1b` forms.
   const ansiC = (p: string): string =>
@@ -332,7 +336,7 @@ function checkW031(snapshot: PlanningSnapshot): Diagnostic[] {
   const quote = (p: string): string => {
     if (/^[\w./-]+$/.test(p)) return p;
     if (/\p{Cc}/u.test(p)) return ansiC(p);
-    return `'${p.replace(/'/g, `'\\''`)}'`;
+    return `'${escapeSingleQuotedShellLiteral(p)}'`;
   };
   const args = paths.map(quote).join(' ');
   return [
@@ -341,7 +345,7 @@ function checkW031(snapshot: PlanningSnapshot): Diagnostic[] {
       severity: SEVERITY.WARNING,
       message: `${paths.map(sanitizeLabel).join(', ')} is tracked by git, but it is a derived cache rewritten at every boundary command — the tracked copy stays modified and /gsd-ship refuses the dirty tree`,
       remedy: adviseRemedy(
-        `Run \`git rm --cached --ignore-unmatch -- ${args}\` once and commit the removal; the file stays on disk and GSD's .git/info/exclude entry keeps it ignored from then on`,
+        `Run \`git --literal-pathspecs rm --cached --ignore-unmatch -- ${args}\` once and commit the removal; the file stays on disk and GSD's .git/info/exclude entry keeps it ignored from then on`,
       ),
     },
   ];

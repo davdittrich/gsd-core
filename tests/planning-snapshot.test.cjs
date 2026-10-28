@@ -31,6 +31,7 @@ const fc = require('fast-check');
 
 const { createTempDir, createTempGitProject, cleanup } = require('./helpers.cjs');
 const { gitOrThrow } = require('./helpers/git-fixture.cjs');
+const { stubEnv } = require('./helpers/env-guard.cjs');
 
 // `export =` shape TBD by the implementing phase — this module is "the sole
 // export consumers reach for" per the design doc, with `worstScope` also
@@ -1880,9 +1881,7 @@ describe('planningTracked field (#3586, matrix rows A1-A12)', () => {
     commitAll(other, 'other tracks .planning');
     gitOrThrow(['rm', '-rq', '--', '.planning'], { cwd });
     gitOrThrow(['commit', '-m', 'cwd tracks nothing'], { cwd });
-    const prior = process.env.GIT_DIR;
-    t.after(() => { if (prior === undefined) delete process.env.GIT_DIR; else process.env.GIT_DIR = prior; });
-    process.env.GIT_DIR = path.join(other, '.git');
+    stubEnv(t, 'GIT_DIR', path.join(other, '.git'));
     const snap = buildPlanningSnapshot(cwd);
     assert.deepStrictEqual(snap.planningTracked.value, { tracked: false, ignored: false });
   });
@@ -2016,6 +2015,19 @@ describe('planningTracked field (#3586, matrix rows A1-A12)', () => {
 
     const snap = buildPlanningSnapshot(cwd);
     assert.strictEqual(snap.planningTracked.reason, 'ok_truncated');
-    assert.deepStrictEqual([...snap.stateJsonTracked].sort(), files);
+    assert.deepStrictEqual([...snap.stateJsonTracked.value].sort(), files);
+    assert.strictEqual(snap.stateJsonTracked.scope, SCOPE.COMPLETE);
   });
+
+  // A listing git could not answer is UNREADABLE, never an empty "nothing tracked" (W031 stays silent on it).
+  for (const [name, mock, reason] of [['a failed', mockGitSpawnFailure, 'git_list_failed'], ['a timed-out', mockGitSpawnTimeout, 'git_timed_out']]) {
+    test(`stateJsonTracked reports ${name} listing as unreadable, not as nothing tracked`, (t) => {
+      const cwd = createTempGitProject('gsd-5505-unreadable-');
+      t.after(() => cleanup(cwd));
+      mock(t);
+      const snap = buildPlanningSnapshot(cwd);
+      assert.strictEqual(snap.stateJsonTracked.scope, SCOPE.UNREADABLE);
+      assert.strictEqual(snap.stateJsonTracked.reason, reason);
+    });
+  }
 });

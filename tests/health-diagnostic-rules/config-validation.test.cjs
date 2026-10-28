@@ -861,8 +861,8 @@ describe('W029 — .planning/ ignored but still tracked', () => {
 
 // ─── W031 — derived state.json still tracked by git (#5505 Case B) ─────────
 //
-// Pure predicate over `snapshot.stateJsonTracked`, which reuses W029's single
-// `git ls-files` probe. Driven through the REAL buildPlanningSnapshot against
+// Pure predicate over `snapshot.stateJsonTracked`, which runs its own bounded
+// `git ls-files` probe (`buildStateJsonTracked`), separate from W029's. Driven through the REAL buildPlanningSnapshot against
 // a REAL temp git repo, like the W029 group above.
 
 describe('W031 — derived state.json still tracked by git', () => {
@@ -886,7 +886,7 @@ describe('W031 — derived state.json still tracked by git', () => {
     assert.equal(diagnostics[0].remedy.action, REMEDY_ACTION.ADVISE);
     assert.ok(
       diagnostics[0].remedy.args.command.includes(
-        '`git rm --cached --ignore-unmatch -- .planning/state.json .planning/workstreams/ws1/state.json`',
+        '`git --literal-pathspecs rm --cached --ignore-unmatch -- .planning/state.json .planning/workstreams/ws1/state.json`',
       ),
       diagnostics[0].remedy.args.command,
     );
@@ -899,7 +899,7 @@ describe('W031 — derived state.json still tracked by git', () => {
 
     const [diagnostic] = ruleFor('W031').check(buildPlanningSnapshot(cwd));
     assert.ok(
-      diagnostic.remedy.args.command.includes(`\`git rm --cached --ignore-unmatch -- '.planning/my $proj'\\''s/state.json'\``),
+      diagnostic.remedy.args.command.includes(`\`git --literal-pathspecs rm --cached --ignore-unmatch -- '.planning/my $proj'\\''s/state.json'\``),
       diagnostic.remedy.args.command,
     );
   });
@@ -986,13 +986,18 @@ describe('W031 — derived state.json still tracked by git', () => {
     fc.assert(
       fc.property(fc.array(fc.constantFrom(...alphabet), { minLength: 1, maxLength: 8 }), (chars) => {
         const name = chars.join('');
-        const [diagnostic] = ruleFor('W031').check({ stateJsonTracked: [name] });
+        const [diagnostic] = ruleFor('W031').check({ stateJsonTracked: { value: [name], scope: SCOPE.COMPLETE, reason: 'ok' } });
         const quoted = /-- (.*)` once/s.exec(diagnostic.remedy.args.command)[1];
         const out = spawnSync('bash', ['-c', `printf %s ${quoted}`], { encoding: 'utf8', timeout: GIT_TIMEOUT_MS });
         return out.status === 0 && out.stdout === name;
       }),
       { numRuns: 100, seed: 5505 },
     );
+  });
+
+  test('W031 is silent when git could not list the tracked files (a failed listing is not a finding)', () => {
+    const field = { value: ['.planning/state.json'], scope: SCOPE.UNREADABLE, reason: 'git_list_failed' };
+    assert.deepEqual(ruleFor('W031').check({ stateJsonTracked: field }), []);
   });
 
   test('W031: no git repo, or the field absent, produces zero findings', (t) => {

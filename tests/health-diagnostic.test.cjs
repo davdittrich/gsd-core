@@ -623,7 +623,8 @@ describe('W031 remedy under bash (#5505)', () => {
   test('W031 remedy untracks exactly the tracked paths under bash', { skip: !hasBash }, (t) => {
     const cwd = createTempGitProject('gsd-5505-w031-bash-');
     t.after(() => cleanup(cwd));
-    const projects = ['my proj', "it's", 'a\nb', 'plain'];
+    // '*' is a legal project name: unquoted-literal, its pathspec would also match the unrelated intel/state.json.
+    const projects = ['my proj', "it's", 'a\nb', 'plain', '*'];
     const rels = [];
     for (const name of projects) {
       for (const file of ['state.json', 'STATE.md']) {
@@ -633,17 +634,19 @@ describe('W031 remedy under bash (#5505)', () => {
         rels.push(rel);
       }
     }
+    fs.mkdirSync(path.join(cwd, '.planning', 'intel'), { recursive: true });
+    fs.writeFileSync(path.join(cwd, '.planning', 'intel', 'state.json'), '{}\n'); // no project marker: not a publish path
     gitOrThrow(['add', '-f', '-A'], { cwd });
     gitOrThrow(['commit', '-q', '-m', 'track'], { cwd });
 
     const w031 = RULES.find((r) => r.code === 'W031');
     const [diagnostic] = w031.check(buildPlanningSnapshot(cwd));
-    const command = /`(git rm [^`]*)`/.exec(diagnostic.remedy.args.command)[1];
+    const command = /`(git --literal-pathspecs rm [^`]*)`/.exec(diagnostic.remedy.args.command)[1];
     const run = spawnSync('bash', ['-c', command], { cwd, encoding: 'utf8', timeout: GIT_TIMEOUT_MS });
     assert.equal(run.status, 0, run.stderr);
 
     const tracked = gitOrThrow(['ls-files', '-z'], { cwd }).split('\0').filter(Boolean);
-    assert.ok(!tracked.some((f) => f.endsWith('/state.json')), `still tracked: ${tracked}`);
+    assert.deepEqual(tracked.filter((f) => f.endsWith('/state.json')), ['.planning/intel/state.json'], `still tracked: ${tracked}`);
     assert.equal(tracked.filter((f) => f.endsWith('/STATE.md')).length, projects.length);
     for (const rel of rels) assert.ok(fs.existsSync(path.join(cwd, rel)), `${rel} stays on disk`);
   });
