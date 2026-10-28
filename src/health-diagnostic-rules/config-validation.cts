@@ -343,9 +343,9 @@ function checkW031(snapshot: PlanningSnapshot): Diagnostic[] {
     {
       code: 'W031',
       severity: SEVERITY.WARNING,
-      message: `${paths.map(sanitizeLabel).join(', ')} is tracked by git, but it is a derived cache rewritten at every boundary command — the tracked copy stays modified and /gsd-ship refuses the dirty tree`,
+      message: `Tracked by git: ${paths.map(sanitizeLabel).join(', ')}. state.json is a derived cache rewritten at every boundary command, so a tracked copy stays modified and /gsd-ship refuses the dirty tree`,
       remedy: adviseRemedy(
-        `Run \`git --literal-pathspecs rm --cached --ignore-unmatch -- ${args}\` once and commit the removal; the file stays on disk and GSD's .git/info/exclude entry keeps it ignored from then on`,
+        `Run \`git --literal-pathspecs rm --cached --ignore-unmatch -- ${args}\` once and commit the removal; the file stays on disk, and with commit_docs on GSD's .git/info/exclude entry keeps it ignored from then on`,
       ),
     },
   ];

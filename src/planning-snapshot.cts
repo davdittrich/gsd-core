@@ -55,7 +55,7 @@ import frontmatterMod = require('./frontmatter.cjs');
 const { extractFrontmatter, stripFrontmatter } = frontmatterMod;
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- core-utils.cjs is an export= CommonJS module
 import coreUtilsMod = require('./core-utils.cjs');
-const { findOrphanSummaries, isStateJsonPublishPath } = coreUtilsMod;
+const { findOrphanSummaries, isStateJsonPublishPath, STATE_JSON_PATHSPECS } = coreUtilsMod;
 import { stateFieldValue, stateCurrentPositionSlice } from './state-document.cjs';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import unusableInputMod = require('./unusable-input.cjs');
@@ -598,6 +598,13 @@ function buildWorktreeHealthField(cwd: string): { value: ReturnType<typeof inspe
 // `buildPlanningSnapshot`, which every health path calls.
 const PLANNING_TRACKED_GIT_TIMEOUT_MS = 10_000;
 
+/** Why a failed `ls-files` failed: a `rev-parse` asks git whether `cwd` is a work tree at all. */
+function classifyLsFilesFailure(cwd: string): string {
+  const probe = execGit(['rev-parse', '--is-inside-work-tree'], { cwd, timeout: PLANNING_TRACKED_GIT_TIMEOUT_MS });
+  if (probe.timedOut) return 'git_timed_out';
+  return probe.exitCode === 0 ? 'git_list_failed' : 'not_a_git_repo';
+}
+
 /**
  * Resolve `planningTracked` — whether `.planning/` matches a gitignore rule
  * AND whether at least one path under it is still tracked by git (#3586,
@@ -673,12 +680,7 @@ function buildPlanningTrackedField(cwd: string): { value: { tracked: boolean; ig
       return { value: { tracked: true, ignored }, scope: SCOPE.COMPLETE, reason: 'ok_truncated' };
     }
     if (result.exitCode !== 0) {
-      const probe = execGit(['rev-parse', '--is-inside-work-tree'], { cwd, timeout: PLANNING_TRACKED_GIT_TIMEOUT_MS });
-      if (probe.timedOut) {
-        return { value: { tracked: false, ignored: false }, scope: SCOPE.UNREADABLE, reason: 'git_timed_out' };
-      }
-      const reason = probe.exitCode === 0 ? 'git_list_failed' : 'not_a_git_repo';
-      return { value: { tracked: false, ignored: false }, scope: SCOPE.UNREADABLE, reason };
+      return { value: { tracked: false, ignored: false }, scope: SCOPE.UNREADABLE, reason: classifyLsFilesFailure(cwd) };
     }
     const tracked = result.stdout.trim().length > 0;
     const ignored = isGitIgnored(cwd, '.planning/');
@@ -688,15 +690,12 @@ function buildPlanningTrackedField(cwd: string): { value: { tracked: boolean; ig
   }
 }
 
-/** Pathspecs matching every file `publishStateContract` can write (see `isStateJsonPublishPath`). */
-const STATE_JSON_PATHSPECS = [':(glob).planning/state.json', ':(glob).planning/*/state.json', ':(glob).planning/workstreams/*/state.json', ':(glob).planning/*/workstreams/*/state.json'];
-
 /** Tracked copies of the derived state.json (#5505); a listing git cannot answer is UNREADABLE, not empty. */
 function buildStateJsonTracked(cwd: string): { value: string[]; scope: Scope; reason: string } {
   try {
     const r = execGit(['ls-files', '-z', '--', ...STATE_JSON_PATHSPECS], { cwd, timeout: PLANNING_TRACKED_GIT_TIMEOUT_MS });
     if (r.timedOut) return { value: [], scope: SCOPE.UNREADABLE, reason: 'git_timed_out' };
-    if (r.exitCode !== 0) return { value: [], scope: SCOPE.UNREADABLE, reason: 'git_list_failed' };
+    if (r.exitCode !== 0) return { value: [], scope: SCOPE.UNREADABLE, reason: classifyLsFilesFailure(cwd) };
     return { value: r.stdout.split('\0').filter((f) => f && isStateJsonPublishPath(cwd, f)), scope: SCOPE.COMPLETE, reason: 'ok' };
   } catch {
     return { value: [], scope: SCOPE.UNREADABLE, reason: 'exception' };

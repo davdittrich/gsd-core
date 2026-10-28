@@ -940,7 +940,7 @@ describe('W031 — derived state.json still tracked by git', () => {
     trackStateJson(cwd, ['.planning/proj/state.json', '.planning/proj/ROADMAP.md', '.planning/proj/workstreams/ws1/state.json']);
 
     const [diagnostic] = ruleFor('W031').check(buildPlanningSnapshot(cwd));
-    assert.ok(diagnostic.message.startsWith('.planning/proj/state.json, .planning/proj/workstreams/ws1/state.json'), diagnostic.message);
+    assert.ok(diagnostic.message.startsWith('Tracked by git: .planning/proj/state.json, .planning/proj/workstreams/ws1/state.json'), diagnostic.message);
   });
 
   // Property: for any single-segment name, `.planning/<name>[/workstreams/ws1]/state.json` is a publish path
@@ -973,6 +973,51 @@ describe('W031 — derived state.json still tracked by git', () => {
         },
       ),
       { numRuns: 40, seed: 5505 },
+    );
+  });
+
+  // The wording holds for one path and for several, and the remedy's exclude promise is conditional:
+  // with commit_docs false GSD writes no exclude entry.
+  test('W031 wording agrees for one path and for several; remedy conditions the exclude promise on commit_docs', () => {
+    for (const value of [['.planning/state.json'], ['.planning/state.json', '.planning/workstreams/ws1/state.json']]) {
+      const [diagnostic] = ruleFor('W031').check({ stateJsonTracked: { value, scope: SCOPE.COMPLETE, reason: 'ok' } });
+      assert.ok(diagnostic.message.startsWith(`Tracked by git: ${value.join(', ')}. state.json is a derived cache`), diagnostic.message);
+      assert.ok(!/ (is|are) tracked by git/.test(diagnostic.message), diagnostic.message);
+      assert.ok(diagnostic.remedy.args.command.includes('with commit_docs on GSD'), diagnostic.remedy.args.command);
+    }
+  });
+
+  // Property: over every `.planning/<segments>/state.json` shape, git lists a path through the owner's
+  // STATE_JSON_PATHSPECS exactly when the owner's matcher accepts it (every possible project directory
+  // holds a marker, so only the path shape decides); the pathspecs and the matcher are one grammar.
+  test('W031 property: STATE_JSON_PATHSPECS and the matcher accept the same paths (one scope list)', (t) => {
+    const fc = require('fast-check');
+    const { STATE_JSON_PATHSPECS, isStateJsonPublishPath } = require('../../gsd-core/bin/lib/core-utils.cjs');
+    const names = ['p', 'workstreams', 'w'];
+    const shapes = [[]];
+    for (let depth = 1; depth <= 3; depth++) {
+      for (const prefix of shapes.filter((s) => s.length === depth - 1)) for (const n of names) shapes.push([...prefix, n]);
+    }
+    const candidates = shapes.map((s) => ['.planning', ...s, 'state.json'].join('/'));
+    const cwd = createTempGitProject('gsd-5505-w031-grammar-');
+    t.after(() => cleanup(cwd));
+    fc.assert(
+      fc.property(fc.subarray(candidates), (chosen) => {
+        cleanup(path.join(cwd, '.planning'));
+        for (const rel of chosen) {
+          fs.mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true });
+          fs.writeFileSync(path.join(cwd, rel), '{}\n');
+        }
+        for (const n of names) {
+          fs.mkdirSync(path.join(cwd, '.planning', n), { recursive: true });
+          fs.writeFileSync(path.join(cwd, '.planning', n, 'config.json'), '{}\n');
+        }
+        gitOrThrow(['add', '-f', '--', '.planning'], { cwd });
+        const listed = gitOrThrow(['ls-files', '-z', '--', ...STATE_JSON_PATHSPECS], { cwd }).split('\0').filter(Boolean).sort();
+        gitOrThrow(['rm', '-rq', '--cached', '--', '.planning'], { cwd });
+        return JSON.stringify(listed) === JSON.stringify(chosen.filter((rel) => isStateJsonPublishPath(cwd, rel)).sort());
+      }),
+      { numRuns: 25, seed: 5505 },
     );
   });
 

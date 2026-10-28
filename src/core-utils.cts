@@ -585,16 +585,34 @@ function planRowPattern(planId: string, opts: { anchored?: boolean; anyState?: b
 const PLANNING_PROJECT_MARKERS = Object.freeze(['STATE.md', 'ROADMAP.md', 'PROJECT.md', 'config.json', 'phases', 'workstreams']);
 
 /**
- * True when `rel` (a path relative to `cwd`) is a file `publishStateContract` writes:
- * `.planning[/<project>][/workstreams/<ws>]/state.json`. The project segment is free text, so
- * `.planning/<name>/…` counts only when `<name>` is a project directory, i.e. holds its own
- * planning files; `.planning/intel/state.json` is not a publish path.
+ * The one list of shapes `publishStateContract` writes:
+ * `.planning[/<project>][/workstreams/<ws>]/state.json`. Each entry carries the git pathspec
+ * that lists it (`*` stays inside one path segment under `:(glob)`) and the matcher compiled from
+ * that same glob, so `STATE_JSON_PATHSPECS` and `isStateJsonPublishPath` cannot drift apart.
+ */
+const STATE_JSON_SCOPES = [false, true].flatMap((project) =>
+  [false, true].map((workstream) => {
+    const glob = `.planning/${project ? '*/' : ''}${workstream ? 'workstreams/*/' : ''}state.json`;
+    return {
+      project,
+      pathspec: `:(glob)${glob}`,
+      matcher: new RegExp(`^${glob.replace(/\./g, '\\.').replace(/\*/g, '[^/]+')}$`),
+    };
+  }));
+const STATE_JSON_PATHSPECS = STATE_JSON_SCOPES.map((scope) => scope.pathspec);
+
+/**
+ * True when `rel` (a path relative to `cwd`) is a file `publishStateContract` writes (see
+ * `STATE_JSON_SCOPES`). The project segment is free text, so `.planning/<name>/…` counts only
+ * when `<name>` is a project directory, i.e. holds its own planning files;
+ * `.planning/intel/state.json` is not a publish path.
  */
 function isStateJsonPublishPath(cwd: string, rel: string): boolean {
-  const m = /^\.planning\/(?:([^/]+)\/)?(?:workstreams\/[^/]+\/)?state\.json$/.exec(toPosixPath(rel));
-  if (!m) return false;
-  const project = m[1];
-  if (project === undefined) return true;
+  const posix = toPosixPath(rel);
+  const scope = STATE_JSON_SCOPES.find((s) => s.matcher.test(posix));
+  if (!scope) return false;
+  if (!scope.project) return true;
+  const project = posix.split('/')[1];
   return PLANNING_PROJECT_MARKERS.some((x) =>
     fs.existsSync(path.join(cwd, '.planning', project, x)));
 }
@@ -612,6 +630,7 @@ function tickAnchoredPlanRow(text: string, planId: string): string {
 export = {
   toPosixPath,
   isStateJsonPublishPath,
+  STATE_JSON_PATHSPECS,
   PLANNING_PROJECT_MARKERS,
   normalizeLineEndings,
   detectSubRepos,
