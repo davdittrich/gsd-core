@@ -71,10 +71,13 @@ const hrefsIn = (text) => {
 };
 const read = (f) => fs.readFileSync(path.join(GH, f), 'utf8');
 const hrefsOf = (f) => hrefsIn(read(f));
-const REF_PAGE = /^(blob|tree|raw|blame)\//; // repo pages that name a ref; issues, pull, discussions, actions do not
+const REF_PAGE = /^(blob|tree|raw|blame)\//; // the repo pages whose path the existence check can read
+const NO_REF = /^(?:issues|pull|pulls|discussions|actions|releases|wiki|security|projects|labels|milestones|tags|branches)(?:[/?#]|$)/;
+// A repo link is ok when it names no ref (bare root, NO_REF pages) or its first path segment is followed by `next`.
 const isBadLink = (h) => {
-  const kind = REF_PAGE.exec(h.slice(REPO.length))?.[1];
-  return !(h.startsWith('?template=') || (h.startsWith(REPO) && (!kind || h.startsWith(`${REPO}${kind}/next/`))));
+  if (h.startsWith('?template=') || h === REPO.slice(0, -1)) return false;
+  const rest = h.slice(REPO.length);
+  return !(h.startsWith(REPO) && (!rest || NO_REF.test(rest) || h.startsWith(`${REPO}${rest.split('/')[0]}/next/`)));
 };
 // The path of a blob/tree/raw/blame link on next, undefined for any other link.
 const nextRel = (h) => {
@@ -106,9 +109,13 @@ const existsExact = (rel) => {
 };
 const missingNext = (hs, where) => hs.filter((h) => nextRel(h) !== undefined).map((h) => repoPathOf(h, where))
   .filter((rel) => rel.split('/').includes('..') || !existsExact(rel));
-const CONTRIB = `${NEXT}CONTRIBUTING.md#`;
-const unresolvedAnchors = (hs, headings, where) => hs.filter((h) => h.startsWith(CONTRIB))
-  .map((h) => decode(h.slice(CONTRIB.length), h, where)).filter((a) => !headings.has(a));
+// Every #fragment on a markdown file on next (a ?query may precede it) must be a heading of that file; a missing file is missingNext's.
+const headingsOfFile = (rel) => headingSet(fs.readFileSync(path.join(ROOT, rel), 'utf8'));
+const unresolvedAnchors = (hs, where, headingsOf = headingsOfFile) => hs.filter((h) => nextRel(h)?.includes('#')).flatMap((h) => {
+  const rel = repoPathOf(h, where);
+  const anchor = decode(h.slice(h.indexOf('#') + 1), h, where);
+  return rel.endsWith('.md') && existsExact(rel) && !headingsOf(rel).has(anchor) ? [`${rel}#${anchor}`] : [];
+});
 
 // A paragraph followed by === or --- is a setext heading; maskCode supplies fences and code spans, the raw lines the text.
 const setextHeadings = (md) => {
@@ -261,20 +268,24 @@ describe('next-ref existence and anchors (#5427)', () => {
   test('a malformed percent escape names the template and the link', () => {
     assert.throws(() => repoPathOf(`${NEXT}a%zz.md`, 'tpl.md'), /tpl\.md.*a%zz\.md/);
   });
-  test('only the root CONTRIBUTING.md on next owns an anchor, and the fragment is percent-decoded', () => {
-    const headings = new Set(['x_y']);
-    assert.deepEqual(unresolvedAnchors([`${NEXT}guide/CONTRIBUTING.md#nope`, `${NEXT}CONTRIBUTING.md#x%5Fy`], headings, 'tpl.md'), []);
-    assert.deepEqual(unresolvedAnchors([`${NEXT}CONTRIBUTING.md#nope`], headings, 'tpl.md'), ['nope']);
+  test('an anchor on any linked markdown file on next must resolve, behind a query too, and is percent-decoded', () => {
+    const real = DOCS_ANCHOR.split('#')[1];
+    assert.deepEqual(unresolvedAnchors([`${NEXT}CONTRIBUTING.md#${real}`, `${NEXT}CONTRIBUTING.md?plain=1#${real}`], 'tpl.md'), []);
+    assert.deepEqual(unresolvedAnchors([`${NEXT}CONTRIBUTING.md?plain=1#nope`, `${NEXT}.github/pull_request_template.md#nope`], 'tpl.md'),
+      ['CONTRIBUTING.md#nope', '.github/pull_request_template.md#nope']);
+    assert.deepEqual(unresolvedAnchors([`${NEXT}CONTRIBUTING.md#x%5Fy`], 'tpl.md', () => new Set(['x_y'])), []);
+    assert.deepEqual(unresolvedAnchors([`${NEXT}CONTRIBUTING.md`, `${NEXT}no-such.md#a`, `${REPO}issues/1#a`], 'tpl.md'), []);
   });
 });
 
 describe('link classification (#5427)', () => {
   test('bad: relative, other hosts, repo blob links off next; ok: next blob, repo pages, ?template=', () => {
     const bad = ['guide/x.md', '../CONTRIBUTING.md', '#a', 'https://evil.example/x', `${REPO}blob/main/CONTRIBUTING.md`,
-      `${REPO}tree/main/docs`, `${REPO}raw/main/CONTRIBUTING.md`, `${REPO}blame/main/CONTRIBUTING.md`];
+      `${REPO}tree/main/docs`, `${REPO}raw/main/CONTRIBUTING.md`, `${REPO}blame/main/CONTRIBUTING.md`,
+      `${REPO}commits/main`, `${REPO}edit/main/CONTRIBUTING.md`, `${REPO}archive/main.zip`];
     assert.deepEqual(bad.filter(isBadLink), bad);
     assert.deepEqual([`${NEXT}a.md`, `${REPO}tree/next/docs`, `${REPO}raw/next/a.md`, `${REPO}blame/next/a.md`, `${REPO}discussions/1`,
-      `${REPO}issues/1`, `${REPO}pull/1`, `${REPO}actions`, '?template=fix.md'].filter(isBadLink), []);
+      `${REPO}issues/1`, `${REPO}pull/1`, `${REPO}actions`, REPO, REPO.slice(0, -1), `${REPO}commits/next/docs`, '?template=fix.md'].filter(isBadLink), []);
   });
   test('property: each class is built by construction, schemes and ?template= included', () => {
     const d = fc.stringMatching(/^[A-Za-z0-9._/-]{1,20}$/);
@@ -322,9 +333,8 @@ describe('PR template links (#5427)', () => {
     test(`${f}: blob/next links point at existing repo paths`, () => {
       assert.deepEqual(missingNext(hrefsOf(f), f), []);
     });
-    test(`${f}: CONTRIBUTING.md anchors resolve to a heading`, () => {
-      const headings = headingSet(fs.readFileSync(path.join(ROOT, 'CONTRIBUTING.md'), 'utf8'));
-      assert.deepEqual(unresolvedAnchors(hrefsOf(f), headings, f), []);
+    test(`${f}: anchors on next resolve to a heading`, () => {
+      assert.deepEqual(unresolvedAnchors(hrefsOf(f), f), []);
     });
   }
   test('"Using the wrong template?" links keep ?template= (maintainer ruling on #5427)', () => {
