@@ -41,8 +41,8 @@
  * diff/event stream, a config toggle, milestone-scoping of `phases[]`. This
  * module answers "where is this project right now" and nothing else — a
  * request for document *contents* belongs to `planning.inspect`. (Its one side
- * effect beyond the snapshot: `excludeFromGit` (git-info-exclude.cts) keeps state.json out of git via
- * `.git/info/exclude`, REQ-SC-05.)
+ * effect beyond the snapshot: `excludeFromGit` (git-info-exclude.cts) keeps
+ * state.json out of git via `.git/info/exclude`, REQ-SC-05.)
  *
  * REQUIRE-CYCLE HAZARD (the single most important implementation
  * constraint). `src/state.cts` imports THIS module, and `src/smart-entry.cts`
@@ -438,7 +438,8 @@ export function publishStateContract(cwd: string, deps?: StateContractDeps): { p
     try {
       // commit_docs false (explicit, or .planning already ignored) means the user keeps
       // planning out of git: leave the enclosing repo's exclude alone. loadConfig's own
-      // resolution, with `persist: false, quiet: true` so it neither migrates config files nor warns on stderr.
+      // resolution, with `persist: false, quiet: true` so it neither migrates config
+      // files nor warns on stderr.
       if (owners().loadConfig(cwd, { persist: false, quiet: true })['commit_docs']) {
         owners().excludeFromGit(path.dirname(statePath), 'state.json');
       }

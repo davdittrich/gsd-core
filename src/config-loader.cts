@@ -236,6 +236,10 @@ interface ParsedConfig {
 
 const _gitIgnoredCache = new Map<string, boolean>();
 
+// The state-contract publisher reaches isGitIgnored through loadConfig at every boundary command:
+// fail fast there instead of waiting out execGit's 10 s default.
+const CHECK_IGNORE_TIMEOUT_MS = 5_000;
+
 function isGitIgnored(cwd: string, targetPath: string, env?: Record<string, string>): boolean {
   // #2206: strip trailing slashes — `git check-ignore` has a quirk where a
   // CRLF .gitignore with blank lines falsely reports a trailing-slash path
@@ -244,7 +248,7 @@ function isGitIgnored(cwd: string, targetPath: string, env?: Record<string, stri
   const key = cwd + '::' + normalized + (env ? '::env:' + JSON.stringify(Object.entries(env).sort()) : '');
   if (_gitIgnoredCache.has(key)) return _gitIgnoredCache.get(key)!;
   // --no-index checks .gitignore rules regardless of whether the file is tracked.
-  const result = execGit(['check-ignore', '-q', '--no-index', '--', normalized], { cwd, env });
+  const result = execGit(['check-ignore', '-q', '--no-index', '--', normalized], { cwd, env, timeout: CHECK_IGNORE_TIMEOUT_MS });
   const ignored = result.exitCode === 0;
   _gitIgnoredCache.set(key, ignored);
   return ignored;
@@ -666,38 +670,6 @@ function _warnUnusableConfig(fault: ConfigFault): void {
 }
 
 /**
- * Legacy-key migration found sub-repos on disk (#3760): record them and turn commit_docs off.
- * `requiresFilesystem` only reaches here when `planning` is absent or an object
- * (configuration.cts refuses otherwise and reports it via `skipped`), so the narrowing
- * chooses between merge and create and never discards the user's config.
- */
-function _applyDetectedSubRepos(cfg: ParsedConfig, norms: NormalizationEntry[], detect: () => string[]): void {
-  for (const norm of norms) {
-    if (norm.requiresFilesystem && !cfg.planning?.['sub_repos']) {
-      const detected = detect();
-      if (detected.length > 0) {
-        if (!isConfigSection(cfg.planning)) cfg.planning = {};
-        cfg.planning['sub_repos'] = detected;
-        cfg.planning['commit_docs'] = false;
-      }
-    }
-  }
-}
-
-/**
- * commit_docs from a parsed config: explicit value (flat, then planning.*), else false when .planning/ is git-ignored, else the default.
- * loadConfigResolved is its only reader (the state-contract publisher calls it with `{ persist: false, quiet: true }`).
- * resolveCommitDocsPolicy (commands.cts) is the commit-time gate on the loaded value, with its own phase-override and
- * ignore-veto tiers.
- */
-function _resolveCommitDocs(parsed: Record<string, unknown>, planningIgnored: () => boolean): unknown {
-  const explicit = _getConfigValue(parsed, 'commit_docs', { section: 'planning', field: 'commit_docs' });
-  if (explicit !== undefined) return explicit;
-  if (planningIgnored()) return false;
-  return CONFIG_DEFAULTS.commit_docs;
-}
-
-/**
  * loadConfigResolved — provenance-aware config loading (#1415, ADR-1411 P2).
  *
  * Identical to loadConfig in every observable way except it returns
@@ -796,7 +768,25 @@ function loadConfigResolvedInternal(cwd: string, options: Record<string, unknown
         if (!quiet) _warnUnusableInput({ reason: _UNUSABLE_REASON.CONFIG_SECTION_NOT_OBJECT, source: rootConfigPath });
       }
       if (rootNorms.length > 0) {
-        _applyDetectedSubRepos(rootNormalized, rootNorms as unknown as NormalizationEntry[], getDetectedSubRepos);
+        for (const norm of rootNorms as unknown as NormalizationEntry[]) {
+          if (norm.requiresFilesystem && !(rootNormalized as ParsedConfig).planning?.['sub_repos']) {
+            const detected = getDetectedSubRepos();
+            if (detected.length > 0) {
+              // #3760: `if (!planning) planning = {}` treated a non-empty STRING as an
+              // already-present section, and the next line then assigned onto a
+              // primitive — a strict-mode TypeError the enclosing catch swallowed,
+              // discarding the user's whole config. `requiresFilesystem` now only
+              // reaches here when the section is absent or an object (configuration.cts
+              // block 3 refuses otherwise and reports it via `skipped`), so this
+              // narrowing chooses between merge and create and never discards.
+              if (!isConfigSection((rootNormalized as ParsedConfig).planning)) {
+                (rootNormalized as ParsedConfig).planning = {};
+              }
+              (rootNormalized as ParsedConfig).planning!['sub_repos'] = detected;
+              (rootNormalized as ParsedConfig).planning!['commit_docs'] = false;
+            }
+          }
+        }
         rootParsed = rootNormalized;
         if (persist) {
           try { platformWriteSync(rootConfigPath, JSON.stringify(rootParsed, null, 2)); } catch { /* ignore */ }
@@ -835,7 +825,17 @@ function loadConfigResolvedInternal(cwd: string, options: Record<string, unknown
         Object.keys(fileData).forEach(k => delete (fileData as Record<string, unknown>)[k]);
         Object.assign(fileData, normalized);
         configDirty = true;
-        _applyDetectedSubRepos(fileData, normalizations as unknown as NormalizationEntry[], getDetectedSubRepos);
+        for (const norm of normalizations as unknown as NormalizationEntry[]) {
+          if (norm.requiresFilesystem && !fileData.planning?.['sub_repos']) {
+            const detected = getDetectedSubRepos();
+            if (detected.length > 0) {
+              // #3760 — see the identical guard on the root-config path above.
+              if (!isConfigSection(fileData.planning)) fileData.planning = {};
+              fileData.planning['sub_repos'] = detected;
+              fileData.planning['commit_docs'] = false;
+            }
+          }
+        }
       }
     }
 
@@ -930,7 +930,12 @@ function loadConfigResolvedInternal(cwd: string, options: Record<string, unknown
 
     const _baseConfig: Record<string, unknown> = {
       model_profile: get('model_profile') ?? defaults.model_profile,
-      commit_docs: _resolveCommitDocs(parsed, () => isGitIgnored(cwd, '.planning/')),
+      commit_docs: (() => {
+        const explicit = get('commit_docs', { section: 'planning', field: 'commit_docs' });
+        if (explicit !== undefined) return explicit;
+        if (isGitIgnored(cwd, '.planning/')) return false;
+        return defaults.commit_docs;
+      })(),
       search_gitignored: get('search_gitignored', { section: 'planning', field: 'search_gitignored' }) ?? defaults.search_gitignored,
       branching_strategy: get('branching_strategy', { section: 'git', field: 'branching_strategy' }) ?? defaults.branching_strategy,
       base_branch: get('base_branch', { section: 'git', field: 'base_branch' }),

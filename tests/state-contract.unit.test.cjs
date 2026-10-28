@@ -1498,10 +1498,14 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
     git(tmpDir, 'commit', '-q', '-m', 'planning');
     const childProcess = require('node:child_process');
     let gitCalls = 0;
+    const calls = [];
     for (const fn of ['spawnSync', 'execFileSync']) {
       const real = childProcess[fn];
       t.mock.method(childProcess, fn, function (cmd, ...rest) {
-        if (path.basename(String(cmd)).replace(/\.exe$/, '') === 'git') gitCalls += 1;
+        if (path.basename(String(cmd)).replace(/\.exe$/, '') === 'git') {
+          gitCalls += 1;
+          calls.push({ args: rest[0], timeout: rest[1] && rest[1].timeout });
+        }
         return real.call(this, cmd, ...rest);
       });
     }
@@ -1510,6 +1514,10 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
     const words = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
     const stated = words.indexOf(/up to (\w+) bounded git calls/.exec(doc)[1]) + 1;
     assert.strictEqual(gitCalls, stated);
+    // the two calls every boundary command pays for (the commit_docs ignore check and the exclude rev-parse) are bounded
+    const hot = calls.filter(({ args }) => args.includes('check-ignore') || args.includes('info/exclude'));
+    assert.strictEqual(hot.length, 2);
+    assert.ok(hot.every(({ timeout }) => timeout > 0 && timeout <= 5_000), JSON.stringify(hot));
   });
 
   test('publishLeavesALegacyConfigUnrewritten', (t) => {
@@ -1531,6 +1539,44 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
     assert.strictEqual(publishStateContract(tmpDir, fixedDeps()).published, true);
     // REQ-SC-04: the publisher is invisible to the parent command's output.
     assert.deepStrictEqual(written, []);
+  });
+
+  // REQ-SC-04: every stderr diagnostic of a read sits behind `quiet`. One fixture per guard; the loud
+  // read afterwards proves the fixture reaches its guard and that the quiet read did not consume the
+  // once-per-process dedupe slot of a later loud read.
+  describe('quietReadStaysSilentAtEveryGuard', () => {
+    const { loadConfigResolved } = require('../gsd-core/bin/lib/config-loader.cjs');
+    const put = (file, value) => {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, typeof value === 'string' ? value : JSON.stringify(value));
+    };
+    const shapes = {
+      rootConfigUnusable: { ws: 'ws', build: ({ planning }) => { put(path.join(planning, 'config.json'), '{ not json'); put(path.join(planning, 'workstreams', 'ws', 'config.json'), {}); } },
+      rootSectionNotObject: { ws: 'ws', build: ({ planning }) => { put(path.join(planning, 'config.json'), { multiRepo: true, planning: 'x' }); put(path.join(planning, 'workstreams', 'ws', 'config.json'), {}); } },
+      ownConfigUnusable: { build: ({ planning }) => put(path.join(planning, 'config.json'), '{ not json') },
+      ownSectionNotObject: { build: ({ planning }) => put(path.join(planning, 'config.json'), { multiRepo: true, planning: 'x' }) },
+      unknownKeys: { build: ({ planning, name }) => put(path.join(planning, 'config.json'), { [`zz_unknown_${name}`]: 1 }) },
+      profileOverrides: { build: ({ planning, name }) => put(path.join(planning, 'config.json'), { runtime: `zz-runtime-${name}` }) },
+      shadowedGlobalDefaults: { build: ({ planning, home }) => { put(path.join(planning, 'config.json'), {}); put(path.join(home, '.gsd', 'defaults.json'), { model_profile: 'quality' }); } },
+      unusableGlobalDefaults: { build: ({ planning, home }) => { cleanup(planning); put(path.join(home, '.gsd', 'defaults.json'), '{ not json'); } },
+    };
+    for (const [name, shape] of Object.entries(shapes)) {
+      test(`quietReadStaysSilent:${name}`, (t) => {
+        const tmpDir = createTempGitProject();
+        const home = createTempDir('gsd-quiet-home-');
+        t.after(() => { cleanup(tmpDir); cleanup(home); });
+        stubEnv(t, 'GSD_HOME', home);
+        stubEnv(t, 'GSD_PROJECT', undefined);
+        stubEnv(t, 'GSD_WORKSTREAM', shape.ws);
+        shape.build({ planning: planningDirOf(tmpDir), home, name });
+        const written = [];
+        t.mock.method(process.stderr, 'write', (chunk) => { written.push(String(chunk)); return true; });
+        loadConfigResolved(tmpDir, { persist: false, quiet: true });
+        assert.deepStrictEqual(written, []);
+        loadConfigResolved(tmpDir, { persist: false });
+        assert.ok(written.length > 0, 'the same read, loud, warns');
+      });
+    }
   });
 
   test('preTrackedCopyIsLeftTrackedAndStageable', (t) => {
