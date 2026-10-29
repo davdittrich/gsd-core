@@ -1575,7 +1575,7 @@ Resolve and render the active Capability hooks at a Loop Extension Point. Emits 
 | Flag | Description |
 |------|-------------|
 | `<point>` | Loop Extension Point, e.g. `plan:pre` |
-| `--phase <token>` | Bare phase token (`05`, `07.5`). Adds `context: { phase, phaseDir }`, authoritative for task-local phase; omitted token means no `context` key. No match, ambiguity, a foreign `project_code` prefix, a match only in an archived milestone, or a directory outside `.planning/phases` omits `context` with a warning. |
+| `--phase <token>` | Bare phase token (`05`, `07.5`). Adds `context: { phase, phaseDir }`, authoritative for task-local phase; omitted token means no `context` key. A token outside `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` (`INVALID_TOKEN`), an unusable `.planning/config.json` (`CONFIG_FAULT`), no match, ambiguity, a foreign `project_code` prefix, a match only in an archived milestone, or a directory outside `.planning/phases` omits `context` with a warning and sets the envelope's typed `phaseDrop` code; the phase-argument table in `loop-hook-dispatch.md` says what each code makes a handler receive. |
 | `--phase-dir <dir>` | Optional cross-check against the resolved directory; requires `--phase`. A different directory omits `context` with a warning. Emitted `phaseDir` is always the resolver's. |
 | `--config-dir <path>` | Runtime config directory for surface resolution |
 | `--runtime <r>` | Override the auto-detected runtime so the config directory resolves to that runtime's home (#2003) |
