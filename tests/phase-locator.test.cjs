@@ -1932,7 +1932,7 @@ describe('[4030] phase token and argument properties', () => {
     fc.array(fc.constantFrom(...'AZaz09._-'.split('')), { maxLength: 63 }),
   ).map(([h, t]) => h + t.join(''));
 
-  describe('PHASE_TOKEN_RE (#4030 F-TOKEN)', () => {
+  describe('PHASE_TOKEN_RE (#4030)', () => {
     test('PHASE_TOKEN_RE accepts phase grammar and rejects shell metacharacters', () => {
       fc.assert(fc.property(fc.oneof(numeric, prefixed, wide), (t) => PHASE_TOKEN_RE.test(t)));
       const meta = [...'$`;|&()<>\'" \t\n*?[]{}~!#\\'];
@@ -1946,7 +1946,7 @@ describe('[4030] phase token and argument properties', () => {
     });
   });
 
-  describe('positional-token extractor (#4030 F-BIND)', () => {
+  describe('positional-token extractor (#4030)', () => {
     const flag = fc.oneof(
       fc.integer({ min: 1, max: 9 }).map((n) => `--wave ${n}`),
       wide.map((n) => `--ws ${n}`),
