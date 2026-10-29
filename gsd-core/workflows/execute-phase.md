@@ -202,7 +202,9 @@ $ARGUMENTS
 GSD_ARGS_END
 GSD_ARGS=${GSD_ARGS%$'\n'}
 GSD_WS=$(echo " $GSD_ARGS" | sed -nE 's/.* --ws +([A-Za-z0-9][A-Za-z0-9._-]*).*/--ws \1/p' | head -n 1)
-PHASE_NUMBER=$(gsd_run query init.phase-op ${GSD_WS:+--ws=${GSD_WS##* }} "${PHASE_ARG}" --pick phase_number)
+read -ra _gsd_argv <<<"$GSD_ARGS"; set -- "${_gsd_argv[@]}"
+while [ "$#" -gt 0 ]; do case "$1" in --ws|--wave) shift; [ "$#" -gt 0 ] && shift;; -*) shift;; *) break;; esac; done
+PHASE_NUMBER=$(gsd_run query init.phase-op ${GSD_WS:+--ws=${GSD_WS##* }} "${1}" --pick phase_number)
 MVP_FLAG_ARG=""
 if [[ "$GSD_ARGS" =~ (^|[[:space:]])--mvp([[:space:]]|$) ]]; then MVP_FLAG_ARG="--cli-flag"; fi
 MVP_MODE=$(gsd_run query phase.mvp-mode "${PHASE_NUMBER}" $MVP_FLAG_ARG --pick active)

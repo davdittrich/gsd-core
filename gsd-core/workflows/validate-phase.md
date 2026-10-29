@@ -26,7 +26,7 @@ PHASE_ARG=$(echo "$GSD_ARGS" | sed -E 's/--ws[[:space:]]+[A-Za-z0-9._-]+//g' | x
 GSD_WS=$(echo " $GSD_ARGS" | sed -nE 's/.* --ws +([A-Za-z0-9][A-Za-z0-9._-]*).*/--ws \1/p' | head -n 1)
 INIT=$(gsd_run query init.phase-op ${GSD_WS:+--ws=${GSD_WS##* }} "${PHASE_ARG}")
 if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
-PHASE_NUMBER=$(gsd_run query init.phase-op ${GSD_WS:+--ws=${GSD_WS##* }} "${PHASE_ARG}" --pick phase_number)
+PHASE_NUMBER=$(printf '%s' "$INIT" | jq -r '.phase_number // empty')
 AGENT_SKILLS_AUDITOR=$(gsd_run query agent-skills gsd-nyquist-auditor ${GSD_WS:+--ws=${GSD_WS##* }})
 ```
 
