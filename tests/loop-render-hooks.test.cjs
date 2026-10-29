@@ -1974,7 +1974,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
   });
 
   // The two-line positional-token normalizer must sit verbatim at both sites that have no INIT in their fence.
-  test('[4030 F-BIND] ARGS_BIND appears verbatim at execute-phase and verify-phase-goal', () => {
+  test('[phase binding] ARGS_BIND appears verbatim at execute-phase and verify-phase-goal', () => {
     for (const file of ['gsd-core/workflows/execute-phase.md', 'gsd-core/workflows/execute-phase/steps/verify-phase-goal.md']) {
       const lines = splitLines(fs.readFileSync(path.join(ROOT, file), 'utf8')).map((l) => l.trim());
       const at = lines.indexOf(ARGS_BIND[0]);
@@ -2391,13 +2391,13 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     { cwd: ROOT, timeoutMs: PROBE_TIMEOUT_MS, env: { ...process.env, GSD_HOME: fx.home } },
   ).stdout.trim());
 
-  test('[4030 F-DROP] dispatch table codes equal PHASE_DROP', () => {
+  test('[phaseDrop] dispatch table codes equal PHASE_DROP', () => {
     const rows = dispatchTable(DISPATCH_MD);
     // sorted with duplicates kept: every code appears in exactly one row, hence maps to exactly one argument
     assert.deepStrictEqual(rows.flatMap((x) => x.codes).sort(), Object.keys(PHASE_DROP).sort());
   });
 
-  test('[4030 F-DROP] envelope carries phaseDrop for a dropped token', (t) => {
+  test('[phaseDrop] envelope carries phaseDrop for a dropped token', (t) => {
     const dir = makePhaseProject('01-alpha', '02-beta');
     t.after(() => cleanup(dir));
     const env = (args) => JSON.parse(renderWithPhase(dir, 'plan:pre', [...args, '--raw']).stdout.trim());
@@ -2406,7 +2406,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     assert.ok(!Object.prototype.hasOwnProperty.call(env(['--phase', '02']), 'phaseDrop'), 'a resolved token carries no phaseDrop');
   });
 
-  test('[4030 F-DROP] ROADMAP-only phase reaches the discuss:pre handler', (t) => {
+  test('[phaseDrop] ROADMAP-only phase reaches the discuss:pre handler', (t) => {
     const fx = makeThirdPartyStepFixture(PHASE_SCOPED_POINTS);
     t.after(() => { cleanup(fx.home); cleanup(fx.project); });
     fs.writeFileSync(path.join(fx.project, '.planning', 'ROADMAP.md'), '# Roadmap\n\n## Phase 3: Gadgets\n');
@@ -2416,13 +2416,13 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     assert.deepStrictEqual(runHandler(DISPATCH_MD, envelope, hook, '03'), ['phase', 'probe', '--phase', '03', '--raw']);
   });
 
-  test('[4030 F-TOKEN] dispatch contract regex equals PHASE_TOKEN_RE.source', () => {
+  test('[phase token] dispatch contract regex equals PHASE_TOKEN_RE.source', () => {
     const m = DISPATCH_MD.match(TOKEN_CHECK_RE);
     assert.ok(m, 'dispatch contract lost its in-context phase-token check');
     assert.strictEqual(`^${m[1]}$`, PHASE_TOKEN_RE.source);
   });
 
-  test('[4030 F-TOKEN] hostile custom id never reaches context', (t) => {
+  test('[phase token] hostile custom id never reaches context', (t) => {
     const lib = (n) => path.join(ROOT, 'gsd-core/bin/lib', n);
     const loc = require(lib('phase-locator.cjs'));
     const orig = loc.guardedFindPhase;
@@ -2458,7 +2458,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     }
   });
 
-  test('[4030 F-CONFIG] unusable config.json fails --phase closed', (t) => {
+  test('[config] unusable config.json fails --phase closed', (t) => {
     const unparseable = makePhaseProject('02-beta');
     const unreadable = makePhaseProject('02-beta');
     t.after(() => { cleanup(unparseable); cleanup(unreadable); });
@@ -2472,7 +2472,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     }
   });
 
-  test('[4030 F-CAP] ambiguous warning caps the count at 5', (t) => {
+  test('[phaseDrop] ambiguous warning caps the count at 5', (t) => {
     const echoedMore = (n) => {
       const dir = makePhaseProject(...Array.from({ length: n }, (_, i) => `05-${String.fromCharCode(97 + i)}`));
       t.after(() => cleanup(dir));
