@@ -57,8 +57,9 @@ different phases that are *both* inside the project.
   `context` key appears and no fallback phase is invented.
 - A token that matches no phase directory, matches more than one, matches
   only an archived milestone's phase, resolves outside `.planning/phases`, or
-  carries a foreign project-code prefix omits `context` and appends to the
-  existing `warnings` array. `--phase` degrades; it never fails a render.
+  carries a foreign project-code prefix, is not a safe token, or meets an unusable
+  `.planning/config.json` omits `context`, appends to the existing `warnings` array and sets the
+  envelope's typed `phaseDrop` code. `--phase` degrades; it never fails a render.
 - `ship:pre`/`ship:post` are not given `--phase` by this change (`ship.md`
   resolves its own phase argument); `audit-milestone.md`, `quick.md`,
   `quick-batch` and the code-review reviewer lane hold no phase to pass either.

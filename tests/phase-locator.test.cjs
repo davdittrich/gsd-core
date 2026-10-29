@@ -1895,6 +1895,90 @@ describe('guardedFindPhase (#4030)', () => {
   });
 });
 
+describe('[4030] phase token and argument properties', () => {
+  const { splitLines } = require('../gsd-core/bin/lib/text-lines.cjs');
+  const { runHook } = require('./helpers/process-seam.cjs');
+  const { PROBE_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
+  const { PHASE_TOKEN_RE } = require('../gsd-core/bin/lib/loop-resolver.cjs');
+  const ROOT = path.resolve(__dirname, '..');
+  const SITES = [
+    'gsd-core/workflows/execute-phase.md',
+    'gsd-core/workflows/execute-phase/steps/verify-phase-goal.md',
+  ];
+  const ARGS_FIRST = 'read -ra _gsd_argv <<<"$GSD_ARGS"; set -- "${_gsd_argv[@]}"';
+
+  // The two lines are read verbatim from each site, never copied here.
+  function argsBind(file) {
+    const lines = splitLines(fs.readFileSync(path.join(ROOT, file), 'utf8')).map((l) => l.trim());
+    const at = lines.indexOf(ARGS_FIRST);
+    assert.notStrictEqual(at, -1, `${file} lost the ARGS_BIND normalizer`);
+    return lines.slice(at, at + 2).join('\n');
+  }
+
+  const digit = fc.integer({ min: 0, max: 9 }).map(String);
+  const upper = fc.constantFrom(...'ABCDEFGHIJKLMNOPQRSTUVWXYZ');
+  const numeric = fc.tuple(
+    fc.array(digit, { minLength: 1, maxLength: 3 }).map((d) => d.join('')),
+    fc.option(upper, { nil: '' }),
+    fc.array(fc.array(digit, { minLength: 1, maxLength: 2 }).map((d) => d.join('')), { maxLength: 2 }),
+  ).map(([n, l, subs]) => n + l + subs.map((x) => `.${x}`).join(''));
+  const prefixed = fc.tuple(
+    upper,
+    fc.array(fc.constantFrom(...'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_'.split('')), { maxLength: 6 }),
+    fc.integer({ min: 0, max: 99 }),
+  ).map(([u, rest, n]) => `${u}${rest.join('')}-${String(n).padStart(2, '0')}`);
+  const wide = fc.tuple(
+    fc.constantFrom(...'AZaz09'.split('')),
+    fc.array(fc.constantFrom(...'AZaz09._-'.split('')), { maxLength: 63 }),
+  ).map(([h, t]) => h + t.join(''));
+
+  describe('PHASE_TOKEN_RE (#4030 F-TOKEN)', () => {
+    test('PHASE_TOKEN_RE accepts phase grammar and rejects shell metacharacters', () => {
+      fc.assert(fc.property(fc.oneof(numeric, prefixed, wide), (t) => PHASE_TOKEN_RE.test(t)));
+      const meta = [...'$`;|&()<>\'" \t\n*?[]{}~!#\\'];
+      fc.assert(fc.property(
+        wide, fc.constantFrom(...meta), fc.nat(),
+        (t, c, k) => { const i = k % (t.length + 1); return !PHASE_TOKEN_RE.test(t.slice(0, i) + c + t.slice(i)); },
+      ));
+      assert.ok(!PHASE_TOKEN_RE.test(''));
+      assert.ok(PHASE_TOKEN_RE.test('a'.repeat(63)) && PHASE_TOKEN_RE.test('a'.repeat(64)));
+      assert.ok(!PHASE_TOKEN_RE.test('a'.repeat(65)));
+    });
+  });
+
+  describe('positional-token extractor (#4030 F-BIND)', () => {
+    const flag = fc.oneof(
+      fc.integer({ min: 1, max: 9 }).map((n) => `--wave ${n}`),
+      wide.map((n) => `--ws ${n}`),
+      wide.map((n) => `--ws=${n}`),
+      fc.constantFrom('--gaps-only', '--interactive', '--tdd', '--mvp', '--auto'),
+    );
+    const ws = fc.constantFrom('', ' ', '\t', '  ');
+    const run = (file, gsdArgs) => {
+      const r = runHook('-c', [`${argsBind(file)}\nprintf %s "\${1}"`], {
+        interpreter: 'bash', env: { ...process.env, GSD_ARGS: gsdArgs }, timeoutMs: PROBE_TIMEOUT_MS,
+      });
+      assert.strictEqual(r.exitCode, 0, r.stderr);
+      return r.stdout;
+    };
+
+    for (const file of SITES) {
+      test(`positional-token extractor returns the phase for any flag tail (${path.basename(file)})`, () => {
+        fc.assert(fc.property(
+          fc.oneof(numeric, prefixed), fc.array(flag, { maxLength: 3 }), fc.array(flag, { maxLength: 3 }), ws, ws,
+          (tok, head, tail, lead, trail) => run(file, `${lead}${[...head, tok, ...tail].join(' ')}${trail}`) === tok,
+        ), { numRuns: 25 });
+        // flag guard: flags only, or nothing, give the empty string
+        assert.strictEqual(run(file, ''), '');
+        assert.strictEqual(run(file, '--wave'), '');
+        assert.strictEqual(run(file, '--auto --tdd'), '');
+        // read -ra never globs
+        assert.strictEqual(run(file, '* 5'), '*');
+      });
+    }
+  });
+});
+
 // ─── F. The guard — both detectors, proven fail-capable ──────────────────
 
 describe('lint-phase-enumeration-drift.cjs guard (#3882 rows F1-F3)', () => {

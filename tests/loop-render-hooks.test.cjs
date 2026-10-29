@@ -24,6 +24,7 @@ const {
   resolveLoopHooks,
   renderLoopHooks,
   resolveActiveHooksForPoint,
+  PHASE_TOKEN_RE,
   PHASE_DROP,
   _getNestedConfigValue,
   _resolveActivationValue,
@@ -1431,22 +1432,29 @@ function phaseVarBinding(lines, idx, name) {
 // the variables that binding reads are pinned in SRC_CROSS_FENCE.
 // Pins the exact PHASE_NUMBER binding line each cross-fence site relies on; `--pick` is gsd-tools' own field extractor (verify-work.md's verify:pre binds from $INIT with jq instead).
 const phaseBind = (arg) => `PHASE_NUMBER=$(gsd_run query init.phase-op \${GSD_WS:+--ws=\${GSD_WS##* }} "${arg}" --pick phase_number)`;
-const INIT_BIND = phaseBind('${PHASE_ARG}');
-const VERIFY_BIND = `PHASE_NUMBER=\${PHASE_NUMBER:-$(${phaseBind('${PHASE_ARG}').slice('PHASE_NUMBER=$('.length, -1)})}`;
+// Where the call's fence already holds INIT, the bind reads the phase from it (the verify-work form).
+const INIT_JQ_BIND = `PHASE_NUMBER=$(printf '%s' "$INIT" | jq -r '.phase_number // empty')`;
+// Fences with no INIT take the first positional token of $GSD_ARGS: it skips every flag and the value of --ws and --wave.
+const ARGS_BIND = [
+  'read -ra _gsd_argv <<<"$GSD_ARGS"; set -- "${_gsd_argv[@]}"',
+  'while [ "$#" -gt 0 ]; do case "$1" in --ws|--wave) shift; [ "$#" -gt 0 ] && shift;; -*) shift;; *) break;; esac; done',
+];
+const INIT_BIND = phaseBind('${1}');
+const VERIFY_BIND = `PHASE_NUMBER=\${PHASE_NUMBER:-$(${phaseBind('${1}').slice('PHASE_NUMBER=$('.length, -1)})}`;
 const CROSS_FENCE = {
-  'gsd-core/workflows/discuss-phase.md :: discuss:pre': phaseBind('${PHASE}'),
-  'gsd-core/workflows/discuss-phase.md :: discuss:post': phaseBind('${PHASE}'),
-  'gsd-core/workflows/plan-phase.md :: plan:pre': phaseBind('$PHASE'),
-  'gsd-core/workflows/plan-phase.md :: plan:post': phaseBind('$PHASE'),
+  'gsd-core/workflows/discuss-phase.md :: discuss:pre': INIT_JQ_BIND,
+  'gsd-core/workflows/discuss-phase.md :: discuss:post': INIT_JQ_BIND,
+  'gsd-core/workflows/plan-phase.md :: plan:pre': INIT_JQ_BIND,
+  'gsd-core/workflows/plan-phase.md :: plan:post': INIT_JQ_BIND,
   'gsd-core/workflows/execute-phase.md :: execute:wave:pre': INIT_BIND,
   'gsd-core/workflows/execute-phase.md :: execute:wave:post': INIT_BIND,
   'gsd-core/workflows/execute-phase/steps/verify-phase-goal.md :: verify:post': VERIFY_BIND,
   'gsd-core/workflows/execute-phase/steps/verify-phase-goal.md :: execute:post': VERIFY_BIND,
   // verify-work's verify:pre fence binds PHASE_NUMBER from $INIT itself (#5289), before the call; verify:post carries that line.
-  'gsd-core/workflows/verify-work.md :: verify:post': `PHASE_NUMBER=$(printf '%s' "$INIT" | jq -r '.phase_number // empty')`,
-  'gsd-core/workflows/secure-phase.md :: verify:post': INIT_BIND,
-  'gsd-core/workflows/validate-phase.md :: verify:post': INIT_BIND,
-  'gsd-core/workflows/code-review-fix.md :: execute:post': INIT_BIND,
+  'gsd-core/workflows/verify-work.md :: verify:post': INIT_JQ_BIND,
+  'gsd-core/workflows/secure-phase.md :: verify:post': INIT_JQ_BIND,
+  'gsd-core/workflows/validate-phase.md :: verify:post': INIT_JQ_BIND,
+  'gsd-core/workflows/code-review-fix.md :: execute:post': INIT_JQ_BIND,
 };
 
 // Sites that pass the autonomous driver's own loop variable. It is never
@@ -1501,11 +1509,11 @@ test('[unit] WS_EXPANSION expands GSD_WS to --ws=<name>, and to nothing when uns
 });
 // Turn the tail of a render-hooks call line into argv, substituting a real
 // token for the phase variable and the fingerprint path.
-function callArgv(rest) {
+function callArgv(rest, tok = '05') {
   return (rest
     .replace(WS_EXPANSION, '') // unset GSD_WS expands to nothing
     .replace(/--after-fingerprint\s+"[^"]*"/, '--after-fingerprint .planning/phases/05-widgets')
-    .replace(/"\$\{?\w+\}?"/g, '"05"')
+    .replace(/"\$\{?\w+\}?"/g, `"${tok}"`)
     .match(/"[^"]*"|\S+/g) || []).map((a) => a.replace(/"/g, ''));
 }
 
@@ -1659,7 +1667,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     assert.ok(!Object.prototype.hasOwnProperty.call(envelope, 'context'));
     assert.ok(Array.isArray(envelope.warnings) && envelope.warnings.length > 0,
       'an explicit empty --phase must warn, not go silent');
-    assert.strictEqual(dropOf(dir, { phase: '' }), PHASE_DROP.UNRESOLVED);
+    assert.strictEqual(dropOf(dir, { phase: '' }), PHASE_DROP.INVALID_TOKEN);
   });
 
   test('[negative] --phase= (explicit empty string, equals form) warns, never a hard error', (t) => {
@@ -1676,15 +1684,14 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
   test('[negative] resolveActiveHooksForPoint called in-process with phase: \'\' warns the same way', (t) => {
     // This exported function is its own boundary (an in-process caller does not
     // go through readOptionalFlag) and must not silently swallow an explicit empty string the way
-    // a bare, truly-absent --phase does. An empty phase here reaches
-    // guardedFindPhase('', ...), which returns null (its own falsy-phase
-    // guard), and falls through to the same "did not match" warning any other
-    // unresolvable token gets, as on the CLI path.
+    // a bare, truly-absent --phase does. An empty phase fails PHASE_TOKEN_RE
+    // before any lookup and drops as INVALID_TOKEN with a warning, as on the
+    // CLI path.
     const dir = makePhaseProject('05-widgets');
     t.after(() => cleanup(dir));
     const result = resolveActiveHooksForPoint(dir, 'plan:pre', { phase: '' });
     assert.strictEqual(result.context, undefined);
-    assert.strictEqual(result.phaseDrop, PHASE_DROP.UNRESOLVED);
+    assert.strictEqual(result.phaseDrop, PHASE_DROP.INVALID_TOKEN);
   });
 
   test('[negative] resolveActiveHooksForPoint called in-process with phaseDir: \'\' and no phase warns', (t) => {
@@ -1822,7 +1829,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
       assert.ok(!Object.prototype.hasOwnProperty.call(envelope, 'context'),
         `${token} must not resolve to a phase directory`);
       assert.ok((envelope.warnings || []).length > 0);
-      assert.strictEqual(dropOf(dir, { phase: token }), PHASE_DROP.UNRESOLVED);
+      assert.strictEqual(dropOf(dir, { phase: token }), PHASE_DROP.INVALID_TOKEN);
     });
   }
 
@@ -1966,6 +1973,16 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     assert.deepStrictEqual(fs.readFileSync(statePath), before, 'STATE.md must stay byte-identical');
   });
 
+  // The two-line positional-token normalizer must sit verbatim at both sites that have no INIT in their fence.
+  test('[4030 F-BIND] ARGS_BIND appears verbatim at execute-phase and verify-phase-goal', () => {
+    for (const file of ['gsd-core/workflows/execute-phase.md', 'gsd-core/workflows/execute-phase/steps/verify-phase-goal.md']) {
+      const lines = splitLines(fs.readFileSync(path.join(ROOT, file), 'utf8')).map((l) => l.trim());
+      const at = lines.indexOf(ARGS_BIND[0]);
+      assert.notStrictEqual(at, -1, `${file} lost ARGS_BIND`);
+      assert.strictEqual(lines[at + 1], ARGS_BIND[1], `${file}: ARGS_BIND line 2 changed`);
+    }
+  });
+
   test('[e2e] every CROSS_FENCE key still names a SITES row', () => {
     const rows = new Set(SITES.map(([f, p]) => `${f} :: ${p}`));
     assert.deepStrictEqual(Object.keys(CROSS_FENCE).filter((k) => !rows.has(k)), []);
@@ -1976,14 +1993,39 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
   // --phase), so a site with a wrong flag or variable fails here. The phase
   // variable must be bound in the call's own fence, or in an earlier one the
   // site is listed for in CROSS_FENCE; only then is it replaced by a real token.
+  // Run a site's own PHASE_NUMBER bind line in a fresh bash (the carry: each fence is its own shell)
+  // with only what its fence supplies, and return the value it yields.
+  function boundPhase(fx, file, bindLine) {
+    const args = /execute-phase/.test(file) ? '02 --wave 2 --auto' : '02';
+    const initQuery = file.endsWith('verify-work.md') ? VERIFY_WORK_INIT
+      : `INIT=$(gsd_run query ${file.endsWith('plan-phase.md') ? 'init.plan-phase' : 'init.phase-op'} 02)`;
+    const script = [
+      `gsd_run() { node "${GSD_TOOLS}" "$@"; }`,
+      `GSD_ARGS='${args}'`, 'PHASE_ARG=02', 'GSD_WS=""',
+      bindLine.includes('$INIT') ? initQuery : ':',
+      bindLine.includes('${1}') ? ARGS_BIND.join('\n') : ':',
+      bindLine,
+      'printf %s "$PHASE_NUMBER"',
+    ].join('\n');
+    const r = runHook('-c', [script], { interpreter: 'bash', cwd: fx.project, env: { ...process.env, GSD_HOME: fx.home }, timeoutMs: PROBE_TIMEOUT_MS });
+    assert.strictEqual(r.exitCode, 0, `${file}: bind failed: ${r.stderr}`);
+    return r.stdout;
+  }
+
   for (const [file, point] of SITES) {
     test(`[e2e] ${file} :: ${point} call site binds its phase var and its argv puts the phase in the envelope beside a third-party step`, (t) => {
       const fx = makeThirdPartyStepFixture(PHASE_SCOPED_POINTS);
       t.after(() => { cleanup(fx.home); cleanup(fx.project); });
+      for (const n of ['01-alpha', '02-beta']) fs.mkdirSync(path.join(fx.project, '.planning', 'phases', n));
+      const statePath = path.join(fx.project, '.planning', 'STATE.md');
+      fs.writeFileSync(statePath, 'current_phase: 01\n');
+      const stateBefore = fs.readFileSync(statePath);
+      const dispatchMd = fs.readFileSync(path.join(ROOT, 'gsd-core/references/loop-hook-dispatch.md'), 'utf8');
       const lines = splitLines(fs.readFileSync(path.join(ROOT, file), 'utf8'));
       const carried = CROSS_FENCE[`${file} :: ${point}`];
       const srcCarried = SRC_CROSS_FENCE[`${file} :: ${point}`];
       let seen = 0;
+      let tok = '02'; // a host-bound site (HOST_BOUND) takes the loop variable's value
       let crossed = 0;
       let srcCrossed = 0;
       // True when `name` is assigned in an earlier fence than lines[idx]; that
@@ -2019,6 +2061,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
         } else {
           assert.notStrictEqual(b.line, -1,
             `${file}:${idx + 1} ${point}: ${v[1]} is never assigned in a bash block before this call`);
+          tok = boundPhase(fx, file, lines[b.line].trim());
           if (checkCarry(carried, 'CROSS_FENCE', idx, v[1], idx)) crossed++;
           // The phase binding also reads source variables ($INIT, $PHASE_STATE,
           // ${EXECUTE_INIT:-$INIT}, ...): each one assigned in another fence is
@@ -2028,15 +2071,19 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
           for (const readVar of readVars) if (checkCarry(srcCarried, 'SRC_CROSS_FENCE', b.line, readVar, idx)) srcCrossed++;
         }
         const result = runNode(
-          [GSD_TOOLS, 'loop', 'render-hooks', point, ...callArgv(m[1]), '--cwd', fx.project],
+          [GSD_TOOLS, 'loop', 'render-hooks', point, ...callArgv(m[1], tok), '--cwd', fx.project],
           { cwd: ROOT, timeoutMs: PROBE_TIMEOUT_MS, env: { ...process.env, GSD_HOME: fx.home } },
         );
         assert.strictEqual(result.exitCode, 0, 'stderr: ' + result.stderr);
         const envelope = JSON.parse(result.stdout.trim());
-        assert.ok((envelope.activeHooks || []).some((h) => h.capId === 'phase-probe'),
-          `${file} ${point}: the third-party handler must be dispatched`);
-        assert.deepStrictEqual(envelope.context, { phase: '05', phaseDir: '.planning/phases/05-widgets' },
+        const hook = (envelope.activeHooks || []).find((h) => h.capId === 'phase-probe');
+        assert.ok(hook, `${file} ${point}: the third-party handler must be dispatched`);
+        assert.strictEqual(tok, '02', `${file}:${idx + 1} ${point}: the bind must yield the call's own phase, not STATE.current_phase`);
+        assert.deepStrictEqual(envelope.context, { phase: '02', phaseDir: '.planning/phases/02-beta' },
           `${file} ${point}: the call site's phase must reach the handler unchanged`);
+        assert.deepStrictEqual(runHandler(dispatchMd, envelope, hook, tok), ['phase', 'probe', '--phase', '02', '--raw'],
+          `${file} ${point}: the handler must receive the call site's phase`);
+        assert.deepStrictEqual(fs.readFileSync(statePath), stateBefore, 'STATE.md must stay byte-identical');
       });
       assert.ok(seen > 0, `no ${point} call site in ${file}`);
       for (const [table, n, name] of [[carried, crossed, 'CROSS_FENCE'], [srcCarried, srcCrossed, 'SRC_CROSS_FENCE']]) {
@@ -2045,21 +2092,48 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
     });
   }
 
-  // The handler argv the projected dispatch contract (loop-hook-dispatch.md
-  // § step, ref.command) builds from an envelope: pick the template branch the
-  // contract names, fill its placeholders from the envelope, split to argv.
-  function handlerArgv(dispatchMd, envelope, hook, phaseNumber) {
+  // The phase-argument table of the dispatch contract (loop-hook-dispatch.md, ref.command):
+  // one row per envelope shape, naming the phaseDrop codes it covers and the template to fill.
+  // The in-context phase-token check the contract tells the agent to make, between ^ and $.
+  const TOKEN_CHECK_RE = /in-context against\s+`\^([^`]{1,100})\$`/;
+  function dispatchTable(dispatchMd) {
     const lines = splitLines(dispatchMd).map((l) => l.trim());
-    const branch = envelope.context ? '# context present'
-      : phaseNumber !== undefined && !(envelope.warnings || []).some((w) => w.startsWith('--phase')) ? '# context absent, host binds PHASE_NUMBER'
-        : '# context absent, no PHASE_NUMBER';
-    const at = lines.indexOf(branch);
-    assert.notStrictEqual(at, -1, `dispatch contract lost its "${branch}" branch`);
+    const head = lines.findIndex((l) => l.startsWith('| Envelope |'));
+    assert.notStrictEqual(head, -1, 'dispatch contract lost its phase-argument table');
+    const rows = [];
+    for (let i = head + 2; i < lines.length && lines[i].startsWith('|'); i++) {
+      const [env, arg, tpl] = lines[i].split('|').slice(1, -1).map((c) => c.trim());
+      rows.push({ env, arg, template: tpl.replace(/`/g, ''), codes: [...env.matchAll(/`([A-Z_]+)`/g)].map((m) => m[1]) });
+    }
+    return rows;
+  }
+
+  // Run the handler line the projected dispatch contract builds from an envelope: pick the table row,
+  // check the phase value in-context (as the contract tells the agent), fill the template under the row's
+  // comment, and run it with bash against a recording gsd_run (a synthetic third-party handler).
+  function runHandler(dispatchMd, envelope, hook, phaseNumber) {
+    const rows = dispatchTable(dispatchMd);
+    const row = envelope.context ? rows.find((x) => x.env.startsWith('`context` present'))
+      : envelope.phaseDrop ? rows.find((x) => x.codes.includes(envelope.phaseDrop))
+        : rows.find((x) => x.env.startsWith('no `context`'));
+    assert.ok(row, `dispatch table has no row for ${JSON.stringify(envelope.phaseDrop)}`);
+    const value = envelope.context ? envelope.context.phase : row.arg.includes('PHASE_NUMBER') ? phaseNumber : undefined;
+    const tokenRe = new RegExp(`^${dispatchMd.match(TOKEN_CHECK_RE)[1]}$`);
+    const template = value !== undefined && value !== '' && tokenRe.test(value) ? row.template : 'context absent, no PHASE_NUMBER';
+    const lines = splitLines(dispatchMd).map((l) => l.trim());
+    const at = lines.indexOf(`# ${template}`);
+    assert.notStrictEqual(at, -1, `dispatch contract lost its "# ${template}" branch`);
     const filled = lines[at + 1]
       .replace('${ref.command}', hook.ref.command)
       .replace('${context.phase}', envelope.context ? envelope.context.phase : '')
       .replace('${PHASE_NUMBER}', phaseNumber ?? '');
-    return (filled.match(/"[^"]*"|\S+/g) || []).map((a) => a.replace(/"/g, '')).slice(1); // drop gsd_run
+    const recDir = createTempDir('loop-handler-rec-');
+    try {
+      const rec = path.join(recDir, 'argv');
+      const r = runHook('-c', [`gsd_run() { printf '%s\\n' "$@" > "$REC"; }\n${filled}`], { interpreter: 'bash', env: { ...process.env, REC: rec }, timeoutMs: PROBE_TIMEOUT_MS });
+      assert.strictEqual(r.exitCode, 0, `handler line failed: ${r.stderr}`);
+      return splitLines(fs.readFileSync(rec, 'utf8')).filter((l, i, all) => i < all.length - 1 || l !== '');
+    } finally { cleanup(recDir); }
   }
 
   // #4030 AC8: the installer projects workflows and references per runtime.
@@ -2106,7 +2180,7 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
           const envelope = JSON.parse(result.stdout.trim());
           const hook = (envelope.activeHooks || []).find((h) => h.capId === 'phase-probe');
           assert.ok(hook, `${runtime}: ${file} ${point}: the third-party step must be dispatched`);
-          assert.deepStrictEqual(handlerArgv(dispatchMd, envelope, hook, undefined), ['phase', 'probe', '--phase', '05', '--raw'],
+          assert.deepStrictEqual(runHandler(dispatchMd, envelope, hook, undefined), ['phase', 'probe', '--phase', '05', '--raw'],
             `${runtime}: ${file} ${point}: the handler must receive the call site's phase`);
         }
       }
@@ -2117,10 +2191,10 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
         { cwd: ROOT, timeoutMs: PROBE_TIMEOUT_MS, env },
       ).stdout.trim());
       const hook = bareEnv.activeHooks.find((h) => h.capId === 'phase-probe');
-      assert.deepStrictEqual(handlerArgv(dispatchMd, bareEnv, hook, '07'), ['phase', 'probe', '--phase', '07', '--raw']);
-      assert.deepStrictEqual(handlerArgv(dispatchMd, bareEnv, hook, undefined), ['phase', 'probe', '--raw']);
+      assert.deepStrictEqual(runHandler(dispatchMd, bareEnv, hook, '07'), ['phase', 'probe', '--phase', '07', '--raw']);
+      assert.deepStrictEqual(runHandler(dispatchMd, bareEnv, hook, undefined), ['phase', 'probe', '--raw']);
       // An unrelated warning (capability load failure) does not mean --phase was rejected: the fallback stays.
-      assert.deepStrictEqual(handlerArgv(dispatchMd, { ...bareEnv, warnings: ['capability x failed to load'] }, hook, '07'), ['phase', 'probe', '--phase', '07', '--raw']);
+      assert.deepStrictEqual(runHandler(dispatchMd, { ...bareEnv, warnings: ['capability x failed to load'] }, hook, '07'), ['phase', 'probe', '--phase', '07', '--raw']);
       // --phase was passed but rejected (warning): the host's PHASE_NUMBER must not
       // stand in for it, or the rejected token's phase reaches the handler anyway.
       const rejectedEnv = JSON.parse(runNode(
@@ -2128,7 +2202,16 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
         { cwd: ROOT, timeoutMs: PROBE_TIMEOUT_MS, env },
       ).stdout.trim());
       assert.ok(rejectedEnv.warnings && rejectedEnv.warnings.length, 'an unmatched --phase warns');
-      assert.deepStrictEqual(handlerArgv(dispatchMd, rejectedEnv, hook, '07'), ['phase', 'probe', '--raw']);
+      assert.strictEqual(rejectedEnv.phaseDrop, 'UNRESOLVED');
+      // UNRESOLVED means no phase directory yet (ROADMAP-only phases): the host's own PHASE_NUMBER stands in.
+      assert.deepStrictEqual(runHandler(dispatchMd, rejectedEnv, hook, '07'), ['phase', 'probe', '--phase', '07', '--raw']);
+      // Every other drop passes no phase.
+      const unsafeEnv = JSON.parse(runNode(
+        [GSD_TOOLS, 'loop', 'render-hooks', 'plan:pre', '--raw', '--phase', 'a;id', '--cwd', fx.project],
+        { cwd: ROOT, timeoutMs: PROBE_TIMEOUT_MS, env },
+      ).stdout.trim());
+      assert.strictEqual(unsafeEnv.phaseDrop, 'INVALID_TOKEN');
+      assert.deepStrictEqual(runHandler(dispatchMd, unsafeEnv, hook, '07'), ['phase', 'probe', '--raw']);
     }
   });
 
@@ -2301,6 +2384,106 @@ describe('cmdLoopRenderHooks --phase (#4030)', () => {
       'the emitted phase is the caller\'s token, not STATE.current_phase (01)');
     assert.deepStrictEqual(fs.readFileSync(statePath), before, 'STATE.md must stay byte-identical');
   });
+
+  const DISPATCH_MD = fs.readFileSync(path.join(ROOT, 'gsd-core/references/loop-hook-dispatch.md'), 'utf8');
+  const envelopeOf = (fx, point, args) => JSON.parse(runNode(
+    [GSD_TOOLS, 'loop', 'render-hooks', point, '--cwd', fx.project, '--raw', ...args],
+    { cwd: ROOT, timeoutMs: PROBE_TIMEOUT_MS, env: { ...process.env, GSD_HOME: fx.home } },
+  ).stdout.trim());
+
+  test('[4030 F-DROP] dispatch table codes equal PHASE_DROP', () => {
+    const rows = dispatchTable(DISPATCH_MD);
+    // sorted with duplicates kept: every code appears in exactly one row, hence maps to exactly one argument
+    assert.deepStrictEqual(rows.flatMap((x) => x.codes).sort(), Object.keys(PHASE_DROP).sort());
+  });
+
+  test('[4030 F-DROP] envelope carries phaseDrop for a dropped token', (t) => {
+    const dir = makePhaseProject('01-alpha', '02-beta');
+    t.after(() => cleanup(dir));
+    const env = (args) => JSON.parse(renderWithPhase(dir, 'plan:pre', [...args, '--raw']).stdout.trim());
+    assert.strictEqual(env(['--phase', '99']).phaseDrop, 'UNRESOLVED');
+    assert.strictEqual(env(['--phase', '02', '--phase-dir', '.planning/phases/01-alpha']).phaseDrop, 'DIR_MISMATCH');
+    assert.ok(!Object.prototype.hasOwnProperty.call(env(['--phase', '02']), 'phaseDrop'), 'a resolved token carries no phaseDrop');
+  });
+
+  test('[4030 F-DROP] ROADMAP-only phase reaches the discuss:pre handler', (t) => {
+    const fx = makeThirdPartyStepFixture(PHASE_SCOPED_POINTS);
+    t.after(() => { cleanup(fx.home); cleanup(fx.project); });
+    fs.writeFileSync(path.join(fx.project, '.planning', 'ROADMAP.md'), '# Roadmap\n\n## Phase 3: Gadgets\n');
+    const envelope = envelopeOf(fx, 'discuss:pre', ['--phase', '03']);
+    assert.strictEqual(envelope.context, undefined);
+    const hook = envelope.activeHooks.find((h) => h.capId === 'phase-probe');
+    assert.deepStrictEqual(runHandler(DISPATCH_MD, envelope, hook, '03'), ['phase', 'probe', '--phase', '03', '--raw']);
+  });
+
+  test('[4030 F-TOKEN] dispatch contract regex equals PHASE_TOKEN_RE.source', () => {
+    const m = DISPATCH_MD.match(TOKEN_CHECK_RE);
+    assert.ok(m, 'dispatch contract lost its in-context phase-token check');
+    assert.strictEqual(`^${m[1]}$`, PHASE_TOKEN_RE.source);
+  });
+
+  test('[4030 F-TOKEN] hostile custom id never reaches context', (t) => {
+    const lib = (n) => path.join(ROOT, 'gsd-core/bin/lib', n);
+    const loc = require(lib('phase-locator.cjs'));
+    const orig = loc.guardedFindPhase;
+    const calls = [];
+    // loop-resolver destructures guardedFindPhase at load: wrap it, then reload the resolver so it binds the wrapper.
+    loc.guardedFindPhase = (...a) => { calls.push(a[1]); return orig(...a); };
+    delete require.cache[require.resolve(lib('loop-resolver.cjs'))];
+    const fresh = require(lib('loop-resolver.cjs'));
+    t.after(() => { loc.guardedFindPhase = orig; delete require.cache[require.resolve(lib('loop-resolver.cjs'))]; });
+    const customProject = (name) => {
+      const dir = makePhaseProject(name);
+      t.after(() => cleanup(dir));
+      fs.writeFileSync(path.join(dir, '.planning', 'config.json'), JSON.stringify({ phase_naming: 'custom' }));
+      return dir;
+    };
+    // positive control: a safe token on a safe directory is looked up and resolves
+    const ok = customProject('05-x');
+    const good = fresh.resolveActiveHooksForPoint(ok, 'plan:pre', { phase: '05' });
+    assert.deepStrictEqual(calls, ['05']);
+    assert.deepStrictEqual(good.context, { phase: '05', phaseDir: '.planning/phases/05-x' });
+    for (const id of ['a`id`', 'a;id', 'AB$(id)']) {
+      calls.length = 0;
+      const dir = customProject(id + '-hostile');
+      const hostile = fresh.resolveActiveHooksForPoint(dir, 'plan:pre', { phase: id });
+      assert.strictEqual(hostile.context, undefined, id);
+      assert.strictEqual(hostile.phaseDrop, PHASE_DROP.INVALID_TOKEN, id);
+      assert.deepStrictEqual(calls, [], `${id}: no lookup before the token check`);
+      const cli = JSON.parse(renderWithPhase(dir, 'plan:pre', ['--phase', id, '--raw']).stdout.trim());
+      assert.strictEqual(cli.context, undefined);
+      assert.strictEqual(cli.phaseDrop, 'INVALID_TOKEN');
+      // a safe token on the same fixture is still looked up and merely unresolved
+      assert.strictEqual(fresh.resolveActiveHooksForPoint(dir, 'plan:pre', { phase: 'a' }).phaseDrop, PHASE_DROP.UNRESOLVED);
+    }
+  });
+
+  test('[4030 F-CONFIG] unusable config.json fails --phase closed', (t) => {
+    const unparseable = makePhaseProject('02-beta');
+    const unreadable = makePhaseProject('02-beta');
+    t.after(() => { cleanup(unparseable); cleanup(unreadable); });
+    fs.writeFileSync(path.join(unparseable, '.planning', 'config.json'), '{bad');
+    fs.mkdirSync(path.join(unreadable, '.planning', 'config.json'));
+    for (const [dir, reason] of [[unparseable, 'config_unparseable'], [unreadable, 'config_unreadable']]) {
+      const env = JSON.parse(renderWithPhase(dir, 'plan:pre', ['--phase', '02', '--raw']).stdout.trim());
+      assert.strictEqual(env.context, undefined);
+      assert.strictEqual(env.phaseDrop, 'CONFIG_FAULT');
+      assert.ok(env.warnings.some((w) => w.includes(reason)), `a warning names ${reason}`);
+    }
+  });
+
+  test('[4030 F-CAP] ambiguous warning caps the count at 5', (t) => {
+    const echoedMore = (n) => {
+      const dir = makePhaseProject(...Array.from({ length: n }, (_, i) => `05-${String.fromCharCode(97 + i)}`));
+      t.after(() => cleanup(dir));
+      const env = JSON.parse(renderWithPhase(dir, 'plan:pre', ['--phase', '05', '--raw']).stdout.trim());
+      const w = env.warnings.find((x) => x.includes('is ambiguous'));
+      return { listed: [...w.matchAll(/"(05-[a-z])"/g)].length - 0, more: (w.match(/, … (\d+) more\)/) || [])[1] };
+    };
+    assert.deepStrictEqual(echoedMore(5), { listed: 5, more: undefined });
+    assert.deepStrictEqual(echoedMore(6), { listed: 5, more: '1' });
+    assert.deepStrictEqual(echoedMore(7), { listed: 5, more: '2' });
+  });
 });
 
 // #4030: every phase-scoped call site must carry --phase, not just dispatch
@@ -2414,12 +2597,13 @@ describe('cmdLoopRenderHooks --phase confinement and --phase-dir identity (#4030
   ];
   for (const [label, project, drop, opts] of branches) {
     for (const n of [79, 80, 81, 200]) {
-      test(`[bva] ${label} echoes the --phase token capped at 80 (token length ${n})`, opts, (t) => {
-        const name = '05-' + 'a'.repeat(n - 3);
+      test(`[bva] ${label} echoes the directory capped at 80 (directory echo length ${n})`, opts, (t) => {
+        const prefix = label === 'ARCHIVED' ? '.planning/milestones/v1.0-phases/' : '.planning/phases/';
+        const name = '05-' + 'a'.repeat(n - prefix.length - 3);
         const dir = project(t, name);
-        assert.strictEqual(dropOf(dir, { phase: name }), drop);
-        const values = echoed(runText(dir, ['--phase', name]));
-        assert.strictEqual(values[0].length, Math.min(n, 80));
+        assert.strictEqual(dropOf(dir, { phase: '05' }), drop);
+        const values = echoed(runText(dir, ['--phase', '05']));
+        assert.strictEqual(values[1].length, Math.min(n, 80));
         assert.ok(values.every((v) => v.length <= 80));
       });
     }
@@ -2427,9 +2611,9 @@ describe('cmdLoopRenderHooks --phase confinement and --phase-dir identity (#4030
       const name = '05-a\u001b[31m\nb';
       let dir;
       try { dir = project(t, name); } catch { t.skip('FS refuses control characters'); return; }
-      assert.strictEqual(dropOf(dir, { phase: name }), drop);
-      const values = echoed(runText(dir, ['--phase', name]));
-      assert.ok(values.length > 0 && values.every((v) => !hasControl(v)), 'echoed values must be single-line and escaped');
+      assert.strictEqual(dropOf(dir, { phase: '05' }), drop);
+      const values = echoed(runText(dir, ['--phase', '05']));
+      assert.ok(values.length > 1 && values.every((v) => !hasControl(v)), 'echoed values (token and directory) must be single-line and escaped');
     });
   }
 
@@ -2450,10 +2634,10 @@ describe('cmdLoopRenderHooks --phase confinement and --phase-dir identity (#4030
       assert.strictEqual(values[0].length, Math.min(n, 80));
       assert.ok(values.every((v) => v.length <= 80));
     });
-    test(`[bva] UNRESOLVED echoes the --phase token capped at 80 (token length ${n})`, (t) => {
+    test(`[bva] INVALID_TOKEN echoes the --phase token capped at 80 (token length ${n})`, (t) => {
       const token = '9' + 'q'.repeat(n - 1);
       const dir = unresolvedProject(t);
-      assert.strictEqual(dropOf(dir, { phase: token }), PHASE_DROP.UNRESOLVED);
+      assert.strictEqual(dropOf(dir, { phase: token }), PHASE_DROP.INVALID_TOKEN);
       const values = echoed(runText(dir, ['--phase', token]));
       assert.strictEqual(values[0].length, Math.min(n, 80));
       assert.ok(values.every((v) => v.length <= 80));
@@ -2466,8 +2650,9 @@ describe('cmdLoopRenderHooks --phase confinement and --phase-dir identity (#4030
     const values = echoed(runText(dir, ['--phase', '05']));
     assert.ok(values.length > 0 && values.every((v) => !hasControl(v)), 'echoed values must be escaped');
   });
-  test('[hostile] UNRESOLVED and DIR_MISMATCH echo no control characters', (t) => {
+  test('[hostile] INVALID_TOKEN and DIR_MISMATCH echo no control characters', (t) => {
     const token = '9a\u001b[31m\nb';
+    assert.strictEqual(dropOf(unresolvedProject(t), { phase: token }), PHASE_DROP.INVALID_TOKEN);
     const unresolved = echoed(runText(unresolvedProject(t), ['--phase', token]));
     assert.ok(unresolved.length > 0 && unresolved.every((v) => !hasControl(v)));
     const mismatch = echoed(runText(mismatchProject(t, '05-x'), ['--phase', '05', '--phase-dir', token]));

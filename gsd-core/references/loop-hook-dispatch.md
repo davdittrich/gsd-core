@@ -33,7 +33,7 @@ executes. Absent `context` means `--phase` was omitted, or it was dropped: it ma
 directory or several, matched only an archived milestone's phase, resolved to a directory
 outside the project's `.planning/phases` tree, or disagreed with `--phase-dir`; `--phase-dir`
 without `--phase` is dropped too. Every case except an omitted `--phase` appends a warning to
-`warnings`. A dropped token is never passed on; `ref.command` below says when the host's own `PHASE_NUMBER` stands in.
+`warnings`, and the envelope's `phaseDrop` carries the typed reason code. A dropped token is never passed on; the phase-argument table under `ref.command` says when the host's own `PHASE_NUMBER` stands in.
 
 ## Dispatch rules by `kind`
 
@@ -48,7 +48,7 @@ Inject `fragment.inline` verbatim into the context for the role named in `into`
 Dispatch the referenced unit. Exactly one of `ref.skill`, `ref.agent`, or `ref.command` is set.
 
 - `ref.skill` present → dispatch via the Skill tool with skill id `gsd-<ref.skill>`. When
-  `context` is present, pass `context.phase` as the skill's args (e.g.
+  the phase-argument table below gives a phase argument, pass it as the skill's args (e.g.
   `args="${context.phase}"`), plus whatever else that host's own dispatch already appends.
   Skills diverge sharply on what an omitted phase argument does: some (e.g.
   `code-review`) exit with "Phase not found"; others (e.g. `validate-phase`, whose
@@ -56,7 +56,8 @@ Dispatch the referenced unit. Exactly one of `ref.skill`, `ref.agent`, or `ref.c
   to artifact-order inference, exactly the failure mode this field exists to close.
 - `ref.agent` present → dispatch via the Agent tool with `subagent_type` = `ref.agent`. If
   `context` is present, include `context.phase` / `context.phaseDir` in the agent's prompt so
-  it operates on the task-local phase rather than inferring one.
+  it operates on the task-local phase rather than inferring one. When it is absent, the
+  phase-argument table below says which phase, if any, the prompt names.
   Before dispatching an agent, print the canonical liveness banner so users know silence
   is expected and do not kill a healthy agent:
 
@@ -71,12 +72,19 @@ Dispatch the referenced unit. Exactly one of `ref.skill`, `ref.agent`, or `ref.c
   `` ` ``, `$(`, or a newline would terminate the assignment and run as its own statement
   before any shell-side check could execute. A value that fails is a malformed manifest:
   record a warning, skip that hook, continue to the next entry. Only a value that has passed
-  is run. When `context` is present, append `context.phase`. When it is absent and no `warnings` entry begins with `--phase`
-  (the phase warnings all do; capability-load and state warnings do not), `--phase` was never passed:
-  append the host workflow's `${PHASE_NUMBER}` if it binds one. When such an entry exists the
-  token was rejected: pass no phase argument, so
-  a rejected token never reaches the handler. Never substitute an empty string for a missing
-  token:
+  is run. The phase argument comes from the envelope, by this table (the same table
+  serves `ref.skill` and `ref.agent`):
+
+  | Envelope | Phase argument | Template under the comment |
+  | --- | --- | --- |
+  | `context` present | `context.phase` | `context present` |
+  | no `context`, no `phaseDrop` | the host's `${PHASE_NUMBER}` if it binds one, else none | `context absent, host binds PHASE_NUMBER` |
+  | `phaseDrop` is `UNRESOLVED` or `ARCHIVED` | the host's `${PHASE_NUMBER}` | `context absent, host binds PHASE_NUMBER` |
+  | `phaseDrop` is `ESCAPES_ROOT`, `DIR_MISMATCH`, `AMBIGUOUS`, `PHASE_DIR_ALONE`, `INVALID_TOKEN` or `CONFIG_FAULT` | none | `context absent, no PHASE_NUMBER` |
+
+  Before splicing any phase value into a command, check it in-context against
+  `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`; on a miss pass none. Never substitute an empty string
+  for a missing token:
 
   ```bash
   # placeholders are filled in by you from the envelope, not by the shell

@@ -69,7 +69,10 @@ existing #2237 handling of that same shape: `context` is omitted and a
 warning is appended to the envelope's existing `warnings` array, not thrown
 or exited non-zero — `--phase` degrades to "no context", it does not fail
 the render. Omitting `--phase` entirely preserves today's `{ point,
-activeHooks, rendered, warnings? }` shape exactly.
+activeHooks, rendered, warnings? }` shape exactly. A dropped `--phase` adds the typed
+`phaseDrop` field (`UNRESOLVED`, `ARCHIVED`, `ESCAPES_ROOT`, `DIR_MISMATCH`, `AMBIGUOUS`,
+`PHASE_DIR_ALONE`, `INVALID_TOKEN`, `CONFIG_FAULT`), which the dispatch contract maps to the
+handler's phase argument.
 
 Generic `step` dispatch (`gsd-core/references/loop-hook-dispatch.md`)
 hands `context` to the handler by kind: a `ref.skill` gets `context.phase` as
@@ -87,9 +90,11 @@ diverges from it whenever one phase plans/verifies while another executes.
 ## Consequences
 
 - `context` appears in the `loop render-hooks` envelope only when `--phase` is
-  passed and resolves. Without `--phase`, the envelope is unchanged.
+  passed and resolves. Without `--phase`, the envelope is unchanged. A dropped `--phase`
+  carries `phaseDrop`, the typed reason code.
 - An unresolvable, ambiguous, foreign-prefixed, archived-milestone-only,
-  escaping, or mismatched `--phase`/`--phase-dir` omits `context` and appends a warning; hooks still
+  escaping, unsafe (`INVALID_TOKEN`), unresolvable because `.planning/config.json` is unusable
+  (`CONFIG_FAULT`), or mismatched `--phase`/`--phase-dir` omits `context` and appends a warning; hooks still
   dispatch and the command does not exit non-zero.
 - Handlers must treat `context` as optional and fall back to their prior
   behavior when it is absent.

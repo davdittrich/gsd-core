@@ -1570,7 +1570,7 @@ gsd capability remove my-cap --scope project          # Turn the installed overl
 ---
 
 ### `gsd-tools loop render-hooks`
-Resolve and render the active Capability hooks at a Loop Extension Point. Emits `{ point, activeHooks[], rendered, warnings?, skippedHooks?, context? }`.
+Resolve and render the active Capability hooks at a Loop Extension Point. Emits `{ point, activeHooks[], rendered, warnings?, skippedHooks?, context?, phaseDrop? }`.
 
 | Flag | Description |
 |------|-------------|
