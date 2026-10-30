@@ -186,8 +186,7 @@ function block1(agentSkills) {
 function composeThenGuard(agentSkills, { mutate = (x) => x, strict = false } = {}) {
   const dir = createTempDir('gsd-5531-');
   try {
-    // Trailing `:`: the block ends in a `grep ... && {...}` list that returns 1 when it passes, which `set -e` would treat as a failure of the sourcing.
-    fs.writeFileSync(path.join(dir, 'block1.sh'), mutate(block1(agentSkills)) + ':\n');
+    fs.writeFileSync(path.join(dir, 'block1.sh'), mutate(block1(agentSkills)));
     const script = path.join(dir, 'compose.sh');
     fs.writeFileSync(
       script,

@@ -297,10 +297,10 @@ printf '%s' "$EXECUTOR_PROMPT" | grep -q '\${AGENT_SKILLS}' && {
   echo "FATAL: executor prompt for plan {plan_number} still contains the un-substituted \${AGENT_SKILLS} marker — the role definition was not spliced in (#3637). Halting." >&2
   exit 1
 }
-printf '%s' "$EXECUTOR_PROMPT" | grep -q '\${TDD_APPLICABLE' && {
+if printf '%s' "$EXECUTOR_PROMPT" | grep -q '\${TDD_APPLICABLE'; then
   echo "FATAL: executor prompt for plan {plan_number} still contains the un-substituted \${TDD_APPLICABLE marker — the TDD-applicability decision was not resolved into the prompt (#4266). Halting." >&2
   exit 1
-}
+fi
 ```
 
 The prompt is a quoted heredoc, so apostrophes and any other quote characters are safe in the template and in every spliced embed; do not escape them. `read -d ''` exits non-zero at end of input by design (hence `|| true`) and keeps the body's final newline, so the delivered prompt ends in `</success_criteria>` plus one newline (the old single-quoted assignment had none); the empty-prompt check on the next line is the gate. If the terminator is not matched exactly (indented or CRLF), the heredoc runs to the end of the block and swallows the checks above, so the guard that opens the next block — outside the heredoc — halts on any prompt that does not end at `</success_criteria>`. Run the two blocks as separate commands in one shell, never concatenated into one script: a bad terminator would then swallow that guard too and the script would exit 0 without dispatching. The random `{nonce}` is what keeps embedded text from ending the heredoc early: a fixed delimiter would let an embed containing that line run its remaining lines as shell before any guard could fire. A heredoc delimiter cannot be a shell variable, so the guard checks only the `GSD_NONCE` assignment (exactly 16 lowercase hex chars); the opening and terminator lines are protected only because step 2 gives them that same value.
