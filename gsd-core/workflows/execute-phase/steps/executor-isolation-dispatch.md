@@ -142,30 +142,23 @@ Run the loop below once per runnable plan in the wave, **one plan at a time** (`
 
 First build the executor prompt. It is the **same prompt text the harness path's `Agent()` call uses** — same executor identity, same execution context, same required-reading contract — with only the harness-only framing removed: drop the `<worktree_branch_check>` build-time embed note (this backend pins the base itself via `worktree create --base` and verifies it at merge) and the `<parallel_execution>` harness block (its SUMMARY-commit semantics ride inside the embedded `execute-plan.md` worktree mode). Keep `<objective>`, `<execution_context>`, `<required_reading>`, `${AGENT_SKILLS}`, and `<success_criteria>` from the harness prompt — substituting the worktree-specific `<execution_context>` framing below. The checkpoint gate rule (#3370, in `per-plan-executor-routing.md`) applies here too: add no prompt text refusing or overriding auto-approval for the default `gate="blocking"` — only `blocking-human` always surfaces.
 
-#3637: the process-spawned child has NO host subagent machinery — nothing loads the `gsd-executor` agent definition or the execute-plan workflow unless THIS prompt carries them. A short objective-only prompt forces the child to reconstruct its role from the repository (skill discovery, inference) and leaves it unaware of the gitignored-planning skip semantics, which is how executors ended up force-staging gitignored `SUMMARY.md` files to satisfy an unconditional commit criterion. Build-time embeds below are therefore MANDATORY, and the resolution check after the assignment fails closed: if any embed source cannot be read, do NOT spawn a generic process and hope — halt the wave (the fail-closed check after `dispatch-isolation` handles the worktree teardown).
+#3637: the process-spawned child has NO host subagent machinery — nothing loads the `gsd-executor` agent definition or the execute-plan workflow unless THIS prompt carries them. A short objective-only prompt forces the child to reconstruct its role from the repository (skill discovery, inference) and leaves it unaware of the gitignored-planning skip semantics, which is how executors ended up force-staging gitignored `SUMMARY.md` files to satisfy an unconditional commit criterion. Build-time embeds below are therefore MANDATORY, and the empty-prompt and placeholder checks that read the prompt back fail closed: if any embed source cannot be read, do NOT spawn a generic process and hope — halt the wave (the fail-closed check after `dispatch-isolation` handles the worktree teardown).
 
-Assign the composed prompt to a shell variable so it can be passed as one argument:
+Compose the prompt in a file, then read it into `EXECUTOR_PROMPT` so it can be passed as one argument. First this block creates `PROMPT_FILE=<path>`:
 
 ```bash
-# Compose the executor prompt for THIS plan. QUOTED-heredoc assignment (#5531):
-# the delimiter is quoted, so the shell expands and parses nothing in the body.
-# Every substituted or inlined text (the ${AGENT_SKILLS} value, the role
-# definition, the execute-plan/summary/checkpoints files) therefore reaches the
+# Compose the executor prompt for THIS plan (#5531). The prompt text below the
+# block is written to PROMPT_FILE with your file-writing tool, never through
+# the shell, so every substituted or inlined text (the ${AGENT_SKILLS} value,
+# the role definition, the execute-plan/summary/checkpoints files) reaches the
 # prompt byte-for-byte whatever quote characters it holds — apostrophes in a
-# persona must NEVER be escaped or stripped. Keep the opening line and the
-# terminator at column 0, exactly as written. The delimiter carries a per-run
-# random {nonce}, so no embedded text can contain a line equal to it and end
-# the heredoc early (which would run the rest of the embed as shell).
+# persona must NEVER be escaped or stripped.
 #
 # ORCHESTRATOR BUILD-TIME EMBEDS (do these BEFORE the spawn, in order):
 #   1. Inline each file listed in <execution_context> verbatim, in order.
 #      An unreadable source file is a halt condition (#3637 fail-closed),
 #      never a skip — a child without these texts is not a gsd-executor.
-#   2. In THIS bash block, replace EVERY {nonce} that is not in a comment or the
-#      embedded prompt text (the GSD_NONCE assignment, the opening line and the
-#      terminator line) with one fresh random {nonce} value (16 lowercase hex chars, new for
-#      every dispatch, e.g. `od -An -N8 -tx1 /dev/urandom | tr -d ' \n'`); never
-#      substitute into embedded text. Substitute this plan's {plan_number},
+#   2. Substitute this plan's {plan_number},
 #      {phase_number}, {phase_name}, {phase_dir}, {plan_file}, {plan_id}, and
 #      {plan_padded} placeholders (same values the harness path substitutes into
 #      its Agent() prompt). {plan_id} is this
@@ -195,10 +188,13 @@ if [ $_TDD_APPLICABLE_RC -ne 0 ]; then
 fi
 TDD_APPLICABLE="$_TDD_APPLICABLE_RAW"
 
-# Nonce guard (#5531): the nonce is exactly 16 lowercase hex chars; an empty, short, non-hex or unsubstituted value halts.
-GSD_NONCE='{nonce}'
-[[ $GSD_NONCE =~ ^[0-9a-f]{16}$ ]] || { echo "FATAL: the executor heredoc nonce is not 16 lowercase hex chars (not substituted?). Halting." >&2; exit 1; }
-IFS= read -r -d '' EXECUTOR_PROMPT <<'GSD_EXECUTOR_PROMPT_EOF_{nonce}' || true
+PROMPT_FILE=$(mktemp "${TMPDIR:-/tmp}/gsd-executor-prompt-XXXXXX") || { echo "FATAL: could not create executor prompt file for plan {plan_number} (TMPDIR unwritable?). Halting." >&2; exit 1; } # XXXXXX path-final on BSD/macOS (#1520)
+echo "PROMPT_FILE=$PROMPT_FILE"
+```
+
+Write the template below to the `PROMPT_FILE` path block 1 printed, with your file-writing tool and never through the shell, every build-time embed and placeholder substituted:
+
+```text
 <objective>
 Execute plan {plan_number} of phase {phase_number}-{phase_name}.
 [gsd:dispatch phase="{phase_number}" plan="{plan_id}"]
@@ -266,7 +262,13 @@ ${AGENT_SKILLS}
       .planning paths is forbidden. An intentional skip is a success path.
 - [ ] No modifications to shared orchestrator artifacts (the orchestrator handles all post-wave shared-file writes)
 </success_criteria>
-GSD_EXECUTOR_PROMPT_EOF_{nonce}
+```
+
+Then read it back and check it:
+
+```bash
+EXECUTOR_PROMPT=$(cat -- "$PROMPT_FILE") || { echo "FATAL: executor prompt file for plan {plan_number} missing or unreadable. Halting." >&2; exit 1; }
+rm -f -- "$PROMPT_FILE"
 [ -n "$EXECUTOR_PROMPT" ] || { echo "FATAL: executor prompt is empty for plan {plan_number}." >&2; exit 1; }
 # #3637 fail-closed verification. Two classes of check:
 #   (a) template completeness — the prompt must carry the required-reading
@@ -303,17 +305,11 @@ if printf '%s' "$EXECUTOR_PROMPT" | grep -q '\${TDD_APPLICABLE'; then
 fi
 ```
 
-The prompt is a quoted heredoc, so apostrophes and any other quote characters are safe in the template and in every spliced embed; do not escape them. `read -d ''` exits non-zero at end of input by design (hence `|| true`) and keeps the body's final newline, so the delivered prompt ends in `</success_criteria>` plus one newline (the old single-quoted assignment had none); the empty-prompt check on the next line is the gate. If the terminator is not matched exactly (indented or CRLF), the heredoc runs to the end of the block and swallows the checks above, so the guard that opens the next block — outside the heredoc — halts on any prompt that does not end at `</success_criteria>`. Run the two blocks as separate commands in one shell, never concatenated into one script: a bad terminator would then swallow that guard too and the script would exit 0 without dispatching. The random `{nonce}` is what keeps embedded text from ending the heredoc early: a fixed delimiter would let an embed containing that line run its remaining lines as shell before any guard could fire. A heredoc delimiter cannot be a shell variable, so the guard checks only the `GSD_NONCE` assignment (exactly 16 lowercase hex chars); the opening and terminator lines are protected only because step 2 gives them that same value.
+The prompt reaches the shell only as file contents read by `cat`, so apostrophes, `$(...)`, backticks and quotes in the template or in any spliced embed are never parsed or run; do not escape them. Run the blocks as separate commands in one shell (`PROMPT_FILE` carries across them).
 
 Then create the worktree and resolve the spawn:
 
 ```bash
-# Unterminated-heredoc guard (#5531): the template ends at </success_criteria>.
-case "$EXECUTOR_PROMPT" in
-  *'</success_criteria>'|*'</success_criteria>'$'\n') ;;
-  *) echo "FATAL: executor prompt for plan {plan_number} does not end at </success_criteria> (terminator not matched: indented, CRLF or nonce mismatch; or prompt not carried over) — the verification above did not run. Halting." >&2; exit 1 ;;
-esac
-
 # 1. Create the worktree. Bounded, manifest-recorded, fail-closed, and
 #    root-confined by the verb itself — never hand-roll `git worktree add`.
 AGENT_ID="agent-p{plan_number}-$(date -u +%s)"
