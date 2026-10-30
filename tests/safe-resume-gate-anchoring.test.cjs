@@ -119,14 +119,8 @@ describe('#4003 / #5164 — safe_resume_gate plan-commit lookups ask the resolve
   });
 });
 
-const NESTED_TEST_PATHS = [
-  'crates/core/tests/scan_test.rs', 'crates/core/tests/sub/x.rs',
-  'src/__tests__/util.js', 'src/__tests__/sub/y.js', 'pkg/api/test_x.py',
-];
-const NESTED_NON_TEST_PATHS = [
-  'crates/core/src/scan.rs', 'src/test_utils/factory.py', 'test_utils/foo.py',
-  'mytests/a.js', 'src/contests/b.js', 'src/__tests__x/a.js',
-];
+const { isTestFilePath } = require('../gsd-core/bin/lib/tdd-test-files.cjs');
+const { SHARED_TEST_PATHS, SHARED_NON_TEST_PATHS } = require('./helpers/tdd-test-paths.cjs');
 
 // ─── #4379: the RED pathspec is language-agnostic, and matches at root ──────
 //
@@ -160,9 +154,9 @@ describe('#4379 — the TDD RED pathspec is language-agnostic', () => {
       'tests/c.py', '__tests__/d.js',           // directory conventions
       'test_mod.py', 'mod_test.py',             // Python, outside tests/
       'lib_spec.rb', 'x_test.exs',              // Ruby, Elixir
-      ...NESTED_TEST_PATHS,                     // nested
+      ...SHARED_TEST_PATHS,                     // every router-positive path
       'src/impl.go', 'src/lib.rs',              // NOT tests — must never match
-      ...NESTED_NON_TEST_PATHS,                 // NOT tests, nested + root
+      ...SHARED_NON_TEST_PATHS,                 // NOT tests, nested + root
     ];
     for (const rel of files) {
       const abs = path.join(dir, rel);
@@ -201,16 +195,15 @@ describe('#4379 — the TDD RED pathspec is language-agnostic', () => {
     assert.ok(hits.has('foo_test.go'), 'a root-level _test.go must match');
   });
 
-  test('nested tests/, __tests__/ and test_*.py match at any depth (#5181)', (t) => {
+  test('router and shipped pathspec agree on every shared path, nested included (#5181)', (t) => {
     // Default-mode pathspecs match the whole path from the repo root: `tests/` is a root-anchored
     // prefix and `test_*.py` only matches paths starting `test_`, so nested files need `:(glob)**/`.
     const dir = seedRepo(t);
     const hits = matched(dir, shippedRedPathspec());
-    for (const rel of NESTED_TEST_PATHS) {
-      assert.ok(hits.has(rel), `${rel} must match`);
-    }
-    for (const rel of NESTED_NON_TEST_PATHS) {
-      assert.ok(!hits.has(rel), `${rel} must NOT match`);
+    for (const rel of [...SHARED_TEST_PATHS, ...SHARED_NON_TEST_PATHS]) {
+      const expected = SHARED_TEST_PATHS.includes(rel);
+      assert.equal(hits.has(rel), expected, `${rel} must agree: git`);
+      assert.equal(isTestFilePath(rel), expected, `${rel} must agree: router`);
     }
   });
 
