@@ -14,6 +14,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const fc = require('./helpers/fast-check-setup.cjs');
 const { span, runBash } = require('./helpers/doc-bash-span.cjs');
+const { have } = require('./helpers/bash-probe.cjs');
 const { createTempDir, cleanup } = require('./helpers.cjs');
 
 const FIX = 'gsd-core/workflows/code-review-fix.md';
@@ -36,7 +37,10 @@ function kept(names) {
 
 const oracle = (names) => [...names].filter((n) => BACKUP.test(n)).sort();
 
-describe('#5506 backup name grammar', { skip: process.platform === 'win32' }, () => {
+// The span is bash: skip where there is none.
+const NO_BASH = !have('bash') && 'bash is not available';
+
+describe('#5506 backup name grammar', { skip: NO_BASH }, () => {
   test('the cleanup span keeps exactly the .iter<digits>.md names', () => {
     // Digit strings of length 0, 1, 2: below, at and above the "at least one digit" limit.
     const digits = fc.array(fc.constantFrom('0', '1', '2', '7', '9'), { maxLength: 2 })
