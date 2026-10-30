@@ -67,28 +67,24 @@ function readRepoFile(rel) {
   return fs.readFileSync(abs, 'utf8');
 }
 
-module.exports = { parseApprovalLabels, checkApprovedIssueParity };
+const readDocs = () => Object.fromEntries(DOCS.map((p) => [p, readRepoFile(p)]));
 
-if (require.main === module) {
-  describe('registry submission docs: approved issue first (#5299)', () => {
-    const labels = parseApprovalLabels(readRepoFile(WORKFLOW));
+describe('registry submission docs: approved issue first (#5299)', () => {
+  const labels = parseApprovalLabels(readRepoFile(WORKFLOW));
 
-    test('the workflow yields the three accepted labels', () => {
-      assert.deepEqual(labels, ['approved-feature', 'approved-enhancement', 'confirmed-bug']);
-    });
-
-    test('the four docs agree on the gate, the label set, Closes and the title shape', () => {
-      const files = {};
-      for (const p of DOCS) files[p] = readRepoFile(p);
-      assert.deepEqual(checkApprovedIssueParity(files, labels), []);
-    });
-
-    test('negative control: a README without the gate is reported', () => {
-      const files = {};
-      for (const p of DOCS) files[p] = readRepoFile(p);
-      files[README] = 'There is no separate account, package publish, or approval queue.';
-      const failures = checkApprovedIssueParity(files, labels);
-      assert.ok(failures.includes(`${README}: no approved-issue-first requirement`));
-    });
+  test('the workflow yields the three accepted labels', () => {
+    assert.deepEqual(labels, ['approved-feature', 'approved-enhancement', 'confirmed-bug']);
   });
-}
+
+  test('the four docs agree on the gate, the label set, Closes and the title shape', () => {
+    const files = readDocs();
+    assert.deepEqual(checkApprovedIssueParity(files, labels), []);
+  });
+
+  test('negative control: a README without the gate is reported', () => {
+    const files = readDocs();
+    files[README] = 'There is no separate account, package publish, or approval queue.';
+    const failures = checkApprovedIssueParity(files, labels);
+    assert.ok(failures.includes(`${README}: no approved-issue-first requirement`));
+  });
+});
