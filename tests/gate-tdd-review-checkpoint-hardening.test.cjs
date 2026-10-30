@@ -645,43 +645,47 @@ describe('#5354 tdd review checkpoint seal', () => {
   });
 
   // Execute ship.md's seal step against a stubbed `gsd_run`, so the branches (not their text) are what is tested.
-  function runSealStep({ commitDocs = 'true', recordRc = 0, picked = '1', seal, ws = '', prepare }) {
+  function runSealStep({ recordRc = 0, picked = '1', seal, ws = '', prepare, commitOut, commitRc = 0, subjects = [], real = false }) {
     const ship = fs.readFileSync(path.join(__dirname, '..', 'gsd-core', 'workflows', 'ship.md'), 'utf8').replace(/\r\n/g, '\n');
     const from = ship.indexOf('```bash\n', ship.indexOf('<step name="seal_tdd_review">')) + 8;
     const script = ship.slice(from, ship.indexOf('\n```', from));
-    const { dir } = fixture([], { summary: false });
+    const { dir } = fixture(subjects, { summary: false });
+    const before = sealGit(dir, 'log', '-1', '--format=%s');
     if (seal !== undefined) w(dir, SEAL, seal);
     if (prepare) prepare(dir);
     const calls = path.join(path.dirname(dir), `${path.basename(dir)}-calls`);
     dirs.push(calls);
-    const stub = 'gsd_run() { echo "$*" >> "$CALLS"; case "$*" in "query config-get commit_docs"*) echo "$CD";; *--record*) echo "$PICK"; return "$REC";; *) echo "$PICK";; esac; }\n';
+    // `query commit` stands in for cmdCommit: it commits the seal itself unless COMMIT_OUT is set (then it prints that and commits nothing).
+    const stub = real
+      ? 'gsd_run() { echo "$*" >> "$CALLS"; node "$GSD_TOOLS_BIN" "$@"; }\n'
+      : 'gsd_run() { echo "$*" >> "$CALLS"; case "$*" in "query commit"*) if [ -n "${COMMIT_OUT+x}" ]; then echo "$COMMIT_OUT"; else git add "$SEAL" && git commit -q -m "$3" -- "$SEAL" && git rev-parse HEAD || return 1; fi; return "${COMMIT_RC:-0}";; *--record*) echo "$PICK"; return "$REC";; *) echo "$PICK";; esac; }\n';
     const r = runHook('-c', [stub + script], {
       interpreter: 'bash', cwd: dir, timeoutMs: GIT_TIMEOUT_MS,
-      env: { ...process.env, CALLS: calls, GSD_WS: ws, CD: commitDocs, REC: String(recordRc), PICK: picked, PHASE_DIR: PHASE, PHASE_NUMBER: '1', padded_phase: '01', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' },
+      env: { ...process.env, ...(commitOut === undefined ? {} : { COMMIT_OUT: commitOut }), COMMIT_RC: String(commitRc), GSD_TOOLS_BIN: path.join(__dirname, '..', 'gsd-core', 'bin', 'gsd-tools.cjs'), CALLS: calls, GSD_WS: ws, REC: String(recordRc), PICK: picked, PHASE_DIR: PHASE, PHASE_NUMBER: '1', padded_phase: '01', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' },
     });
-    return { r, dir, subject: sealGit(dir, 'log', '-1', '--format=%s'), calls: fs.readFileSync(calls, 'utf8').split(/\r?\n/).filter(Boolean) };
+    return { r, dir, before, subject: sealGit(dir, 'log', '-1', '--format=%s'), calls: fs.readFileSync(calls, 'utf8').split(/\r?\n/).filter(Boolean) };
   }
 
   // Each seal-step branch, with the text of ship.md's own message for it (defined once, taken from the step).
   const SEAL_BRANCH = {
     recordFailed: { marker: 'could not record the seal', exitCode: 0 },
     noSeal: { marker: 'TDD review failed or was not evaluable', exitCode: 0 },
-    gitignored: { marker: 'is gitignored', exitCode: 0 },
+    gitignored: { marker: 'the squash will not carry it', exitCode: 0 },
     commitFailed: { marker: 'TDD seal commit failed', exitCode: 1 },
-    commitDocsFalse: { marker: 'commit_docs is false', exitCode: 0 },
+    commitSkipped: { marker: 'commit_docs resolves false', exitCode: 0 },
   };
   // The step took exactly this branch: its exit status, its message and no other branch's, and no seal commit.
-  function expectBranchWarning({ r, subject }, branch) {
+  function expectBranchWarning({ r, subject, before }, branch) {
     assert.equal(r.exitCode, SEAL_BRANCH[branch].exitCode, r.stderr);
     for (const [name, { marker }] of Object.entries(SEAL_BRANCH)) {
       assert.equal(r.stderr.includes(marker), name === branch, `${branch}: stderr ${name === branch ? 'has' : 'lacks'} "${marker}": ${r.stderr}`);
     }
-    assert.equal(subject, 'docs: plans');
+    assert.equal(subject, before);
   }
-  function expectQuiet({ r, subject }) {
+  function expectQuiet({ r, subject, before }) {
     assert.equal(r.exitCode, 0, r.stderr);
     assert.equal(r.stderr.trim(), '');
-    assert.equal(subject, 'docs: plans');
+    assert.equal(subject, before);
   }
 
   test('ship.md seal step commits a dirty seal after a successful record', posix, () => {
@@ -694,17 +698,47 @@ describe('#5354 tdd review checkpoint seal', () => {
     expectBranchWarning(runSealStep({ recordRc: 3, seal: '<<<<<<< conflict' }), 'recordFailed');
   });
 
-  test('ship.md seal step with commit_docs false warns only when the phase has tdd plans', posix, () => {
-    expectBranchWarning(runSealStep({ commitDocs: 'false', picked: '2' }), 'commitDocsFalse');
-    expectQuiet(runSealStep({ commitDocs: 'false', picked: '0' }));
+  test('ship.md seal step leaves the seal uncommitted and warns when the commit owner skips it (commit_docs resolves false)', posix, () => {
+    const result = runSealStep({ seal: sealOf(sha('a'), sha('b')), commitOut: 'skipped' });
+    expectBranchWarning(result, 'commitSkipped');
+    assert.equal(fs.existsSync(path.join(result.dir, SEAL)), true);
+    assert.notEqual(sealGit(result.dir, 'status', '--porcelain', '--', SEAL), '');
+  });
+
+  test('ship.md seal step commits through the commit owner, not raw git', posix, () => {
+    const { calls } = runSealStep({ seal: sealOf(sha('a'), sha('b')) });
+    assert.ok(calls.some((c) => c.startsWith('query commit docs(01): seal TDD review evidence --files ') && c.includes('TDD-REVIEW-SEAL.json')), calls.join('\n'));
+  });
+
+  // The real commit owner: phase_commit_docs.<phase> beats the project-level commit_docs (#3587).
+  function realSeal(config) {
+    return runSealStep({
+      real: true,
+      subjects: ['test(01-01): red', 'feat(01-01): green'],
+      prepare: (dir) => w(dir, '.planning/config.json', JSON.stringify(config)),
+    });
+  }
+
+  test('ship.md seal step commits the seal when the phase override is true and the project value false', posix, () => {
+    const { r, dir, subject } = realSeal({ commit_docs: false, phase_commit_docs: { '01': true } });
+    assert.equal(r.exitCode, 0, r.stderr);
+    assert.equal(subject, 'docs(01): seal TDD review evidence');
+    assert.equal(sealGit(dir, 'status', '--porcelain', '--', SEAL), '');
+  });
+
+  test('ship.md seal step leaves the seal uncommitted when the phase override is false and the project value true', posix, () => {
+    const result = realSeal({ commit_docs: true, phase_commit_docs: { '01': false } });
+    expectBranchWarning(result, 'commitSkipped');
+    assert.equal(fs.existsSync(path.join(result.dir, SEAL)), true);
+    assert.notEqual(sealGit(result.dir, 'status', '--porcelain', '--', SEAL), '');
   });
 
   test('ship.md seal step resolves the phase in the workstream ship resolved it in (#5354)', posix, () => {
-    for (const commitDocs of ['true', 'false']) {
-      const { calls } = runSealStep({ commitDocs, ws: '--ws ws1', seal: sealOf(sha('a'), sha('b')) });
-      assert.equal(calls.length, 2, commitDocs);
-      for (const call of calls) assert.match(call, / --ws=ws1(?: |$)/, `${commitDocs}: ${call}`);
-    }
+    const { calls } = runSealStep({ ws: '--ws ws1', seal: sealOf(sha('a'), sha('b')) });
+    assert.equal(calls.length, 2);
+    assert.match(calls[0], /^check .* --record /);
+    assert.match(calls[1], /^query commit /);
+    for (const call of calls) assert.match(call, / --ws=ws1(?: |$)/, call);
   });
 
   test('ship.md seal step warns when no seal file exists, and only for a phase with tdd plans', posix, () => {
@@ -723,6 +757,10 @@ describe('#5354 tdd review checkpoint seal', () => {
     const { dir } = result;
     assert.equal(fs.existsSync(path.join(dir, SEAL)), true);
     assert.equal(sealGit(dir, 'status', '--porcelain', '--', SEAL), '');
+  });
+
+  test('ship.md seal step stops with exit 1 when the commit owner reports failed', posix, () => {
+    expectBranchWarning(runSealStep({ seal: sealOf(sha('a'), sha('b')), commitOut: 'failed' }), 'commitFailed');
   });
 
   test('ship.md seal step stops with exit 1 when the seal commit fails', posix, () => {
