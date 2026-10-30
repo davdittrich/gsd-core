@@ -5,7 +5,7 @@
  *
  * Module: gsd-core/bin/lib/tdd-test-files.cjs (built from src/tdd-test-files.cts)
  * `stripGlobDepthPrefix` is module-private, so it is driven through the public
- * `isTestFilePath` and `TEST_FILE_PATHSPECS`.
+ * `isTestFilePath`, with samples from the shared SAMPLES_BY_SPEC.
  *
  * Properties tested:
  *   (a) separator invariance: `/` and `\` spell the same path
@@ -18,21 +18,14 @@
 const { describe, test } = require('node:test');
 const assert = require('node:assert/strict');
 const fc = require('./helpers/fast-check-setup.cjs');
-const { TEST_FILE_PATHSPECS, isTestFilePath } = require('../gsd-core/bin/lib/tdd-test-files.cjs');
+const { isTestFilePath } = require('../gsd-core/bin/lib/tdd-test-files.cjs');
+const { SAMPLES_BY_SPEC } = require('./helpers/tdd-test-paths.cjs');
 
-const GLOB_DEPTH_PREFIX = ':(glob)**/';
-const token = fc.stringMatching(/^[a-z0-9]{1,6}$/);
 // A directory segment that is not a test directory name (`test`, `tests`, `__tests__`).
 const filler = fc.stringMatching(/^[a-z]{1,8}$/).filter((s) => s !== 'test' && s !== 'tests');
 const fillers = fc.array(filler, { maxLength: 4 });
-
-/** A concrete path matching `spec`, with each `*` replaced by `name`. */
-function instance(spec, name) {
-  const bare = spec.startsWith(GLOB_DEPTH_PREFIX) ? spec.slice(GLOB_DEPTH_PREFIX.length) : spec;
-  return bare.endsWith('/**')
-    ? `${bare.slice(0, -3)}/${name}.js`
-    : bare.split('*').join(name);
-}
+// Every shared sample of every pathspec, flattened; the owner is tests/helpers/tdd-test-paths.cjs.
+const samples = Object.entries(SAMPLES_BY_SPEC).flatMap(([spec, paths]) => paths.map((path) => [spec, path]));
 
 describe('#5181 tdd-test-files matcher properties', () => {
   test('(a) separator invariance', () => {
@@ -43,8 +36,8 @@ describe('#5181 tdd-test-files matcher properties', () => {
   });
 
   test('(b) depth invariance: every pathspec instance is a test file at any depth', () => {
-    fc.assert(fc.property(fc.constantFrom(...TEST_FILE_PATHSPECS), token, fillers, (spec, name, parents) => {
-      const p = [...parents, instance(spec, name)].join('/');
+    fc.assert(fc.property(fc.constantFrom(...samples), fillers, ([spec, sample], parents) => {
+      const p = [...parents, sample].join('/');
       assert.equal(isTestFilePath(p), true, `${p} (from ${spec}) must be a test file`);
     }));
   });
