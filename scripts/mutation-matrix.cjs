@@ -657,8 +657,8 @@ const COVERED = {
   'state-contract': {
     cjs: 'gsd-core/bin/lib/state-contract.cjs',
     excludeTests: ['state-contract.test.cjs'],
-    // CI run 40672548395 (job 122762928837, PR #5550): measured 70.50%. Floor =
-    // floor(70.50) - 1 = 69.
+    // #5764: CI run 40800623930, job 123207881000, `Stryker (state-contract)`: measured 70.43%
+    // once the checklist fallback ran through the phase-entry grammar; floor(70.43)-1.
     minScore: 69,
   },
   // #4998 review (trek-e 5563202317 Nit 6, 5608265301 Minor 4): the STATE.md and

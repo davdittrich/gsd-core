@@ -224,8 +224,9 @@ const RATCHET_BASELINE = {
                                    // floor(75.26)-1. Supersedes the #3007 59.62% measurement
                                    // (248 killed / 168 survived) — see scripts/mutation-matrix.cjs
                                    // for the RuntimeError classification-change diagnosis.
-  'state-contract':          69,  // CI run 40672548395, job 122762928837 (PR #5550): measured 70.50%;
-                                   // floor(70.50)-1. Supersedes #3227's 66.25% (run 32769289750).
+  'state-contract':          69,  // #5764: CI run 40800623930, job 123207881000,
+                                   // `Stryker (state-contract)`: measured 70.43%; floor(70.43)-1.
+                                   // (#3227 set 65 from a measured 66.25%.)
                                    // Below TARGET_MUTATION_SCORE (80) — ratchet candidate like
                                    // planning-inspect / model-catalog above; raise as tests improve.
   'state-document':          50,  // #4998: CI 50.47% (run 39742269013); range minimum
