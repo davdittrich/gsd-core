@@ -82,6 +82,20 @@ describe('#5275 RED must precede GREEN by ancestry', () => {
     });
   });
 
+  test('fix before test is a violation too (#5274 x #5275)', () => {
+    withProject(ONE, (d) => { commit(d, 'fix(01-01): green first'); commit(d, 'test(01-01): red later'); }, (out) => {
+      assert.equal(out.violations, 1);
+      assert.equal(out.block, true);
+      assert.equal(out.rows[0].status, 'FAIL');
+      assert.equal(out.rows[0].reason, 'green_before_red');
+      assert.deepEqual(out.rows[0].missing, []);
+      assert.ok(
+        out.table.includes('Plan 01-01 GREEN precedes RED: no feat(...) or fix(...) commit descends from a test(...) commit.'),
+        out.table,
+      );
+    });
+  });
+
   test('a missing RED or GREEN keeps its existing reason, distinct from the order violation', () => {
     withProject(ONE, (d) => { commit(d, 'test(01-01): red only'); }, (out) => {
       assert.equal(out.rows[0].reason, undefined, 'a missing commit is told by missing, not by a reason');

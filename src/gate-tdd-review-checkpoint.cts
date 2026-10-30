@@ -248,7 +248,7 @@ export function evaluateTddReviewCheckpoint(input: { projectDir: string; args: r
     const ownOk = inOrder(ownGreens);
 
     // #4867: a RED-only probe plan is satisfied by the GREEN of a plan that (transitively) declares
-    // `depends_on` it. Only a real `feat(...)`/`fix(...)` commit under such a plan counts, and it must follow the
+    // `depends_on` it. Only a real `feat(...)` or `fix(...)` commit under such a plan counts, and it must follow the
     // RED too (#5275); the plan's own RED is still required, and a plan nothing depends on is scored
     // on its own commits alone.
     const dependentGreens = ownOk

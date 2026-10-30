@@ -165,7 +165,8 @@ const CASES = [
     },
   },
   {
-    id: 'U5k',
+    id: 'U5i',
+    // new #5274 behavior: not capturable on origin/next, unlike the cases above.
     title: 'RED + fix GREEN (plan corrects a defect) -> Pass row, no violations (#5274)',
     git: true,
     setup(dir, h) {
@@ -193,7 +194,8 @@ const CASES = [
     },
   },
   {
-    id: 'U5l',
+    id: 'U5j',
+    // new #5274 behavior: not capturable on origin/next, unlike the cases above.
     title: 'fix GREEN alone -> FAIL row missing RED (#5274)',
     git: true,
     setup(dir, h) {
@@ -384,15 +386,18 @@ describe('U5 evaluateTddReviewCheckpoint', () => {
   }
 });
 
-// #5274: the gate and the tdd.md executor lookup must agree on which commit types are GREEN.
+// allow-test-rule: docs-parity #5274 — the gate and the tdd.md executor lookup must agree on which commit types are GREEN
 describe('U5 GREEN commit types: gate agrees with the tdd.md lookup (#5274)', () => {
-  const md = fs.readFileSync(path.join(__dirname, '..', 'gsd-core', 'references', 'tdd.md'), 'utf8');
-  const line = splitLines(md).find((l) => /--grep="\^\(feat\|fix\)/.test(l));
-  assert.ok(line, 'GREEN grep line present in tdd.md');
-  const re = new RegExp(/--grep="([^"]{1,300})"/.exec(line)[1].replace('${PHASE_N}', '1').replace('${PLAN_N}', '1'));
-  for (const type of ['feat', 'fix', 'refactor', 'chore', 'docs']) {
+  let re;
+  require('node:test').before(() => {
+    const md = fs.readFileSync(path.join(__dirname, '..', 'gsd-core', 'references', 'tdd.md'), 'utf8');
+    const line = splitLines(md).find((l) => /--grep="\^\(/.test(l));
+    assert.ok(line, 'GREEN grep line present in tdd.md');
+    re = new RegExp(/--grep="([^"]{1,300})"/.exec(line)[1].replace('${PHASE_N}', '1').replace('${PLAN_N}', '1'));
+  });
+  for (const type of ['feat', 'fix', 'refactor', 'chore', 'docs', 'perf', 'build', 'ci', 'style', 'revert']) {
     test(`test + ${type}`, () => {
-      const { result } = run({
+      const { result, writes } = run({
         git: true,
         setup(dir, hh) {
           hh.w(dir, '.planning/phases/01-x/01-01-PLAN.md', ['---', 'phase: 1', 'plan: 1', 'type: tdd', '---', '# Plan', ''].join('\n'));
@@ -404,6 +409,7 @@ describe('U5 GREEN commit types: gate agrees with the tdd.md lookup (#5274)', ()
         },
         args() { return ['1']; },
       });
+      assert.deepStrictEqual(writes, [], 'a gate module must not write to stdout/stderr');
       const row = result.payload.rows[0];
       const docGreen = re.test(`${type}(01-01): x`);
       assert.equal(row.green, docGreen, `${type}: gate and tdd.md lookup disagree`);

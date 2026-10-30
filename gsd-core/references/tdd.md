@@ -110,7 +110,7 @@ After completion, create SUMMARY.md with:
 1. Write minimal code to make test pass
 2. No cleverness, no optimization - just make it work
 3. Run test - it MUST pass
-4. Commit: `feat({phase}-{plan}): implement [feature]` for new behaviour, or `fix({phase}-{plan}): correct [defect]` when the plan corrects a defect
+4. Commit: `feat({phase}-{plan}): implement [feature]` for new behavior, or `fix({phase}-{plan}): correct [defect]` when the plan corrects a defect
 
 **REFACTOR (if needed):**
 1. Clean up implementation if obvious improvements exist
@@ -294,7 +294,7 @@ When `workflow.tdd_mode` is enabled in config, the RED/GREEN/REFACTOR gate seque
 
 1. **Unexpected GREEN in RED phase:** If the test passes before any implementation code is written, STOP. The feature may already exist or the test is wrong. Investigate before proceeding.
 2. **INVALID_RED in RED phase (#3770):** A nonzero exit is not RED by itself. Follow the format-based evidence contract in RED step 4, including reporter reruns and report freshness. An `INVALID_RED` verdict or failed semantic assessment halts GREEN. Unsupported, incomplete, ambiguous, or contradictory evidence cannot authorize implementation.
-3. **Missing RED commit:** If no `test(...)` commit precedes the `feat(...)`/`fix(...)` commit, the TDD discipline was violated. Flag in SUMMARY.md.
+3. **Missing RED commit:** If no `test(...)` commit precedes the `feat(...)` or `fix(...)` commit, the TDD discipline was violated. Flag in SUMMARY.md.
 4. **REFACTOR breaks tests:** Undo the refactor immediately. Commit was premature — refactor in smaller steps.
 
 ### Executor Gate Validation
