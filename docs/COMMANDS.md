@@ -2383,26 +2383,28 @@ node gsd-tools.cjs state complete-phase --phase 3
 
 ---
 
-### `lane-evidence-clear`
+### `lane-evidence-persist`, `lane-evidence-read`, `lane-evidence-clear`
 
-Remove the external-reviewer lane evidence that `/gsd-code-review` persists beside `REVIEW.md`
-(`<review>-lane-evidence.md`) together with the scratch lane directory it names. `code-review` calls it at
-`check_empty_scope` (clearing a previous run's stale evidence) and from `commit_review` unless an `--auto` run
-keeps the evidence for the fixer loop; `code-review-fix` calls it at every exit after `REVIEW_PATH` is computed
-(its phase-validation exits precede that, and a nonexistent phase has no evidence to remove). The removal guard lives in this verb (#5019); the fixer loop's read in `code-review-fix.md` repeats the same 6-character check in bash, held in step by a test.
+Persist, re-read and remove the external-reviewer lane evidence that `/gsd-code-review` carries into
+`code-review-fix --auto` re-reviews (#5019). The state is a file under `$TMPDIR` (`/tmp` when unset, `os.tmpdir()` on Windows) keyed to the
+review file, `<suffix>\n<auto|once>\n<block>`; nothing is written into the project or its git metadata.
+`code-review` persists at dispatch (an empty block persists nothing and removes the lane directory), and clears at
+`check_empty_scope`, in `commit_review` (`--keep-auto` keeps an `--auto` state for the fixer loop) and when the
+reviewer agent fails; `code-review-fix` reads before each re-review and clears at every exit after `REVIEW_PATH`
+is computed (its phase-validation exits precede that, and a nonexistent phase has no evidence to remove).
 
-**Prerequisites:** none — it reads no project state and needs no resolvable project root
-**Produces:** nothing on stdout; exit 0 whether or not there was anything to remove, or a usage error and non-zero exit when `<review-path>` is empty
+**Prerequisites:** none — they read no project state and need no resolvable project root
+**Produces:** `lane-evidence-read` prints the block and a blank line, or nothing; the others print nothing. All exit 0 whether or not there was anything to do; an empty `<review-path>` or an invalid `<suffix>`/mode is a usage error with non-zero exit
 
 ```bash
-gsd_run lane-evidence-clear "$REVIEW_PATH"
+printf '%s' "$EXTERNAL_EVIDENCE_BLOCK" | gsd_run lane-evidence-persist "$REVIEW_PATH" "$SUFFIX" auto
+gsd_run lane-evidence-read "$REVIEW_PATH"
+gsd_run lane-evidence-clear "$REVIEW_PATH" --keep-auto
 ```
 
-Line 1 of the evidence file is data, not a path: only a 6-character alphanumeric value names a
-`$TMPDIR/gsd-review-lanes-<suffix>` (`/tmp` when unset) directory, and a symlinked directory is skipped; a symlinked
-evidence file is never read through but is itself unlinked.
-Only line 1 is validated: the fixer loop injects the rest of a fresh file verbatim into the re-review
-prompt, refreshes the file's mtime on each use, and ignores a file idle for 6 hours (with a warning).
+The suffix is data, not a path: only a 6-character alphanumeric value names a `$TMPDIR/gsd-review-lanes-<suffix>`
+directory. A symlinked or foreign-owned state or lane directory is never followed, and a malformed state, or one idle
+for 6 hours, is rejected (read prints a warning). Each read refreshes the state's mtime.
 
 ---
 

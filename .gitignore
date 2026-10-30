@@ -416,6 +416,3 @@ qa-report.json
 
 # Scratch PR body files (gh pr create --body-file); never committed
 .pr-body-*.md
-
-# External-reviewer lane evidence persisted beside REVIEW.md (#5019); never committed
-*-REVIEW-lane-evidence.md

@@ -1,15 +1,13 @@
 ---
 id: 5019
-title: Lane Evidence Clear
+title: Lane Evidence Persist, Read and Clear
 group: v1.7.0 Features
 ---
 
-**Command:** `gsd_run lane-evidence-clear <review-path>`
+**Command:** `gsd_run lane-evidence-persist <review-path> <suffix> <auto|once>` (block on stdin), `gsd_run lane-evidence-read <review-path>`, `gsd_run lane-evidence-clear <review-path> [--keep-auto]`
 
-**Purpose:** `/gsd-code-review` persists the external-reviewer evidence beside `REVIEW.md` (`<review>-lane-evidence.md`) so the `code-review-fix` workflow with `--auto` re-reviews can see it. Both that file and the scratch lane directory it names must go when the evidence is no longer wanted; six inline bash copies of that removal had drifted.
+**Purpose:** `/gsd-code-review` carries the external-reviewer evidence into the `code-review-fix` workflow's `--auto` re-reviews. The evidence is kept under the temp directory, keyed to the review file, so nothing is written into the project or its git metadata; the three verbs are its single owner.
 
-**Behavior:** one verb owns the removal. `code-review` calls it at `check_empty_scope`, in `commit_review` unless an `--auto` run keeps the evidence, and when the reviewer agent fails; `code-review-fix` calls it at every exit after `REVIEW_PATH` is computed. Line 1 of the file is data, not a path: only a 6-character alphanumeric value names a `$TMPDIR/gsd-review-lanes-<suffix>` (`/tmp` when unset) directory, and a symlinked directory is skipped. A symlinked evidence file is never read through but is itself unlinked. The verb never throws and exits 0 when there is nothing to remove.
+**Behavior:** `code-review` persists the block at dispatch (a dispatch with no evidence persists nothing and removes its lane directory), `code-review-fix` reads it back before each re-review, and both clear it: `code-review` at `check_empty_scope`, in `commit_review` (with `--keep-auto`, which keeps an `--auto` state for the fixer loop), and when the reviewer agent fails; `code-review-fix` at every exit after `REVIEW_PATH` is computed. The state is `<suffix>\n<auto|once>\n<block>`, where only a 6-character alphanumeric suffix names a `$TMPDIR/gsd-review-lanes-<suffix>` (`/tmp` when unset, `os.tmpdir()` on Windows) directory. A symlinked, foreign-owned or malformed state, or a state idle for 6 hours, is never read; a rejected state read prints a warning. The verbs exit 0 when there is nothing to do.
 
-**Known limits:** the fixer loop's read in `code-review-fix.md` repeats the 6-character check in bash (a workflow fence cannot import it); a test holds the two in step. The loop refreshes the file's mtime on each use and ignores a file idle for 6 hours.
-
-**Reference:** [`lane-evidence-clear`](COMMANDS.md#lane-evidence-clear)
+**Reference:** [`lane-evidence-persist`, `lane-evidence-read`, `lane-evidence-clear`](COMMANDS.md#lane-evidence-persist-lane-evidence-read-lane-evidence-clear)

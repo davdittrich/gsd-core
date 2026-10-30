@@ -135,6 +135,7 @@ module.exports = {
   "tests/isolation-sentinel.test.cjs",
   "tests/issue-version-gate.test.cjs",
   "tests/kimi-upgrades.test.cjs",
+  "tests/lane-evidence.test.cjs",
   "tests/lint-docs-command-form.test.cjs",
   "tests/lint-frontmatter-scalar-broad-grep.test.cjs",
   "tests/lint-retired-runtime-name.test.cjs",

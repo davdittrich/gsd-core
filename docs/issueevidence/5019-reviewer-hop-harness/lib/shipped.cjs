@@ -28,7 +28,7 @@ function stepFence(src, name) {
   }
   fail(`step ${name} has no bash fence`);
 }
-const sliceLines = require('./lines.cjs');
+const sliceLines = require('../../../../tests/helpers/lines.cjs');
 const lines = (...a) => { try { return sliceLines(...a); } catch (e) { fail(e.message); } };
 const T = '" 2>/dev/null)';
 const tmp = `${project}/tmp`, phase = `${project}/phase`;
@@ -44,7 +44,7 @@ gsd_run() {
     printf '{"ok":true,"selection":{},"results":[{"ok":true,"slug":"cursor","reviewPath":"%s"}]}' "$f"
   else real_gsd_run "$@"; fi
 }`;
-  console.log([`cd "${project}"; export TMPDIR="${tmp}"; PHASE_DIR="${phase}"; PADDED_PHASE=01; REPO_ROOT="${project}"; REVIEW_DEPTH=standard; DIFF_BASE=deadbeef; REVIEW_FILES=(src/messages.js src/auth.js)`,
+  console.log([`cd "${project}"; export TMPDIR="${tmp}"; FIX_AUTO=true; PHASE_DIR="${phase}"; PADDED_PHASE=01; REPO_ROOT="${project}"; REVIEW_DEPTH=standard; DIFF_BASE=deadbeef; REVIEW_FILES=(src/messages.js src/auth.js)`,
     stub, 'set -- --cursor', stepFence(REVIEW, 'dispatch_reviewer_lanes'), 'printf "%s" "$EXTERNAL_EVIDENCE_BLOCK"'].join('\n'));
 } else if (verb === 'commit') {
   console.log([`cd "${project}"; gsd_run() { node "${GSD_TOOLS}" "$@"; }`,
@@ -53,12 +53,12 @@ gsd_run() {
   const loop = stepRegion(FIX, 'auto_iteration_loop');
   const call = loop.indexOf('Agent(subagent_type="gsd-code-reviewer"'); if (call < 0) fail('reviewer Agent() not found');
   const from = loop.indexOf('prompt="', call) + 8, to = loop.indexOf('")', from);
-  const parts = [`cd "${project}"; export TMPDIR="${tmp}"; REVIEW_PATH="${phase}/01-REVIEW.md"; PHASE_DIR="${phase}"; AUTO_MODE=true; AGENT_SKILLS_REVIEWER=""`,
+  const parts = [`cd "${project}"; gsd_run() { node "${GSD_TOOLS}" "$@"; }; export TMPDIR="${tmp}"; REVIEW_PATH="${phase}/01-REVIEW.md"; PHASE_DIR="${phase}"; AUTO_MODE=true; AGENT_SKILLS_REVIEWER=""`,
   ];
   parts.push(lines(FIX, 'REVIEW_DEPTH=$(REVIEW_PATH=', T));
   parts.push(lines(FIX, 'REVIEW_FILES_ARRAY=()', T));
   parts.push(lines(loop, 'FILES_CONFIG=""', 'fi'));
-  if (arm === 'head') parts.push(lines(loop, '# #5019: re-surface', 'fi'));
+  if (arm === 'head') parts.push(lines(loop, '# #5019: re-surface', `[ -n "$B" ] && EXTERNAL_EVIDENCE_BLOCK="$B"$'\\n\\n'`));
   parts.push(`PROMPT="${loop.slice(from, to)}"; printf '%s' "$PROMPT"`);
   console.log(parts.join('\n'));
 } else fail('usage: shipped.cjs dispatch|commit|prompt <wt> <project> [head|base]');

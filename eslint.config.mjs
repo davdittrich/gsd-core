@@ -92,7 +92,7 @@ export default tseslint.config(
       'node_modules/**',
       '**/dist/**',
       '.worktrees/**',
-      // #5019: deliberately-buggy sample code for the reviewer-hop harness; it must stay unlinted.
+      // #5019: the harness directory (recorded evidence plus its deliberately buggy fixture) stays unlinted.
       'docs/issueevidence/5019-reviewer-hop-harness/**',
       '.claude/**',
       'coverage/**',
