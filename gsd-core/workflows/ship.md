@@ -208,7 +208,7 @@ Verify the work is ready to ship:
 Seal TDD review evidence before push (squash merge keeps only the branch tip). No-op without `type: tdd` plans; with `commit_docs` false it only warns:
 
 ```bash
-if [ "$(gsd_run query config-get commit_docs --raw 2>/dev/null || echo "true")" != false ]; then
+if [ "$(gsd_run query config-get commit_docs ${GSD_WS:+--ws=${GSD_WS##* }} --raw 2>/dev/null || echo "true")" != false ]; then
   SEAL="${PHASE_DIR}/TDD-REVIEW-SEAL.json"
   OUT=$(gsd_run check tdd.review-checkpoint "${PHASE_NUMBER}" ${GSD_WS:+--ws=${GSD_WS##* }} --record --pick tddPlans) && REC=0 || REC=$?
   if [ "$REC" != 0 ]; then
@@ -218,7 +218,7 @@ if [ "$(gsd_run query config-get commit_docs --raw 2>/dev/null || echo "true")" 
   elif git check-ignore -q "$SEAL"; then
     echo "WARNING: $SEAL is gitignored; the squash will not carry it." >&2
   elif [ -n "$(git status --porcelain -- "$SEAL")" ]; then
-    git add "$SEAL"; git commit -m "docs(${PHASE_NUMBER}): seal TDD review evidence" -- "$SEAL" || { echo "ERROR: TDD seal commit failed" >&2; exit 1; }
+    git add "$SEAL"; git commit -m "docs(${padded_phase}): seal TDD review evidence" -- "$SEAL" || { echo "ERROR: TDD seal commit failed" >&2; exit 1; }
   fi
 else
   case "$(gsd_run check tdd.review-checkpoint "${PHASE_NUMBER}" ${GSD_WS:+--ws=${GSD_WS##* }} --pick tddPlans 2>/dev/null)" in 0) ;; *) echo "WARNING: commit_docs is false, so no TDD review seal was written; the squash will lose RED/GREEN credit." >&2 ;; esac

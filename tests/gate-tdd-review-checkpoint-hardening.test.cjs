@@ -198,6 +198,26 @@ describe('#5354 tdd review checkpoint seal', () => {
     assert.equal(after.payload.rows[0].status, 'Pass');
   });
 
+  test('a sealed plan squashed under a plan-scoped title passes (#5354)', () => {
+    const { dir, base } = fixture(['test(01-01): red', 'feat(01-01): green']);
+    run(dir, '--record');
+    sealGit(dir, 'add', '-A'); sealGit(dir, 'commit', '-m', 'docs(01-01): seal');
+    squash(dir, base, 'feat(01-01): phase one');
+    const after = run(dir);
+    assert.equal(after.payload.rows[0].status, 'Pass');
+    assert.equal(after.payload.violations, 0);
+    assert.equal(after.block, false);
+  });
+
+  test('a sealed scoped squash followed by fix(01-01): typo still passes (#5354)', () => {
+    const { dir, base } = fixture(['test(01-01): red', 'feat(01-01): green']);
+    run(dir, '--record');
+    sealGit(dir, 'add', '-A'); sealGit(dir, 'commit', '-m', 'docs(01-01): seal');
+    squash(dir, base, 'feat(01-01): phase one');
+    commit(dir, 'typo.txt', 'fix(01-01): typo');
+    assert.equal(run(dir).payload.rows[0].status, 'Pass');
+  });
+
   test('no record and no reachable commits but a SUMMARY is not evaluable, not a failure', () => {
     const { dir, base } = fixture(['test(01-01): red', 'feat(01-01): green'], { refs: true });
     squash(dir, base);
@@ -279,20 +299,57 @@ describe('#5354 tdd review checkpoint seal', () => {
     });
   }
 
-  test('a scoped squash title with unreachable SUMMARY hashes is not evaluable', () => {
+  test('a scoped squash title without a seal fails (live plan commit, nothing sealed)', () => {
     const { dir, base } = fixture(['test(01-01): red', 'feat(01-01): green'], { refs: true });
     squash(dir, base, 'feat(01-01): squashed');
+    const r = run(dir);
+    assert.equal(r.payload.rows[0].status, 'FAIL');
+    assert.deepEqual(r.payload.rows[0].missing, ['RED']);
+  });
+
+  test('a squash whose title repeats one task subject is still not evaluable (a rewrite keeps every task subject)', () => {
+    const { dir, base } = fixture(['chore: red', 'chore: green'], { refs: true });
+    squash(dir, base, 'chore: green');
     const r = run(dir);
     assert.equal(r.payload.rows[0].status, 'NotEvaluable');
     assert.equal(r.payload.violations, 0);
   });
 
-  test('a squash whose title repeats one task subject is still not evaluable (a rewrite keeps every task subject)', () => {
+  const ghostSummary = (dir) => w(dir, `${PHASE}/01-01-SUMMARY.md`, `# done\n\n## Task Commits\n\n1. **Task 1: x** - \`${'d'.repeat(40)}\`\n`);
+
+  test('a plan with only a docs commit and a SUMMARY naming a nonexistent id fails (live plan commit)', () => {
+    const { dir } = fixture(['docs(01-01): notes']);
+    ghostSummary(dir);
+    const row = run(dir).payload.rows[0];
+    assert.equal(row.status, 'FAIL');
+    assert.deepEqual(row.missing, ['RED', 'GREEN']);
+  });
+
+  test('a live RED and a SUMMARY naming a nonexistent id fails missing GREEN (live evidence is never overridden)', () => {
+    const { dir } = fixture(['test(01-01): red']);
+    ghostSummary(dir);
+    const row = run(dir).payload.rows[0];
+    assert.equal(row.status, 'FAIL');
+    assert.deepEqual(row.missing, ['GREEN']);
+  });
+
+  test('unscoped commits cherry-picked onto a moved base are a rewrite, not a squash: FAIL', () => {
+    const { dir, base } = fixture(['chore: a', 'chore: b'], { refs: true });
+    sealGit(dir, 'checkout', '-b', 'rebased', base);
+    commit(dir, 'moved.txt', 'chore: moved base');
+    sealGit(dir, 'cherry-pick', `${base}..feature`);
+    const row = run(dir).payload.rows[0];
+    assert.equal(row.status, 'FAIL');
+    assert.deepEqual(row.missing, ['RED', 'GREEN']);
+  });
+
+  test('a seal entry that credits nothing still rules out NotEvaluable, and the table has no not-evaluable note', () => {
     const { dir, base } = fixture(['test(01-01): red', 'feat(01-01): green'], { refs: true });
-    squash(dir, base, 'feat(01-01): green');
+    squash(dir, base);
+    fs.writeFileSync(path.join(dir, SEAL), sealOf(sha('a'), sha('a')));
     const r = run(dir);
-    assert.equal(r.payload.rows[0].status, 'NotEvaluable');
-    assert.equal(r.payload.violations, 0);
+    assert.equal(r.payload.rows[0].status, 'FAIL');
+    assert.doesNotMatch(r.payload.table, /not evaluable/i);
   });
 
   test('a rebased plan whose SUMMARY hashes are unreachable but whose commits are still reachable fails, not evaluable', () => {
@@ -460,10 +517,10 @@ describe('#5354 tdd review checkpoint seal', () => {
   });
 
   test('a plan with one task rewritten and one gone is NotEvaluable, not a rewrite', () => {
-    const { dir, base } = fixture(['test(01-01): red', 'feat(01-01): green'], { refs: true });
+    const { dir, base } = fixture(['chore: red', 'chore: green'], { refs: true });
     sealGit(dir, 'checkout', '-b', 'partial', base);
     w(dir, 'f0.txt', 'different content'); // same content and parent would reproduce the original sha
-    sealGit(dir, 'add', '-A'); sealGit(dir, 'commit', '-m', 'test(01-01): red');
+    sealGit(dir, 'add', '-A'); sealGit(dir, 'commit', '-m', 'chore: red');
     sealGit(dir, 'checkout', 'feature', '--', `${PHASE}/01-01-SUMMARY.md`);
     sealGit(dir, 'commit', '-m', 'docs: summary');
     const r = run(dir);
@@ -500,11 +557,14 @@ describe('#5354 tdd review checkpoint seal', () => {
     assert.equal(run(dir).payload.rows[0].status, 'NotEvaluable');
   });
 
-  test('a seal with two distinct non-hex values credits nothing and stays NotEvaluable', () => {
+  test('a seal with two distinct non-hex values credits nothing, and its entry rules out NotEvaluable', () => {
     const { dir, base } = fixture(['test(01-01): red', 'feat(01-01): green'], { refs: true });
     squash(dir, base);
     fs.writeFileSync(path.join(dir, SEAL), sealOf('zz', 'yy'));
-    assert.equal(run(dir).payload.rows[0].status, 'NotEvaluable');
+    const r = run(dir);
+    assert.equal(r.payload.rows[0].status, 'FAIL');
+    assert.deepEqual(r.payload.rows[0].missing, ['RED', 'GREEN']);
+    assert.equal(r.payload.violations, 1);
   });
 
   test('--record into an unwritable phase directory reports unreadable', (t) => {
@@ -552,7 +612,7 @@ describe('#5354 tdd review checkpoint seal', () => {
   test('property: a sealed red hash is credited iff it is 40 lowercase hex and differs from green', () => {
     const { dir } = fixture([], { summary: false });
     const hex = fc.array(fc.constantFrom(...'0123456789abcdefABCDEFg'), { minLength: 38, maxLength: 42 }).map((a) => a.join(''));
-    fc.assert(fc.property(fc.oneof(fc.string(), hex, fc.constant(sha('b'))), (red) => {
+    fc.assert(fc.property(fc.oneof(fc.string(), hex, fc.stringMatching(/^[0-9a-f]{40}$/), fc.constant(sha('b'))), (red) => {
       w(dir, SEAL, sealOf(red, sha('b')));
       return (run(dir).payload.rows[0].status === 'Pass') === (/^[0-9a-f]{40}$/.test(red) && red !== sha('b'));
     }));
@@ -585,26 +645,27 @@ describe('#5354 tdd review checkpoint seal', () => {
   });
 
   // Execute ship.md's seal step against a stubbed `gsd_run`, so the branches (not their text) are what is tested.
-  function runSealStep({ commitDocs = 'true', recordRc = 0, picked = '1', seal, ws = '' }) {
+  function runSealStep({ commitDocs = 'true', recordRc = 0, picked = '1', seal, ws = '', prepare }) {
     const ship = fs.readFileSync(path.join(__dirname, '..', 'gsd-core', 'workflows', 'ship.md'), 'utf8').replace(/\r\n/g, '\n');
     const from = ship.indexOf('```bash\n', ship.indexOf('<step name="seal_tdd_review">')) + 8;
     const script = ship.slice(from, ship.indexOf('\n```', from));
     const { dir } = fixture([], { summary: false });
     if (seal !== undefined) w(dir, SEAL, seal);
+    if (prepare) prepare(dir);
     const calls = path.join(path.dirname(dir), `${path.basename(dir)}-calls`);
     dirs.push(calls);
     const stub = 'gsd_run() { echo "$*" >> "$CALLS"; case "$*" in "query config-get commit_docs"*) echo "$CD";; *--record*) echo "$PICK"; return "$REC";; *) echo "$PICK";; esac; }\n';
     const r = runHook('-c', [stub + script], {
       interpreter: 'bash', cwd: dir, timeoutMs: GIT_TIMEOUT_MS,
-      env: { ...process.env, CALLS: calls, GSD_WS: ws, CD: commitDocs, REC: String(recordRc), PICK: picked, PHASE_DIR: PHASE, PHASE_NUMBER: '1', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' },
+      env: { ...process.env, CALLS: calls, GSD_WS: ws, CD: commitDocs, REC: String(recordRc), PICK: picked, PHASE_DIR: PHASE, PHASE_NUMBER: '1', padded_phase: '01', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' },
     });
-    return { r, subject: sealGit(dir, 'log', '-1', '--format=%s'), calls: fs.readFileSync(calls, 'utf8').split(/\r?\n/).filter((l) => l.startsWith('check ')) };
+    return { r, subject: sealGit(dir, 'log', '-1', '--format=%s'), calls: fs.readFileSync(calls, 'utf8').split(/\r?\n/).filter(Boolean) };
   }
 
   test('ship.md seal step commits a dirty seal after a successful record', posix, () => {
     const { r, subject } = runSealStep({ seal: sealOf(sha('a'), sha('b')) });
     assert.equal(r.exitCode, 0, r.stderr);
-    assert.match(subject, /^docs\(1\): seal TDD review evidence$/);
+    assert.match(subject, /^docs\(01\): seal TDD review evidence$/);
   });
 
   test('ship.md seal step never commits the on-disk seal when --record failed', posix, () => {
@@ -622,9 +683,55 @@ describe('#5354 tdd review checkpoint seal', () => {
   test('ship.md seal step resolves the phase in the workstream ship resolved it in (#5354)', posix, () => {
     for (const commitDocs of ['true', 'false']) {
       const { calls } = runSealStep({ commitDocs, ws: '--ws ws1', seal: sealOf(sha('a'), sha('b')) });
-      assert.equal(calls.length, 1, commitDocs);
-      assert.match(calls[0], / --ws=ws1(?: |$)/, commitDocs);
+      assert.equal(calls.length, 2, commitDocs);
+      for (const call of calls) assert.match(call, / --ws=ws1(?: |$)/, `${commitDocs}: ${call}`);
     }
+  });
+
+  test('ship.md seal step warns when no seal file exists, and only for a phase with tdd plans', posix, () => {
+    assert.match(runSealStep({ picked: '1' }).r.stderr, /no .*TDD-REVIEW-SEAL\.json/);
+    assert.doesNotMatch(runSealStep({ picked: '0' }).r.stderr, /no .*TDD-REVIEW-SEAL\.json/);
+  });
+
+  test('ship.md seal step warns about a gitignored seal and commits nothing', posix, () => {
+    const { r, subject } = runSealStep({
+      seal: sealOf(sha('a'), sha('b')),
+      prepare: (dir) => { w(dir, '.gitignore', `${SEAL}\n`); sealGit(dir, 'add', '.gitignore'); sealGit(dir, 'commit', '--amend', '--no-edit'); },
+    });
+    assert.equal(r.exitCode, 0, r.stderr);
+    assert.match(r.stderr, /gitignored/);
+    assert.equal(subject, 'docs: plans');
+  });
+
+  test('ship.md seal step stops with exit 1 when the seal commit fails', posix, () => {
+    const { r } = runSealStep({ seal: sealOf(sha('a'), sha('b')), prepare: (dir) => w(dir, '.git/index.lock', '') });
+    assert.equal(r.exitCode, 1);
+    assert.match(r.stderr, /TDD seal commit failed/);
+  });
+
+  test('--record refuses a seal path that became a directory between the read and the write', (t) => {
+    const { dir } = fixture(['test(01-01): red', 'feat(01-01): green']);
+    const real = fs.lstatSync;
+    let seen = 0;
+    t.mock.method(fs, 'lstatSync', (f, ...rest) => (String(f).endsWith('TDD-REVIEW-SEAL.json') && ++seen === 2 ? real(dir) : real(f, ...rest)));
+    const r = run(dir, '--record');
+    assert.equal(r.outcome, 'unreadable');
+    assert.match(r.payload.unreadable[0].reason, /not a regular file/);
+    assert.equal(fs.existsSync(path.join(dir, SEAL)), false);
+  });
+
+  test('--record refuses a seal path that cannot be examined at write time', (t) => {
+    const { dir } = fixture(['test(01-01): red', 'feat(01-01): green']);
+    const real = fs.lstatSync;
+    let seen = 0;
+    t.mock.method(fs, 'lstatSync', (f, ...rest) => {
+      if (String(f).endsWith('TDD-REVIEW-SEAL.json') && ++seen === 2) throw Object.assign(new Error('denied'), { code: 'EACCES' });
+      return real(f, ...rest);
+    });
+    const r = run(dir, '--record');
+    assert.equal(r.outcome, 'unreadable');
+    assert.match(r.payload.unreadable[0].reason, /cannot be examined/);
+    assert.equal(fs.existsSync(path.join(dir, SEAL)), false);
   });
 
   test('the CLI router passes --record through and writes the seal', () => {

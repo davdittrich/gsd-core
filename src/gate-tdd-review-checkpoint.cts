@@ -156,9 +156,9 @@ type SealEntry = { red: string; green: string };
 
 const isSha = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{40}$/.test(v);
 
-// A real seal is a few hundred bytes per plan; anything bigger is not read (the file is repo content, so hostile).
-const SEAL_MAX_BYTES = 64 * 1024;
-/** #5354: most distinct SUMMARY task commits probed per plan; each costs one `git merge-base` spawn plus one `git show` (about 2x64 spawns) and the scope resolver. */
+// Cap for repo-controlled text the gate reads (the seal and SUMMARY.md); a real one is a few KiB at most; anything bigger is not read (repo content, so hostile).
+const REPO_TEXT_MAX_BYTES = 64 * 1024;
+/** #5354: most distinct SUMMARY task commits probed per plan; each costs one `git merge-base` spawn, plus one `git show` per id that exists, plus one `git log` per plan when every id is unreachable. */
 const SUMMARY_REFS_MAX = 64;
 
 /** lstat, so a symlink is seen as a symlink. Never throws. */
@@ -191,20 +191,20 @@ function parseSeal(text: string): Evidence<SealPlans> {
   }
 }
 
-/** Bounded, non-blocking read of repo-controlled text: a symlink, non-regular file or one over SEAL_MAX_BYTES is `unreadable`; absent is `none`. */
+/** Bounded, non-blocking read of repo-controlled text: a symlink, non-regular file or one over REPO_TEXT_MAX_BYTES is `unreadable`; absent is `none`. */
 function readBoundedText(file: string): Evidence<string> {
   // lstat rejects a symlink on every OS (O_NOFOLLOW is 0 on Windows); O_NOFOLLOW + fstat on the fd is the race backstop.
   const st = sealStat(file);
   if (st.kind !== 'found') return st;
-  const notRegular = (): Evidence<string> => evidenceUnreadable(`${path.basename(file)} is not a regular file or exceeds ${SEAL_MAX_BYTES} bytes`, file);
-  if (!st.value.isFile() || st.value.size > SEAL_MAX_BYTES) return notRegular();
+  const notRegular = (): Evidence<string> => evidenceUnreadable(`${path.basename(file)} is not a regular file or exceeds ${REPO_TEXT_MAX_BYTES} bytes`, file);
+  if (!st.value.isFile() || st.value.size > REPO_TEXT_MAX_BYTES) return notRegular();
   let fd: number | undefined;
   let result: Evidence<string>;
   try {
     // O_NONBLOCK: a FIFO swapped in after lstat must not hang open(); fstat isFile() then rejects it.
     fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
     const fst = fs.fstatSync(fd);
-    result = !fst.isFile() || fst.size > SEAL_MAX_BYTES ? notRegular() : evidenceFound(fs.readFileSync(fd, 'utf8'));
+    result = !fst.isFile() || fst.size > REPO_TEXT_MAX_BYTES ? notRegular() : evidenceFound(fs.readFileSync(fd, 'utf8'));
   } catch (err) {
     result = evidenceFromError<string>(err, file);
   }
@@ -236,17 +236,18 @@ function writeSeal(phaseDir: string, evidence: Record<string, SealEntry>, prior:
 }
 
 /**
- * #5354: a plan was squashed away when its SUMMARY names task commits and none is reachable from
- * HEAD (a missing object counts as unreachable only in a complete history). A fabricated or foreign
- * id is indistinguishable from a squashed commit that was garbage-collected or never fetched, so it
- * is also `NotEvaluable`: the gate stays advisory and the row is visible to the maintainer rather
- * than escalating on unverifiable ids. No SUMMARY, no listed hash, more than SUMMARY_REFS_MAX
- * distinct hashes, or any reachable hash is an ordinary failure. When every ref's subject still
- * appears on a reachable plan commit the plan was rewritten (rebase/amend), not squashed, so it is
- * not unreachable. A squash that repeats a single task subject therefore stays `NotEvaluable`; a
- * single-task plan squashed under its own subject is indistinguishable from a rewrite and FAILs.
+ * #5354: a plan was squashed away when it has no live plan commit and no seal entry, and its SUMMARY
+ * names task commits none of which is reachable from HEAD (a missing object counts as unreachable only
+ * in a complete history). A fabricated or foreign id is indistinguishable from a squashed commit that
+ * was garbage-collected or never fetched, so it is also `NotEvaluable`: the gate stays advisory and the
+ * row is visible to the maintainer rather than escalating on unverifiable ids. No SUMMARY, no listed
+ * hash, more than SUMMARY_REFS_MAX distinct hashes, or any reachable hash is an ordinary failure. When
+ * every ref exists and its subject still occurs on a commit reachable from HEAD but not from the refs,
+ * the plan was rewritten (rebase/amend), not squashed, so it is not unreachable. A squash that repeats
+ * a single task subject therefore stays `NotEvaluable`; a single-task plan squashed under its own
+ * subject is indistinguishable from a rewrite and FAILs.
  */
-function summaryCommitsAllUnreachable(projectDir: string, phaseDir: string, planPath: string, reachableSubjects: ReadonlySet<string>): boolean {
+function summaryCommitsAllUnreachable(projectDir: string, phaseDir: string, planPath: string): boolean {
   const subjectOf = (id: string): string => {
     const s = execGit(['show', '-s', '--format=%s', id], { cwd: projectDir });
     return !s.timedOut && s.exitCode === 0 ? s.stdout.trim() : '';
@@ -267,10 +268,17 @@ function summaryCommitsAllUnreachable(projectDir: string, phaseDir: string, plan
     if (refs.length === 0 || refs.length > SUMMARY_REFS_MAX) return false;
     const probes = refs.map((id) => {
       const r = execGit(['merge-base', '--is-ancestor', id, 'HEAD'], { cwd: projectDir });
-      const unreachable = !r.timedOut && (r.exitCode === 1 || (r.exitCode === 128 && historyComplete()));
-      return { unreachable, rewritten: r.exitCode === 1 && reachableSubjects.has(subjectOf(id)) };
+      return { id, exists: r.exitCode === 1, unreachable: !r.timedOut && (r.exitCode === 1 || (r.exitCode === 128 && historyComplete())) };
     });
-    return probes.every((p) => p.unreachable) && !probes.every((p) => p.rewritten);
+    if (!probes.every((p) => p.unreachable)) return false;
+    const existing = probes.filter((p) => p.exists).map((p) => p.id);
+    // A ref that no longer exists was squashed away, so not every ref was rewritten.
+    if (existing.length < probes.length) return true;
+    // Subjects of commits reachable from HEAD but not from the refs; a failed log leans to FAIL (rewritten).
+    const log = execGit(['log', '--format=%s', 'HEAD', '--not', ...existing], { cwd: projectDir });
+    if (log.timedOut || log.exitCode !== 0) return false;
+    const onHead = new Set(log.stdout.split('\n').filter(Boolean));
+    return !existing.every((id) => onHead.has(subjectOf(id)));
   }
   return false;
 }
@@ -297,6 +305,70 @@ function unreadableReview(phase: string, tddPlans: number, unreadable: Unreadabl
     unreadable,
     message: `TDD review could not read: ${names}. Phase ${phase} was not reviewed.`,
   });
+}
+
+/** One TDD plan's row, plus the evidence `--record` seals when it passes (live hashes stay preferred over the seal's). */
+function planRow(
+  projectDir: string,
+  phaseDir: string,
+  planPath: string,
+  seal: SealPlans,
+  dependents: ReadonlyMap<string, string[]>,
+): { row: TddPlanRow; evidence?: SealEntry } {
+  const planId = path.basename(planPath, '-PLAN.md');
+  const commits = planCommits(projectDir, planId);
+  const reds = shasOfKind(commits, 'test');
+  // #5354: the seal stands in only when the plan has no live RED (a squash rewrote it); a live RED means the history
+  // was not squashed, so a stale entry never tops up live-but-incomplete commits. Its GREEN fills only a GREEN no live
+  // commit credits; live hashes stay preferred for the evidence.
+  const sealed = reds.length === 0 && Object.hasOwn(seal, planId) && seal[planId]?.red !== seal[planId]?.green ? seal[planId] : {};
+  const sealedRed = isSha(sealed.red);
+  const sealedGreen = isSha(sealed.green);
+  const red = reds.length > 0 || sealedRed;
+  const refactor = commits.some((c) => c.kind === 'refactor');
+
+  // #5275: with a RED present, a GREEN counts only when it descends from a RED. Without one there is
+  // nothing to order against and the plan is already missing RED, so a GREEN commit stays credited.
+  const inOrder = (greens: readonly string[]): boolean =>
+    greens.length > 0 && (reds.length === 0 || greenFollowsRed(projectDir, reds, greens) !== false);
+
+  const ownGreens = shasOfKind(commits, 'feat');
+  const ownOk = inOrder(ownGreens);
+
+  // #4867: a RED-only probe plan is satisfied by the GREEN of a plan that (transitively) declares
+  // `depends_on` it. Only a real `feat(...)` commit under such a plan counts, and it must follow the
+  // RED too (#5275); the plan's own RED is still required, and a plan nothing depends on is scored
+  // on its own commits alone.
+  const dependentGreens = ownOk
+    ? []
+    : transitiveDependents(planId, dependents).map((id) => ({ id, greens: shasOfKind(planCommits(projectDir, id), 'feat') }));
+  const greenFrom = dependentGreens.filter((d) => inOrder(d.greens)).map((d) => d.id);
+  const green = ownOk || greenFrom.length > 0 || sealedGreen;
+  const anyGreenCommit = ownGreens.length > 0 || dependentGreens.some((d) => d.greens.length > 0) || sealedGreen;
+
+  const missing: string[] = [];
+  if (!red) missing.push('RED');
+  if (!anyGreenCommit) missing.push('GREEN');
+  // #5354: credit incomplete, no live plan commit, nothing sealed, and the SUMMARY's task commits are all gone = squashed away.
+  const notEvaluable = missing.length > 0 && commits.length === 0 && !Object.hasOwn(seal, planId) && summaryCommitsAllUnreachable(projectDir, phaseDir, planPath);
+  const status: TddPlanRow['status'] = notEvaluable ? 'NotEvaluable' : missing.length === 0 && green ? 'Pass' : 'FAIL';
+  // Both commit kinds exist but no GREEN follows a RED: its own reason. A row that fails for a
+  // missing commit keeps the exact shape it always had (`missing` already says why).
+  const reason: TddRowReason | undefined = status === 'FAIL' && missing.length === 0
+    ? TDD_ROW_REASON.GREEN_BEFORE_RED
+    : undefined;
+  const redSha = reds[0] ?? sealed.red;
+  const greenSha = (ownOk ? ownGreens[0] : dependentGreens.find((d) => inOrder(d.greens))?.greens[0]) ?? sealed.green;
+  const sealEvidence = status === 'Pass' && isSha(redSha) && isSha(greenSha) ? { red: redSha, green: greenSha } : undefined;
+
+  return {
+    row: {
+      planId, red, green, refactor, status, missing,
+      ...(reason ? { reason } : {}),
+      ...(greenFrom.length > 0 ? { greenFrom } : {}),
+    },
+    ...(sealEvidence ? { evidence: sealEvidence } : {}),
+  };
 }
 
 export function evaluateTddReviewCheckpoint(input: { projectDir: string; args: readonly string[] }): GateResult {
@@ -371,56 +443,9 @@ export function evaluateTddReviewCheckpoint(input: { projectDir: string; args: r
   const seal: SealPlans = sealRead.kind === 'found' ? sealRead.value : {};
   const evidence: Record<string, SealEntry> = {};
   for (const planPath of tddPlanFiles) {
-    const planId = path.basename(planPath, '-PLAN.md');
-    const commits = planCommits(projectDir, planId);
-    const reds = shasOfKind(commits, 'test');
-    // #5354: the seal stands in only for a plan with no reachable commits at all (a squash rewrote them), so a
-    // stale entry can never top up a plan whose live commits lack RED or GREEN. `--record` can then not re-persist it either.
-    const sealed = commits.length === 0 && Object.hasOwn(seal, planId) && seal[planId]?.red !== seal[planId]?.green ? seal[planId] : {};
-    const sealedRed = isSha(sealed.red);
-    const sealedGreen = isSha(sealed.green);
-    const red = reds.length > 0 || sealedRed;
-    const refactor = commits.some((c) => c.kind === 'refactor');
-
-    // #5275: with a RED present, a GREEN counts only when it descends from a RED. Without one there is
-    // nothing to order against and the plan is already missing RED, so a GREEN commit stays credited.
-    const inOrder = (greens: readonly string[]): boolean =>
-      greens.length > 0 && (reds.length === 0 || greenFollowsRed(projectDir, reds, greens) !== false);
-
-    const ownGreens = shasOfKind(commits, 'feat');
-    const ownOk = inOrder(ownGreens);
-
-    // #4867: a RED-only probe plan is satisfied by the GREEN of a plan that (transitively) declares
-    // `depends_on` it. Only a real `feat(...)` commit under such a plan counts, and it must follow the
-    // RED too (#5275); the plan's own RED is still required, and a plan nothing depends on is scored
-    // on its own commits alone.
-    const dependentGreens = ownOk
-      ? []
-      : transitiveDependents(planId, dependents).map((id) => ({ id, greens: shasOfKind(planCommits(projectDir, id), 'feat') }));
-    const greenFrom = dependentGreens.filter((d) => inOrder(d.greens)).map((d) => d.id);
-    const green = ownOk || greenFrom.length > 0 || sealedGreen;
-    const anyGreenCommit = ownGreens.length > 0 || dependentGreens.some((d) => d.greens.length > 0) || sealedGreen;
-
-    const missing: string[] = [];
-    if (!red) missing.push('RED');
-    if (!anyGreenCommit) missing.push('GREEN');
-    // #5354: credit incomplete, nothing sealed, and the SUMMARY's task commits are all gone = squashed away.
-    const notEvaluable = missing.length > 0 && !(sealedRed || sealedGreen) && summaryCommitsAllUnreachable(projectDir, phaseDir, planPath, new Set(commits.map((commit) => commit.subject)));
-    const status: TddPlanRow['status'] = notEvaluable ? 'NotEvaluable' : missing.length === 0 && green ? 'Pass' : 'FAIL';
-    // Both commit kinds exist but no GREEN follows a RED: its own reason. A row that fails for a
-    // missing commit keeps the exact shape it always had (`missing` already says why).
-    const reason: TddRowReason | undefined = status === 'FAIL' && missing.length === 0
-      ? TDD_ROW_REASON.GREEN_BEFORE_RED
-      : undefined;
-    const redSha = reds[0] ?? sealed.red;
-    const greenSha = (ownOk ? ownGreens[0] : dependentGreens.find((d) => inOrder(d.greens))?.greens[0]) ?? sealed.green;
-    if (status === 'Pass' && isSha(redSha) && isSha(greenSha)) evidence[planId] = { red: redSha, green: greenSha };
-
-    rows.push({
-      planId, red, green, refactor, status, missing,
-      ...(reason ? { reason } : {}),
-      ...(greenFrom.length > 0 ? { greenFrom } : {}),
-    });
+    const { row, evidence: sealEvidence } = planRow(projectDir, phaseDir, planPath, seal, dependents);
+    rows.push(row);
+    if (sealEvidence) evidence[row.planId] = sealEvidence;
   }
 
   const violations = rows.filter(r => r.status === 'FAIL').length;
