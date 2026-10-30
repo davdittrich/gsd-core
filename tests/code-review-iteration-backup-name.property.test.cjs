@@ -20,7 +20,7 @@ const { createTempDir, cleanup } = require('./helpers.cjs');
 const FIX = 'gsd-core/workflows/code-review-fix.md';
 const BACKUP = /^01-REVIEW(-FIX)?\.iter[0-9]+\.md$/;
 
-/** Basenames the owner span keeps out of `names`, sorted. */
+/** Basenames of the `names` the owner span classifies as backups (its BACKUP_FILES), sorted. */
 function kept(names) {
   const dir = createTempDir('gsd-5506-grammar-');
   try {
