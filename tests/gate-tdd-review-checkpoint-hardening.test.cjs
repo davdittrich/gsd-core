@@ -759,6 +759,10 @@ describe('#5354 tdd review checkpoint seal', () => {
     assert.equal(sealGit(dir, 'status', '--porcelain', '--', SEAL), '');
   });
 
+  test('ship.md seal step stops with exit 1 when the commit owner exits non-zero', posix, () => {
+    expectBranchWarning(runSealStep({ seal: sealOf(sha('a'), sha('b')), commitOut: '', commitRc: 3 }), 'commitFailed');
+  });
+
   test('ship.md seal step stops with exit 1 when the commit owner reports failed', posix, () => {
     expectBranchWarning(runSealStep({ seal: sealOf(sha('a'), sha('b')), commitOut: 'failed' }), 'commitFailed');
   });
