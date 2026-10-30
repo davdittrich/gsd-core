@@ -19,7 +19,7 @@
  * router formats output (design D2).
  */
 
-const { test, describe } = require('node:test');
+const { test, describe, before } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -386,10 +386,10 @@ describe('U5 evaluateTddReviewCheckpoint', () => {
   }
 });
 
-// allow-test-rule: docs-parity #5274 — the gate and the tdd.md executor lookup must agree on which commit types are GREEN
 describe('U5 GREEN commit types: gate agrees with the tdd.md lookup (#5274)', () => {
   let re;
-  require('node:test').before(() => {
+  before(() => {
+    // allow-test-rule: docs-parity #5274 — the gate and the tdd.md executor lookup must agree on which commit types are GREEN
     const md = fs.readFileSync(path.join(__dirname, '..', 'gsd-core', 'references', 'tdd.md'), 'utf8');
     const line = splitLines(md).find((l) => /--grep="\^\(/.test(l));
     assert.ok(line, 'GREEN grep line present in tdd.md');

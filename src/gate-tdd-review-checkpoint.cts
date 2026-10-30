@@ -138,9 +138,9 @@ function greenFollowsRed(projectDir: string, reds: readonly string[], greens: re
 }
 
 /** GREEN is a `feat` or a `fix` commit (#5274); `refactor`/`chore`/`docs` never satisfy it. */
-const GREEN_KINDS = ['feat', 'fix'] as const;
+const GREEN_KINDS: readonly string[] = ['feat', 'fix'];
 const greenShas = (commits: readonly PlanCommit[]): string[] =>
-  commits.filter((c) => (GREEN_KINDS as readonly string[]).includes(c.kind)).map((c) => c.sha);
+  commits.filter((c) => GREEN_KINDS.includes(c.kind)).map((c) => c.sha);
 
 interface UnreadableSource {
   source: string;
@@ -248,9 +248,9 @@ export function evaluateTddReviewCheckpoint(input: { projectDir: string; args: r
     const ownOk = inOrder(ownGreens);
 
     // #4867: a RED-only probe plan is satisfied by the GREEN of a plan that (transitively) declares
-    // `depends_on` it. Only a real `feat(...)` or `fix(...)` commit under such a plan counts, and it must follow the
-    // RED too (#5275); the plan's own RED is still required, and a plan nothing depends on is scored
-    // on its own commits alone.
+    // `depends_on` it. Only a real `feat(...)` or `fix(...)` commit under such a plan counts, and it must follow
+    // the RED too (#5275); the plan's own RED is still required, and a plan nothing depends on is scored on its
+    // own commits alone.
     const dependentGreens = ownOk
       ? []
       : transitiveDependents(planId, dependents).map((id) => ({ id, greens: greenShas(planCommits(projectDir, id)) }));
