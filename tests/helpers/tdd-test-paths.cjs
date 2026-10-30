@@ -6,7 +6,7 @@
  * both read these, so a path added here is checked in both directions.
  */
 
-// One root and one nested sample per TEST_FILE_PATHSPECS entry, keyed by spec.
+// A root and a nested sample per TEST_FILE_PATHSPECS entry (the directory specs add a deeper one), keyed by spec.
 const SAMPLES_BY_SPEC = {
   '*.test.*': ['a.test.js', 'nested/a.test.js'],
   '*.spec.*': ['a.spec.js', 'nested/a.spec.js'],

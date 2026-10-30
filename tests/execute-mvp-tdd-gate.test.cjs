@@ -181,7 +181,7 @@ describe('#5106: test-file conventions are one definition', () => {
     // And the router recognizes a literal root and nested sample of every convention.
     const { SAMPLES_BY_SPEC: samples, SHARED_TEST_PATHS, SHARED_NON_TEST_PATHS } = require('./helpers/tdd-test-paths.cjs');
     assert.deepEqual(Object.keys(samples).sort(), [...TEST_FILE_PATHSPECS].sort(),
-      'one root and one nested sample per TEST_FILE_PATHSPECS entry, keyed by spec');
+      'a root and a nested sample per TEST_FILE_PATHSPECS entry, keyed by spec');
     for (const sample of SHARED_TEST_PATHS) {
       assert.equal(isTestFilePath(sample), true, `${sample} must be recognized as a test file`);
     }
