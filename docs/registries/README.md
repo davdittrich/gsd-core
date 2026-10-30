@@ -235,7 +235,7 @@ A `role: "runtime"` capability that also carries a `reviewer` body (a host that 
 
 Registration is a **documentation PR**, per [CONTRIBUTING.md → Documentation Updates](../../CONTRIBUTING.md#documentation-updates--update-the-relevant-docs):
 
-1. **Open an issue for the change** ([new issue](https://github.com/open-gsd/gsd-core/issues/new/choose) — choose Enhancement, since a listing changes what GSD offers rather than adding a new command or workflow, not Documentation Issue) and wait for a maintainer to apply `approved-enhancement` (`approved-feature` also satisfies the gate) (the gate also accepts `confirmed-bug`). External PRs without a closing link to an approved issue are auto-closed.
+1. **Open an issue for the change** ([new issue](https://github.com/open-gsd/gsd-core/issues/new/choose)) and wait for a maintainer to apply `approved-feature`, `approved-enhancement`, or `confirmed-bug`. Any issue form works once a maintainer has applied one of those labels. External PRs without a closing link to an approved issue are auto-closed.
 2. **Fork** the repository.
 3. **Open the entry's Discussion** in this repository's `EoS Registry` Discussions category (the category's scope and format are described under [Ranking + comments](#ranking--comments)). Copy the thread's URL: it fills the entry's required `discussion` field, so the thread must exist *before* the PR is opened.
 4. **Edit** `docs/registries/capabilities.json` (Capability Registry), `docs/registries/eos.json` (EoS Registry), or `docs/registries/reviewers.json` (Reviewer Lane Registry) and append exactly one entry matching the [schema](#entry-schema) above.
