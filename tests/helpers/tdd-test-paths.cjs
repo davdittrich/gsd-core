@@ -1,10 +1,9 @@
 'use strict';
 
-/**
- * One owner for every path list the #5181 test-file rows share: the router/pathspec parity
- * rows in execute-mvp-tdd-gate.test.cjs and the real-git rows in safe-resume-gate-anchoring.test.cjs
- * both read these, so a path added here is checked in both directions.
- */
+// One owner for every path list the #5181 test-file rows share.
+// The parity rows (execute-mvp-tdd-gate) and the real-git rows (safe-resume-gate-anchoring)
+// read the shared test and non-test lists, so a path added to either is checked in both directions.
+// The property rows (tdd-test-files.property) read SAMPLES_BY_SPEC only.
 
 // A root and a nested sample per TEST_FILE_PATHSPECS entry (the directory specs add a deeper one), keyed by spec.
 const SAMPLES_BY_SPEC = {
