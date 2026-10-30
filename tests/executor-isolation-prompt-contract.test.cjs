@@ -215,6 +215,23 @@ test('#5531: a missing, empty, unreadable or unset prompt file fails closed', (t
   }
 });
 
+test('#5531: every halt of the read-and-check block runs with the prompt file already removed', { skip: process.platform === 'win32' || process.getuid?.() === 0 }, (t) => {
+  const dir = createTempDir('gsd-5531-');
+  t.after(() => cleanup(dir));
+  const file = path.join(dir, 'prompt');
+  fs.writeFileSync(file, composed('x'));
+  fs.chmodSync(file, 0o000);
+  const r = readAndCheck(dir, file);
+  assert.equal(r.exitCode, 1, r.stderr);
+  assert.match(r.stderr, /FATAL/);
+  assert.ok(!fs.existsSync(file), 'an unreadable prompt file must be removed before the halt');
+  const empty = path.join(dir, 'empty');
+  fs.writeFileSync(empty, '');
+  assert.equal(readAndCheck(dir, empty).exitCode, 1);
+  assert.ok(!fs.existsSync(empty), 'an empty prompt file must be removed before the halt');
+  assert.match(content, /replace `\{phase_dir\}`, `\{plan_file\}`, `\{plan_number\}` and `\{phase_number\}`/, 'every bash block gets the identifiers substituted');
+});
+
 test('#5531: an un-substituted ${AGENT_SKILLS} or ${TDD_APPLICABLE marker halts', (t) => {
   const dir = createTempDir('gsd-5531-');
   t.after(() => cleanup(dir));
