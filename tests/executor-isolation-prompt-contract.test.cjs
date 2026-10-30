@@ -224,6 +224,9 @@ test('#5531: every halt of the read-and-check block runs with the prompt file al
   fs.writeFileSync(empty, '');
   assert.equal(readAndCheck(dir, empty).exitCode, 1);
   assert.ok(!fs.existsSync(empty), 'an empty prompt file must be removed before the halt');
+});
+
+test('#5531: the substitution instruction covers every bash block and all four plan identifiers', () => {
   assert.match(content, /replace `\{phase_dir\}`, `\{plan_file\}`, `\{plan_number\}` and `\{phase_number\}`/, 'every bash block gets the identifiers substituted');
 });
 
