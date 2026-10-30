@@ -13,8 +13,10 @@
  */
 
 /**
- * Git-pathspec spelling. A `/**` tail is a directory; anything else is a basename glob
- * (optionally behind the `:(glob)` depth prefix).
+ * Git-pathspec spelling. A `/**` tail (behind `:(glob)**\/`) names a directory at any depth.
+ * Any other entry is a file glob: the router reads it against the basename with `*` as a
+ * non-separator run, while git matches a bare entry against the whole path with `*` crossing
+ * `/`, so git is the wider reader. `:(glob)**\/test_*.py` is basename-only in both.
  */
 export const TEST_FILE_PATHSPECS = [
   '*.test.*', '*.spec.*', ':(glob)**/tests/**', ':(glob)**/__tests__/**',
