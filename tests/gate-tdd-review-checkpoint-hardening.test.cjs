@@ -662,6 +662,28 @@ describe('#5354 tdd review checkpoint seal', () => {
     return { r, dir, subject: sealGit(dir, 'log', '-1', '--format=%s'), calls: fs.readFileSync(calls, 'utf8').split(/\r?\n/).filter(Boolean) };
   }
 
+  // Each seal-step branch, with the text of ship.md's own message for it (defined once, taken from the step).
+  const SEAL_BRANCH = {
+    recordFailed: { marker: 'could not record the seal', exitCode: 0 },
+    noSeal: { marker: 'TDD review failed or was not evaluable', exitCode: 0 },
+    gitignored: { marker: 'is gitignored', exitCode: 0 },
+    commitFailed: { marker: 'TDD seal commit failed', exitCode: 1 },
+    commitDocsFalse: { marker: 'commit_docs is false', exitCode: 0 },
+  };
+  // The step took exactly this branch: its exit status, its message and no other branch's, and no seal commit.
+  function expectBranchWarning({ r, subject }, branch) {
+    assert.equal(r.exitCode, SEAL_BRANCH[branch].exitCode, r.stderr);
+    for (const [name, { marker }] of Object.entries(SEAL_BRANCH)) {
+      assert.equal(r.stderr.includes(marker), name === branch, `${branch}: stderr ${name === branch ? 'has' : 'lacks'} "${marker}": ${r.stderr}`);
+    }
+    assert.equal(subject, 'docs: plans');
+  }
+  function expectQuiet({ r, subject }) {
+    assert.equal(r.exitCode, 0, r.stderr);
+    assert.equal(r.stderr.trim(), '');
+    assert.equal(subject, 'docs: plans');
+  }
+
   test('ship.md seal step commits a dirty seal after a successful record', posix, () => {
     const { r, subject } = runSealStep({ seal: sealOf(sha('a'), sha('b')) });
     assert.equal(r.exitCode, 0, r.stderr);
@@ -669,20 +691,12 @@ describe('#5354 tdd review checkpoint seal', () => {
   });
 
   test('ship.md seal step never commits the on-disk seal when --record failed', posix, () => {
-    const { r, subject } = runSealStep({ recordRc: 3, seal: '<<<<<<< conflict' });
-    assert.equal(r.exitCode, 0, r.stderr);
-    assert.notEqual(r.stderr.trim(), '', 'warns');
-    assert.equal(subject, 'docs: plans');
+    expectBranchWarning(runSealStep({ recordRc: 3, seal: '<<<<<<< conflict' }), 'recordFailed');
   });
 
   test('ship.md seal step with commit_docs false warns only when the phase has tdd plans', posix, () => {
-    const warned = runSealStep({ commitDocs: 'false', picked: '2' });
-    assert.equal(warned.r.exitCode, 0, warned.r.stderr);
-    assert.notEqual(warned.r.stderr.trim(), '', 'warns for a phase with tdd plans');
-    assert.equal(warned.subject, 'docs: plans');
-    const quiet = runSealStep({ commitDocs: 'false', picked: '0' });
-    assert.equal(quiet.r.exitCode, 0, quiet.r.stderr);
-    assert.equal(quiet.r.stderr.trim(), '', 'silent without tdd plans');
+    expectBranchWarning(runSealStep({ commitDocs: 'false', picked: '2' }), 'commitDocsFalse');
+    expectQuiet(runSealStep({ commitDocs: 'false', picked: '0' }));
   });
 
   test('ship.md seal step resolves the phase in the workstream ship resolved it in (#5354)', posix, () => {
@@ -695,31 +709,24 @@ describe('#5354 tdd review checkpoint seal', () => {
 
   test('ship.md seal step warns when no seal file exists, and only for a phase with tdd plans', posix, () => {
     const warned = runSealStep({ picked: '1' });
-    assert.equal(warned.r.exitCode, 0, warned.r.stderr);
+    expectBranchWarning(warned, 'noSeal');
     assert.equal(fs.existsSync(path.join(warned.dir, SEAL)), false);
-    assert.notEqual(warned.r.stderr.trim(), '', 'warns when a tdd phase has no seal');
-    assert.equal(warned.subject, 'docs: plans');
-    const quiet = runSealStep({ picked: '0' });
-    assert.equal(quiet.r.exitCode, 0, quiet.r.stderr);
-    assert.equal(quiet.r.stderr.trim(), '', 'silent without tdd plans');
+    expectQuiet(runSealStep({ picked: '0' }));
   });
 
   test('ship.md seal step warns about a gitignored seal and commits nothing', posix, () => {
-    const { r, dir, subject } = runSealStep({
+    const result = runSealStep({
       seal: sealOf(sha('a'), sha('b')),
       prepare: (dir) => { w(dir, '.gitignore', `${SEAL}\n`); sealGit(dir, 'add', '.gitignore'); sealGit(dir, 'commit', '--amend', '--no-edit'); },
     });
-    assert.equal(r.exitCode, 0, r.stderr);
-    assert.notEqual(r.stderr.trim(), '', 'warns');
-    assert.equal(subject, 'docs: plans');
+    expectBranchWarning(result, 'gitignored');
+    const { dir } = result;
     assert.equal(fs.existsSync(path.join(dir, SEAL)), true);
     assert.equal(sealGit(dir, 'status', '--porcelain', '--', SEAL), '');
   });
 
   test('ship.md seal step stops with exit 1 when the seal commit fails', posix, () => {
-    const { r, subject } = runSealStep({ seal: sealOf(sha('a'), sha('b')), prepare: (dir) => w(dir, '.git/index.lock', '') });
-    assert.equal(r.exitCode, 1);
-    assert.equal(subject, 'docs: plans');
+    expectBranchWarning(runSealStep({ seal: sealOf(sha('a'), sha('b')), prepare: (dir) => w(dir, '.git/index.lock', '') }), 'commitFailed');
   });
 
   test('--record refuses a seal path that became a directory between the read and the write', (t) => {
