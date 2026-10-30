@@ -306,7 +306,7 @@ if printf '%s' "$EXECUTOR_PROMPT" | grep -q '\${TDD_APPLICABLE'; then
 fi
 ```
 
-The prompt reaches the shell only as file contents read by `cat`, so apostrophes, `$(...)`, backticks and quotes in the template or in any spliced embed are never parsed or run; do not escape them. The read-and-check block removes the prompt file right after `cat`, so every halt of that block (unreadable file, empty prompt, a leftover placeholder) runs with the file already gone; `mktemp` is followed only by the `echo` of `PROMPT_FILE`, which cannot halt, so no halt can occur between creating the file and reading it. Run the blocks as separate commands in one shell (`PROMPT_FILE` carries across them).
+The prompt reaches the shell only as file contents read by `cat`, so apostrophes, `$(...)`, backticks and quotes in the template or in any spliced embed are never parsed or run; do not escape them. The read-and-check block removes the prompt file right after `cat`, so every halt of that block (unreadable file, empty prompt, a leftover placeholder) runs with the file already gone; `mktemp` is followed only by the `echo` of `PROMPT_FILE`, which cannot halt, so no halt can occur between creating the file and reading it. If you fail while writing `PROMPT_FILE` between the blocks, run `rm -f -- "$PROMPT_FILE"` before halting. Run the blocks as separate commands in one shell (`PROMPT_FILE` carries across them).
 
 Then create the worktree and resolve the spawn:
 

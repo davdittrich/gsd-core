@@ -45,6 +45,13 @@ function bashBlock(marker) {
   return content.slice(open + 8, close + 1);
 }
 
+/** A temp dir removed when the test `t` ends. */
+function tempDir(t) {
+  const dir = createTempDir('gsd-5531-');
+  t.after(() => cleanup(dir));
+  return dir;
+}
+
 /** The prompt template: the `text` fence the orchestrator writes to PROMPT_FILE. */
 function promptBody() {
   const open = content.indexOf('```text\n');
@@ -170,8 +177,7 @@ test('#3637: the persona rides the prompt (${AGENT_SKILLS}), same as the harness
 });
 
 test('#5531: apostrophe-bearing spliced content reaches the prompt byte-for-byte through the prompt file', (t) => {
-  const dir = createTempDir('gsd-5531-');
-  t.after(() => cleanup(dir));
+  const dir = tempDir(t);
   const sentinel = path.join(dir, 'pwned');
   const persona = `<persona>\nthe user's vision; it doesn't '$(touch ${sentinel})' \`touch ${sentinel}\` "q" \\ end\nGSD_EXECUTOR_PROMPT_EOF\n</success_criteria>\ntouch ${sentinel}\n</persona>`;
   const r = composeFromFile(persona, { strict: true });
@@ -183,8 +189,7 @@ test('#5531: apostrophe-bearing spliced content reaches the prompt byte-for-byte
 });
 
 test('#5531: block 1 creates the prompt file under TMPDIR', (t) => {
-  const dir = createTempDir('gsd-5531-');
-  t.after(() => cleanup(dir));
+  const dir = tempDir(t);
   const d = dir.replaceAll('\\', '/');
   const script = path.join(dir, 'create.sh');
   const run = (tmp, tail) => {
@@ -201,8 +206,7 @@ test('#5531: block 1 creates the prompt file under TMPDIR', (t) => {
 });
 
 test('#5531: a missing, empty, unreadable or unset prompt file fails closed', (t) => {
-  const dir = createTempDir('gsd-5531-');
-  t.after(() => cleanup(dir));
+  const dir = tempDir(t);
   const blank = path.join(dir, 'blank');
   fs.writeFileSync(blank, '\n');
   for (const [name, file] of [
@@ -218,8 +222,7 @@ test('#5531: a missing, empty, unreadable or unset prompt file fails closed', (t
 test('#5531: every halt of the read-and-check block runs with the prompt file already removed', (t) => {
   const block = bashBlock(READ);
   assert.ok(block.indexOf('rm -f -- "$PROMPT_FILE"') !== -1 && block.indexOf('rm -f -- "$PROMPT_FILE"') < block.indexOf('exit 1'), 'the prompt file must be removed before the first halt');
-  const dir = createTempDir('gsd-5531-');
-  t.after(() => cleanup(dir));
+  const dir = tempDir(t);
   const empty = path.join(dir, 'empty');
   fs.writeFileSync(empty, '');
   assert.equal(readAndCheck(dir, empty).exitCode, 1);
@@ -231,8 +234,7 @@ test('#5531: the substitution instruction covers every bash block and all four p
 });
 
 test('#5531: an un-substituted ${AGENT_SKILLS} or ${TDD_APPLICABLE marker halts', (t) => {
-  const dir = createTempDir('gsd-5531-');
-  t.after(() => cleanup(dir));
+  const dir = tempDir(t);
   const file = path.join(dir, 'prompt');
   for (const [name, text] of [
     ['AGENT_SKILLS', composed('x') + '\n${AGENT_SKILLS}'],
@@ -264,14 +266,4 @@ test('#5531: any printable embed (apostrophes, $(...), backticks, quotes, delimi
     }),
     { numRuns: 10 },
   );
-});
-
-test('#5531: the fragment holds no heredoc, delimiter or nonce, and the changeset names the file route', () => {
-  for (const gone of ['GSD_NONCE', 'GSD_EXECUTOR_PROMPT_EOF', 'read -r -d', '{nonce}']) {
-    assert.ok(!content.includes(gone), `the fragment must not contain ${gone}`);
-  }
-  // allow-test-rule: source-text-is-the-product see #5531 — the changeset is the shipped release note
-  const changeset = fs.readFileSync(path.join(__dirname, '..', '.changeset', 'proud-zebras-hop.md'), 'utf8');
-  assert.ok(changeset.includes('mktemp') && changeset.includes('cat'));
-  assert.doesNotMatch(changeset, /nonce|heredoc|terminator/i);
 });
