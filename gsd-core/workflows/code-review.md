@@ -918,12 +918,10 @@ fi
 # dispatch_reviewer_lanes persisted the evidence state (a no-op when no lane produced evidence); the state
 # records the --auto decision, so this fence needs no FIX_AUTO or EXTERNAL_EVIDENCE_BLOCK from an earlier step.
 # A valid REVIEW.md keeps an --auto run's state and lane dir for code-review-fix.md's re-reviews, which remove
-# both when the loop ends; any other run starts no fixer loop, so both go now. A gsd-tools without the verb
-# cannot clear, and persisted no state either, so the dir it would have kept is removed directly.
+# both when the loop ends; any other run starts no fixer loop, so both go now. A persist that failed to read
+# the block left a `once` state naming the dir, so this clear removes that dir too.
 KEEP_AUTO=""; [ "$HAS_STATUS" = "valid" ] && KEEP_AUTO="--keep-auto"
-gsd_run lane-evidence-clear "$REVIEW_PATH" $KEEP_AUTO || case "${LANE_RUN_DIR:-}" in
-  "${TMPDIR:-/tmp}"/gsd-review-lanes-??????) [ -L "$LANE_RUN_DIR" ] || rm -rf "$LANE_RUN_DIR" ;;
-esac
+gsd_run lane-evidence-clear "$REVIEW_PATH" $KEEP_AUTO || true
 ```
 </step>
 

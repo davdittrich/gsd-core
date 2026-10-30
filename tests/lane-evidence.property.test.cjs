@@ -9,18 +9,12 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const fc = require('./helpers/fast-check-setup.cjs');
-const { createTempDir, cleanup } = require('./helpers.cjs');
 const { persistLaneEvidence, readLaneEvidence, laneStatePath } = require('../gsd-core/bin/lib/lane-evidence.cjs');
 
 const SUFFIX_RE = /^[A-Za-z0-9]{6}$/;
 const runs = { numRuns: 60 }; // every sample touches disk
 
-function sandbox(t) {
-  const dir = createTempDir('gsd-5019p-');
-  t.after(() => cleanup(dir));
-  const tmp = path.join(dir, 'tmp'); fs.mkdirSync(tmp);
-  return { dir, tmp, review: path.join(dir, '01-REVIEW.md') };
-}
+const sandbox = require('./helpers/lane-sandbox.cjs');
 
 describe('#5019 lane-evidence grammar (property)', () => {
   test('accepts iff ^[A-Za-z0-9]{6}$ (limit-1/limit/limit+1)', (t) => {

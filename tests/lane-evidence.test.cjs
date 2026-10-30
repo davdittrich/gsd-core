@@ -10,26 +10,16 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { runNode, runHook } = require('./helpers/process-seam.cjs');
 const { PROBE_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
-const { createTempDir, cleanup } = require('./helpers.cjs');
+const { cleanup } = require('./helpers.cjs');
 
 const ROOT = path.resolve(__dirname, '..');
 const GSD_TOOLS = path.join(ROOT, 'gsd-core', 'bin', 'gsd-tools.cjs');
-const { persistLaneEvidence, readLaneEvidence, clearLaneEvidence, cmdLaneEvidencePersist, laneStatePath } = require('../gsd-core/bin/lib/lane-evidence.cjs');
+const { persistLaneEvidence, readLaneEvidence, clearLaneEvidence, cmdLaneEvidencePersist } = require('../gsd-core/bin/lib/lane-evidence.cjs');
 
 const BLOCK = '<external_reviewer_evidence>X</external_reviewer_evidence>';
 const symlink = (target, link) => { try { fs.symlinkSync(target, link); return true; } catch { return false; } };
 
-// A scratch TMPDIR plus an outside "victim" dir no verb may touch.
-function sandbox(t) {
-  const dir = createTempDir('gsd-5019-');
-  t.after(() => cleanup(dir));
-  const tmp = path.join(dir, 'tmp'); fs.mkdirSync(tmp);
-  const victim = path.join(dir, 'victim'); fs.mkdirSync(victim);
-  fs.writeFileSync(path.join(victim, 'keep'), 'x');
-  const review = path.join(dir, '01-REVIEW.md');
-  const lane = (suffix) => { const d = path.join(tmp, `gsd-review-lanes-${suffix}`); fs.mkdirSync(d); return d; };
-  return { dir, tmp, victim, review, lane, state: laneStatePath(review, tmp) };
-}
+const sandbox = require('./helpers/lane-sandbox.cjs');
 const age = (file, minutes) => { const d = new Date(Date.now() - minutes * 60000); fs.utimesSync(file, d, d); };
 
 describe('#5019 lane-evidence verbs', () => {
@@ -90,8 +80,8 @@ describe('#5019 lane-evidence verbs', () => {
     const sb = sandbox(t);
     const d = sb.lane('abc123');
     fs.mkdirSync(sb.state); // a directory where the state file goes: the rename fails
-    const prev = process.stderr.write; process.stderr.write = () => true;
-    try { persistLaneEvidence(sb.review, 'abc123', 'auto', BLOCK, sb.tmp); } finally { process.stderr.write = prev; }
+    t.mock.method(process.stderr, 'write', () => true);
+    persistLaneEvidence(sb.review, 'abc123', 'auto', BLOCK, sb.tmp);
     assert.strictEqual(fs.existsSync(d), false);
   });
 
@@ -107,21 +97,40 @@ describe('#5019 lane-evidence verbs', () => {
     const sb = sandbox(t);
     sb.lane('abc123');
     persistLaneEvidence(sb.review, 'abc123', 'once', BLOCK, sb.tmp);
-    const prev = process.stderr.write; process.stderr.write = () => true;
-    try { assert.strictEqual(readLaneEvidence(sb.review, sb.tmp), ''); } finally { process.stderr.write = prev; }
+    t.mock.method(process.stderr, 'write', () => true);
+    assert.strictEqual(readLaneEvidence(sb.review, sb.tmp), '');
   });
 
-  test('a failed stdin read is an error exit that keeps the lane dir', (t) => {
+  test('a failed stdin read is an error exit that keeps the lane dir under a once state, which clear then removes', (t) => {
+    const prevEnv = { TMPDIR: process.env.TMPDIR, TEMP: process.env.TEMP, TMP: process.env.TMP }; // registered before the sandbox so it restores first: cleanup() reads TMPDIR
+    t.after(() => { for (const [k, v] of Object.entries(prevEnv)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } });
     const sb = sandbox(t);
     const d = sb.lane('abc123');
     const realRead = fs.readFileSync;
     const errors = [];
-    fs.readFileSync = (f, ...rest) => { if (f === 0) throw Object.assign(new Error('EAGAIN: resource temporarily unavailable, read'), { code: 'EAGAIN' }); return realRead.call(fs, f, ...rest); };
-    const prevEnv = { ...process.env }; Object.assign(process.env, { TMPDIR: sb.tmp, TEMP: sb.tmp, TMP: sb.tmp });
-    try { cmdLaneEvidencePersist([sb.review, 'abc123', 'auto'], (m) => errors.push(m)); } finally { fs.readFileSync = realRead; Object.assign(process.env, prevEnv); }
+    t.mock.method(fs, 'readFileSync', (f, ...rest) => { if (f === 0) throw Object.assign(new Error('EAGAIN: resource temporarily unavailable, read'), { code: 'EAGAIN' }); return realRead.call(fs, f, ...rest); });
+    Object.assign(process.env, { TMPDIR: sb.tmp, TEMP: sb.tmp, TMP: sb.tmp });
+    cmdLaneEvidencePersist([sb.review, 'abc123', 'auto'], (m) => errors.push(m));
     assert.strictEqual(errors.length, 1);
     assert.match(errors[0], /could not read the block from stdin/);
-    assert.deepStrictEqual([fs.existsSync(d), fs.existsSync(sb.state)], [true, false], 'a failed read is not "no evidence"');
+    assert.deepStrictEqual([fs.existsSync(d), fs.existsSync(sb.state)], [true, true], 'a failed read is not "no evidence": the dir stays until clear');
+    t.mock.method(process.stderr, 'write', () => true);
+    assert.strictEqual(readLaneEvidence(sb.review, sb.tmp), '', 'a once state is never re-surfaced');
+    clearLaneEvidence(sb.review, { keepAuto: true, tmpDir: sb.tmp });
+    assert.deepStrictEqual([fs.existsSync(d), fs.existsSync(sb.state)], [false, false]);
+  });
+
+  test('an unreadable state fails soft in read and clear instead of throwing', (t) => {
+    const sb = sandbox(t);
+    const d = sb.lane('abc123');
+    persistLaneEvidence(sb.review, 'abc123', 'auto', BLOCK, sb.tmp);
+    const realRead = fs.readFileSync;
+    t.mock.method(fs, 'readFileSync', (f, ...rest) => { if (f === sb.state) throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); return realRead.call(fs, f, ...rest); });
+    t.mock.method(process.stderr, 'write', () => true);
+    assert.strictEqual(readLaneEvidence(sb.review, sb.tmp), '');
+    clearLaneEvidence(sb.review, { tmpDir: sb.tmp });
+    assert.strictEqual(fs.existsSync(sb.state), false, 'the unreadable state we own is removed');
+    assert.strictEqual(fs.existsSync(d), true, 'what an unreadable state names is not trusted, so left alone');
   });
 
   test('clear --keep-auto keeps an auto state, removes once', (t) => {
@@ -205,15 +214,21 @@ describe('#5019 lane-evidence verbs', () => {
     assert.deepStrictEqual([fs.existsSync(d), fs.existsSync(sb.state)], [false, false]);
   });
 
-  test('persist writes nothing into the project tree or .git/info/exclude', { skip: process.platform === 'win32' }, (t) => {
+  test('persist, read and clear leave a git project tree and .git/info/exclude untouched', { skip: process.platform === 'win32' }, (t) => {
     const sb = sandbox(t);
+    const project = path.join(sb.dir, 'project'); fs.mkdirSync(project);
+    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')));
+    const git = (...a) => runHook('-c', [`git -C "${project}" ${a.join(' ')}`], { interpreter: 'bash', timeoutMs: PROBE_TIMEOUT_MS, env });
+    assert.strictEqual(git('init -q').exitCode, 0);
+    const review = path.join(project, '01-REVIEW.md');
+    const snap = () => [git('status --porcelain --ignored').stdout, fs.readFileSync(path.join(project, '.git', 'info', 'exclude'), 'utf8')];
+    const before = snap();
     sb.lane('abc123');
-    assert.strictEqual(runHook('-c', [`git -C "${sb.dir}" init -q`], { interpreter: 'bash', timeoutMs: PROBE_TIMEOUT_MS }).exitCode, 0);
-    const exclude = path.join(sb.dir, '.git', 'info', 'exclude');
-    const before = fs.existsSync(exclude) ? fs.readFileSync(exclude, 'utf8') : null;
-    const tree = () => fs.readdirSync(sb.dir).filter((n) => n !== 'tmp' && n !== 'victim' && n !== '.git').sort();
-    persistLaneEvidence(sb.review, 'abc123', 'auto', BLOCK, sb.tmp);
-    assert.deepStrictEqual(tree(), []);
-    assert.strictEqual(fs.existsSync(exclude) ? fs.readFileSync(exclude, 'utf8') : null, before);
+    persistLaneEvidence(review, 'abc123', 'auto', BLOCK, sb.tmp);
+    readLaneEvidence(review, sb.tmp);
+    assert.deepStrictEqual(snap(), before);
+    clearLaneEvidence(review, { tmpDir: sb.tmp });
+    assert.deepStrictEqual(snap(), before);
+    assert.deepStrictEqual(fs.readdirSync(project), ['.git']);
   });
 });

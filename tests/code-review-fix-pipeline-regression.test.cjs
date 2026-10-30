@@ -273,7 +273,7 @@ describe('#3190 — code-review-fix --auto REVIEW.md commit + FIX_REPORT_PATH en
 describe('#5019 — --auto re-review keeps the external reviewer lane evidence', () => {
   const FIX = fs.readFileSync(WORKFLOW_PATH, 'utf8');
   const REVIEW = fs.readFileSync(path.join(ROOT, 'gsd-core', 'workflows', 'code-review.md'), 'utf8');
-  const { persistLaneEvidence, laneStatePath } = require('../gsd-core/bin/lib/lane-evidence.cjs');
+  const { persistLaneEvidence } = require('../gsd-core/bin/lib/lane-evidence.cjs');
 
   // Lines [from, to] (inclusive, first match after `from`) of a step region, so a test RUNS the
   // shipped snippet instead of grepping it.
@@ -286,17 +286,7 @@ describe('#5019 — --auto re-review keeps the external reviewer lane evidence',
     assert.strictEqual(syntax.exitCode, 0, `extracted snippet is not complete shell: ${syntax.stderr}`);
     return runHook('-c', [script], { interpreter: 'bash', timeoutMs: PROBE_TIMEOUT_MS, ...(env && { env: { ...process.env, ...env } }) });
   };
-  // A scratch TMPDIR holding lane dirs plus an outside "victim" dir the guard must never touch.
-  const sandbox = (t, fn) => {
-    const dir = createTempDir('gsd-5019-');
-    t.after(() => cleanup(dir));
-    const tmp = path.join(dir, 'tmp'); fs.mkdirSync(tmp);
-    const victim = path.join(dir, 'victim'); fs.mkdirSync(victim);
-    fs.writeFileSync(path.join(victim, 'keep'), 'x');
-    const review = path.join(dir, '01-REVIEW.md');
-    const lane = (suffix) => { const d = path.join(tmp, `gsd-review-lanes-${suffix}`); fs.mkdirSync(d); return d; };
-    return fn({ dir, tmp, victim, review, lane, state: laneStatePath(review, tmp) });
-  };
+  const sandbox = (t, fn) => fn(require('./helpers/lane-sandbox.cjs')(t));
   // The env a fresh workflow shell has: the phase layout the real REVIEW_PATH expression derives from.
   const envOf = (sb) => `export TMPDIR="${sb.tmp}"; PHASE_DIR="${sb.dir}"; PADDED_PHASE=01`;
   const REVIEW_PATH_EXPR = 'REVIEW_PATH="${PHASE_DIR}/${PADDED_PHASE}-REVIEW.md"';
@@ -446,27 +436,18 @@ describe('#5019 — --auto re-review keeps the external reviewer lane evidence',
     });
   });
 
-  test('version skew: a gsd-tools without the verb lets the workflow continue', { skip: !HAS_BASH }, (t) => {
-    sandbox(t, (sb) => {
-      const r = bash(`gsd_run() { echo "Unknown command" >&2; return 1; }; REVIEW_PATH="${sb.review}"\n${REMOVALS.check_empty_scope()}`);
-      assert.strictEqual(r.exitCode, 0);
-    });
-  });
-
-  test('version skew: commit_review still removes the lane dir (never a symlink or foreign name) when the verb is missing', { skip: !HAS_BASH }, (t) => {
-    const fence = stepFence(REVIEW, 'commit_review');
+  test('a stdin read failure in persist still lets commit_review remove the lane dir, from a fresh shell', { skip: !HAS_BASH }, (t) => {
     sandbox(t, (sb) => {
       const lanes = sb.lane('abc123');
-      const skewed = (dir) => bash(`${envOf(sb)}; REVIEW_PATH="${sb.review}"; LANE_RUN_DIR="${dir}"; COMMIT_DOCS=false\ngsd_run() { echo "Unknown command" >&2; return 1; }\n${fence}`);
-      assert.strictEqual(skewed(lanes).exitCode, 0);
-      assert.strictEqual(fs.existsSync(lanes), false, 'the lane dir the missing verb could not clear is removed');
-      const link = path.join(sb.tmp, 'gsd-review-lanes-abc124');
-      if (process.platform !== 'win32') {
-        fs.symlinkSync(sb.victim, link);
-        skewed(link);
-        skewed(sb.victim);
-        assert.strictEqual(fs.existsSync(path.join(sb.victim, 'keep')), true, 'a symlink or a dir outside the mktemp name is left alone');
-      }
+      const preload = path.join(sb.dir, 'fail-stdin.cjs');
+      fs.writeFileSync(preload, "const fs = require('node:fs'); const r = fs.readFileSync; fs.readFileSync = (f, ...a) => { if (f === 0) throw new Error('EAGAIN'); return r.call(fs, f, ...a); };\n");
+      const env = { NODE_OPTIONS: `-r ${preload}` };
+      const persist = bash(`${envOf(sb)}; ${REVIEW_PATH_EXPR}\nprintf '%s' blk | gsd_run lane-evidence-persist "$REVIEW_PATH" abc123 auto || true`, env);
+      assert.match(persist.stderr, /could not read the block from stdin/);
+      assert.strictEqual(fs.existsSync(lanes), true, 'the dir the reviewer cites survives until commit_review');
+      assert.strictEqual(fs.existsSync(sb.state), true, 'a state is left so the clear can find the dir');
+      bash(`${envOf(sb)}; ${REVIEW_PATH_EXPR}; COMMIT_DOCS=false\n${stepFence(REVIEW, 'commit_review')}`);
+      assert.deepStrictEqual([fs.existsSync(lanes), fs.existsSync(sb.state), fs.existsSync(path.join(sb.victim, 'keep'))], [false, false, true]);
     });
   });
 

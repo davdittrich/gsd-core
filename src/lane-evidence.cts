@@ -47,7 +47,9 @@ function loadState(file: string): { suffix: string; mode: string; block: string;
   let st: fs.Stats;
   try { st = fs.lstatSync(file); } catch { return null; }
   if (!st.isFile() || !ownedByCurrentUser(st)) return 'rejected';
-  const m = STATE_RE.exec(fs.readFileSync(file, 'utf8'));
+  let text: string;
+  try { text = fs.readFileSync(file, 'utf8'); } catch { return 'rejected'; } // a race or EACCES fails soft, like clear
+  const m = STATE_RE.exec(text);
   return m ? { suffix: m[1], mode: m[2], block: m[3], mtimeMs: st.mtimeMs } : 'rejected';
 }
 
@@ -104,7 +106,13 @@ export function cmdLaneEvidencePersist(args: string[], error: (msg: string) => v
   const [reviewPath, suffix, mode] = args;
   if (!reviewPath || !suffix || !mode) { error('Usage: lane-evidence-persist <review-path> <suffix> <auto|once>'); return; }
   let block: string;
-  try { block = fs.readFileSync(0, 'utf8'); } catch (e) { error(`lane-evidence-persist: could not read the block from stdin: ${(e as Error).message}`); return; }
+  try { block = fs.readFileSync(0, 'utf8'); } catch (e) {
+    // The reviewer may still cite the lane dir, so keep it now; a `once` state (read ignores it) lets the
+    // clear in commit_review find and remove it later. Recorded before `error`, which may exit.
+    try { persistLaneEvidence(reviewPath, suffix, 'once', 'unreadable'); } catch { /* bad suffix: nothing to record */ }
+    error(`lane-evidence-persist: could not read the block from stdin: ${(e as Error).message}`);
+    return;
+  }
   try { persistLaneEvidence(reviewPath, suffix, mode, block); } catch (e) { error((e as Error).message); }
 }
 
