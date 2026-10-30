@@ -158,7 +158,7 @@ const isSha = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{4
 
 // Cap for repo-controlled text the gate reads (the seal and SUMMARY.md); a real one is a few KiB at most; anything bigger is not read (repo content, so hostile).
 const REPO_TEXT_MAX_BYTES = 64 * 1024;
-/** #5354: most distinct SUMMARY task commits probed per plan; each costs one `git merge-base` spawn, plus one `git show` per id that exists, plus one `git log` per plan when every id is unreachable. */
+/** #5354: most distinct SUMMARY task commits probed per plan; each costs one `git merge-base` spawn, plus one `git show` per id that exists, plus one `git rev-list` per plan when every id is unreachable. */
 const SUMMARY_REFS_MAX = 64;
 
 /** lstat, so a symlink is seen as a symlink. Never throws. */
@@ -275,9 +275,10 @@ function summaryCommitsAllUnreachable(projectDir: string, phaseDir: string, plan
     // A ref that no longer exists was squashed away, so not every ref was rewritten.
     if (existing.length < probes.length) return true;
     // Subjects of commits reachable from HEAD but not from the refs; a failed log leans to FAIL (rewritten).
-    const log = execGit(['log', '--format=%s', 'HEAD', '--not', ...existing], { cwd: projectDir });
+    const log = execGit(['rev-list', '--format=%s', 'HEAD', '--not', ...existing], { cwd: projectDir });
     if (log.timedOut || log.exitCode !== 0) return false;
-    const onHead = new Set(log.stdout.split('\n').filter(Boolean));
+    // rev-list prints a `commit <sha>` header line before each subject line.
+    const onHead = new Set(log.stdout.split('\n').filter((_, i) => i % 2 === 1));
     return !existing.every((id) => onHead.has(subjectOf(id)));
   }
   return false;
