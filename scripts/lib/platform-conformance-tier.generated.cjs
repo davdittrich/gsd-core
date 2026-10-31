@@ -77,6 +77,7 @@ module.exports = {
   "tests/completion-ratio-scope-withholding.test.cjs",
   "tests/config-defaults-runtime-exclusion.test.cjs",
   "tests/config-get-default.test.cjs",
+  "tests/config-loader-commit-docs.test.cjs",
   "tests/config-loader.test.cjs",
   "tests/config-schema.property.test.cjs",
   "tests/config.platform.test.cjs",
