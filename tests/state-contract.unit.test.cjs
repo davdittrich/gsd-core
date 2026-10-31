@@ -1229,7 +1229,7 @@ describe('state contract — write mechanics', () => {
 
 describe('state contract — state.json is git-ignored via info/exclude (#5505)', () => {
   const { createTempGitProject } = require('./helpers.cjs');
-  const { gitOrThrow } = require('./helpers/git-fixture.cjs');
+  const { gitOrThrow, isFsLegalName } = require('./helpers/git-fixture.cjs');
   const { splitLines } = require('../gsd-core/bin/lib/text-lines.cjs');
   const git = (cwd, ...args) => gitOrThrow(args, { cwd });
   const excludeOf = (cwd) => path.resolve(cwd, git(cwd, 'rev-parse', '--git-path', 'info/exclude').trim());
@@ -1392,10 +1392,12 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
   test('prefixEscapeAndNegationProperty', () => {
     const esc = (x) => x.replace(/[\\*?[]/g, '\\$&');
     const chars = fc.constantFrom(...(process.platform === 'win32' ? [] : ['\\', '*', '?']), '[', ']', '#', '!', ' ', 'a', 'b');
+    // Windows strips a trailing space from a directory name and rejects the glob characters; POSIX keeps every case.
+    const legal = (name) => isFsLegalName(name) && !(process.platform === 'win32' && /[ .]$/.test(name));
     // 0, 1, 6 and 7 characters: the project at the repo root, and the bounds of the name length
     const names = fc.oneof(
       fc.constant(''),
-      ...[1, 6, 7].map((n) => fc.array(chars, { minLength: n - 1, maxLength: n - 1 }).map((cs) => `d${cs.join('')}`)),
+      ...[1, 6, 7].map((n) => fc.array(chars, { minLength: n - 1, maxLength: n - 1 }).map((cs) => `d${cs.join('')}`).filter(legal)),
     );
     const spellings = fc.constantFrom('none', 'anchoredRel', 'rel', 'filename');
     fc.assert(fc.property(names, spellings, (name, spelling) => {
