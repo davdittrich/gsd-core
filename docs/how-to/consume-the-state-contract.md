@@ -208,15 +208,16 @@ index; `/gsd-health` (`validate health`) reports such a copy as warning `W031`
 with the exact command for the paths it found, e.g.
 `git --literal-pathspecs rm --cached --ignore-unmatch -- .planning/state.json`
 (or `.planning/workstreams/<name>/state.json`, `.planning/<project>/state.json`,
-`.planning/<project>/workstreams/<name>/state.json`). Run it once and commit the
-removal; the file stays on disk, rerunning it is a no-op, and `--repair` never
+`.planning/<project>/workstreams/<name>/state.json`). From the project directory
+(the one holding `.planning/`), run it once and commit the removal; the file stays on disk, rerunning it is a no-op, and `--repair` never
 runs it for you. A teammate whose tracked copy is modified (the usual case)
 cannot pull that commit (`Your local changes ... would be overwritten by
 merge`): they run `git checkout -- <path>` (or stash) first, and the next
 boundary regenerates the file. When `commit_docs` resolves to false (set as
-`commit_docs` or `planning.commit_docs`, or `.planning/` ignored while a usable
-`config.json` sets neither), GSD does not touch `.git/info/exclude`; an
-explicit `commit_docs: true` still gets the entry on an ignored `.planning/`.
+`commit_docs` or `planning.commit_docs`) or `.planning/` is already ignored, GSD
+does not add `state.json` to `.git/info/exclude`; the per-machine `milestone.lock`
+claim is excluded whatever `commit_docs` says. A repo that merely encloses the
+project, tracking nothing under it, is left alone too.
 If you keep `.planning/` out of your repo entirely, see
 [Keep planning docs out of a shared repo](keep-planning-docs-private.md).
 

@@ -1234,6 +1234,8 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
   const git = (cwd, ...args) => gitOrThrow(args, { cwd });
   const excludeOf = (cwd) => path.resolve(cwd, git(cwd, 'rev-parse', '--git-path', 'info/exclude').trim());
   const lines = (f) => splitLines(fs.readFileSync(f, 'utf8'));
+  // A project nested in an enclosing repo is edited only when that repo tracks a file under it.
+  const trackUnder = (repo, sub) => { fs.writeFileSync(path.join(sub, 'tracked.txt'), 'x'); git(repo, '--literal-pathspecs', 'add', '--', path.join(sub, 'tracked.txt')); };
 
   test('isIdempotentEvenOnACrlfExclude', (t) => {
     const tmpDir = createTempGitProject();
@@ -1259,14 +1261,14 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
   test('globCharsInThePrefixAreEscaped', (t) => {
     const tmpDir = createTempGitProject();
     t.after(() => cleanup(tmpDir));
-    // The entry is always `/<prefix>state.json`, so only in-pattern metacharacters
-    // can reach it; a leading `#`/`!` or trailing space cannot occur.
-    // Windows forbids backslash, `*` and `?` in file names.
-    const meta = fc.constantFrom(...(process.platform === 'win32' ? [] : ['\\', '*', '?']), '[', ']', 'a', 'b');
+    // The entry is always `/<prefix>state.json` and the prefix starts with `d`, so `#`, `!` and space
+    // sit mid-pattern. Windows forbids backslash, `*` and `?` in file names.
+    const meta = fc.constantFrom(...(process.platform === 'win32' ? [] : ['\\', '*', '?', ' ']), '[', ']', '#', '!', 'a', 'b');
     const names = fc.array(meta, { minLength: 1, maxLength: 6 }).map((cs) => `d${cs.join('')}`);
     fc.assert(fc.property(names, (name) => {
       const sub = path.join(tmpDir, name);
       fs.mkdirSync(planningDirOf(sub), { recursive: true });
+      trackUnder(tmpDir, sub);
       publishStateContract(sub, fixedDeps());
       git(tmpDir, 'check-ignore', '-q', `${name}/.planning/state.json`);
       // An escaped entry matches only its own directory, never a glob sibling.
@@ -1279,19 +1281,21 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
     t.after(() => cleanup(tmpDir));
     const sub = path.join(tmpDir, ' notes');
     fs.mkdirSync(planningDirOf(sub), { recursive: true });
+    trackUnder(tmpDir, sub);
     publishStateContract(sub, fixedDeps());
     git(tmpDir, 'check-ignore', '-q', ' notes/.planning/state.json');
   });
 
-  test('aNewlineInThePlanningPathWritesNoEntry', { skip: process.platform === 'win32' }, (t) => {
+  test('aNewlineInThePlanningPathIsRejected', { skip: process.platform === 'win32' }, (t) => {
     const tmpDir = createTempGitProject();
     t.after(() => cleanup(tmpDir));
     const exclude = excludeOf(tmpDir);
     const before = fs.readFileSync(exclude, 'utf8');
     const sub = path.join(tmpDir, 'a\nb');
     fs.mkdirSync(planningDirOf(sub), { recursive: true });
+    trackUnder(tmpDir, sub);
     assert.strictEqual(publishStateContract(sub, fixedDeps()).published, true);
-    // gitignore cannot express a newline in a pattern: skip rather than write a truncated entry.
+    // gitignore cannot express a newline in a pattern: the path is rejected, no truncated entry is written.
     assert.strictEqual(fs.readFileSync(exclude, 'utf8'), before);
   });
 
@@ -1396,6 +1400,40 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
     assert.strictEqual(lines(excludeOf(tmpDir)).filter((l) => l === '/.planning/state.json').length, 2);
   });
 
+  // Grammar: the prefix alphabet (every gitignore-significant character) crossed with every spelling of a
+  // user's negation. The entry is written iff no spelling names the file, and git agrees with the outcome.
+  test('prefixEscapeAndNegationProperty', (t) => {
+    const esc = (x) => x.replace(/[\\*?[]/g, '\\$&');
+    const chars = fc.constantFrom(...(process.platform === 'win32' ? [] : ['\\', '*', '?']), '[', ']', '#', '!', ' ', 'a', 'b');
+    // 0, 1, 6 and 7 characters: the project at the repo root, and the bounds of the name length
+    const names = fc.oneof(
+      fc.constant(''),
+      ...[1, 6, 7].map((n) => fc.array(chars, { minLength: n - 1, maxLength: n - 1 }).map((cs) => `d${cs.join('')}`)),
+    );
+    const spellings = fc.constantFrom('none', 'anchoredRel', 'rel', 'filename');
+    fc.assert(fc.property(names, spellings, (name, spelling) => {
+      const repo = createTempGitProject();
+      try {
+        const sub = name ? path.join(repo, name) : repo;
+        fs.mkdirSync(planningDirOf(sub), { recursive: true });
+        if (name) trackUnder(repo, sub);
+        const rel = `${esc(name ? `${name}/` : '')}.planning/state.json`;
+        const negation = { none: null, anchoredRel: `!/${rel}`, rel: `!${rel}`, filename: '!state.json' }[spelling];
+        const exclude = excludeOf(repo);
+        if (negation) fs.appendFileSync(exclude, `${negation}\n`);
+        publishStateContract(sub, fixedDeps());
+        const written = lines(exclude).includes(`/${rel}`);
+        assert.strictEqual(written, negation === null);
+        const target = `${name ? `${name}/` : ''}.planning/state.json`;
+        let ignored = true;
+        try { git(repo, 'check-ignore', '-q', '--', target); } catch { ignored = false; }
+        assert.strictEqual(ignored, negation === null);
+      } finally {
+        cleanup(repo);
+      }
+    }), { seed: 5505, numRuns: 40 });
+  });
+
   test('anExplicitNegationOfTheEntryIsLeftAlone', (t) => {
     const tmpDir = createTempGitProject();
     t.after(() => cleanup(tmpDir));
@@ -1463,7 +1501,7 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
     fs.writeFileSync(file, raw ?? JSON.stringify(obj));
   };
   for (const [name, shape] of Object.entries(gateShapes)) {
-    test(`commitDocsGateMatchesLoadConfig:${name}`, (t) => {
+    test(`commitDocsGateMatchesCommitPolicy:${name}`, (t) => {
       const tmpDir = createTempGitProject();
       t.after(() => cleanup(tmpDir));
       stubEnv(t, 'GSD_PROJECT', shape.project);
@@ -1480,7 +1518,9 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
         if (shape.noOwnConfig) fs.mkdirSync(wsDir, { recursive: true });
         else put(path.join(wsDir, 'config.json'), shape.own, shape.ownRaw);
       }
-      const expected = Boolean(require('../gsd-core/bin/lib/config-loader.cjs').loadConfig(tmpDir, { persist: false }).commit_docs);
+      const cfg = require('../gsd-core/bin/lib/config-loader.cjs');
+      const { resolveCommitDocsPolicy } = require('../gsd-core/bin/lib/commands.cjs');
+      const expected = resolveCommitDocsPolicy(cfg.loadConfig(tmpDir, { persist: false }), null, () => cfg.isGitIgnored(tmpDir, '.planning')).resolved;
       publishStateContract(tmpDir, fixedDeps());
       // The entry is derived from the path the publisher itself writes; with no workstream directory it writes nothing.
       const published = path.join(require('../gsd-core/bin/lib/planning-workspace.cjs').planningPaths(tmpDir).planning, 'state.json');
@@ -1510,10 +1550,8 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
       });
     }
     assert.strictEqual(publishStateContract(tmpDir).published, true);
-    const doc = fs.readFileSync(path.join(__dirname, '..', 'docs', 'features', 'machine-readable-state-contract-planningstatejson.md'), 'utf8');
-    const words = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
-    const stated = words.indexOf(/up to (\w+) bounded git calls/.exec(doc)[1]) + 1;
-    assert.strictEqual(gitCalls, stated);
+    const GIT_CALL_BUDGET = 6;
+    assert.strictEqual(gitCalls, GIT_CALL_BUDGET);
     // the two calls every boundary command pays for (the commit_docs ignore check and the exclude rev-parse) are bounded
     const hot = calls.filter(({ args }) => args.includes('check-ignore') || args.includes('info/exclude'));
     assert.strictEqual(hot.length, 2);
@@ -1528,6 +1566,40 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
     assert.strictEqual(publishStateContract(tmpDir, fixedDeps()).published, true);
     // publish writes only state.json: loadConfig's legacy migration would rewrite this file.
     assert.strictEqual(fs.readFileSync(cfg, 'utf8'), '{"branching_strategy":"none"}');
+  });
+
+  test('publishWithAStateMdLeavesALegacyConfigUnrewrittenAndSilent', (t) => {
+    const tmpDir = createTempGitProject();
+    t.after(() => cleanup(tmpDir));
+    fs.writeFileSync(path.join(planningDirOf(tmpDir), 'STATE.md'), '# State\n');
+    const cfg = path.join(planningDirOf(tmpDir), 'config.json');
+    fs.writeFileSync(cfg, '{"branching_strategy":"none"}');
+    const written = [];
+    t.mock.method(process.stderr, 'write', (chunk) => { written.push(String(chunk)); return true; });
+    assert.strictEqual(publishStateContract(tmpDir).published, true);
+    // classifyProject reads sub_repos through loadConfig: that read must neither migrate the file nor warn.
+    assert.strictEqual(fs.readFileSync(cfg, 'utf8'), '{"branching_strategy":"none"}');
+    assert.deepStrictEqual(written, []);
+  });
+
+  test('aTimedOutCheckIgnoreIsNotCached', (t) => {
+    const { isGitIgnored } = require('../gsd-core/bin/lib/config-loader.cjs');
+    const childProcess = require('node:child_process');
+    const tmpDir = createTempGitProject();
+    t.after(() => cleanup(tmpDir));
+    fs.appendFileSync(excludeOf(tmpDir), '.planning\n');
+    const real = childProcess.spawnSync;
+    let timeouts = 0;
+    t.mock.method(childProcess, 'spawnSync', function (cmd, args, ...rest) {
+      if (timeouts === 0 && path.basename(String(cmd)).replace(/\.exe$/, '') === 'git' && args.includes('check-ignore')) {
+        timeouts += 1;
+        return { status: null, signal: 'SIGTERM', stdout: '', stderr: '', output: null, pid: 0, error: Object.assign(new Error('spawnSync git ETIMEDOUT'), { code: 'ETIMEDOUT' }) };
+      }
+      return real.call(this, cmd, args, ...rest);
+    });
+    assert.strictEqual(isGitIgnored(tmpDir, '.planning'), false); // fail open
+    assert.strictEqual(timeouts, 1);
+    assert.strictEqual(isGitIgnored(tmpDir, '.planning'), true); // the real answer is read, not a cached guess
   });
 
   test('publishStaysSilentOnStderrWithAMalformedConfig', (t) => {

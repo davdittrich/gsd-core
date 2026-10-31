@@ -138,6 +138,8 @@ interface Owners {
   platformWriteSync: typeof import('./shell-command-projection.cjs')['platformWriteSync'];
   excludeFromGit: typeof import('./git-info-exclude.cjs')['excludeFromGit'];
   loadConfig: typeof import('./config-loader.cjs')['loadConfig'];
+  isGitIgnored: typeof import('./config-loader.cjs')['isGitIgnored'];
+  execGit: typeof import('./shell-command-projection.cjs')['execGit'];
   locateRoadmapProgress: typeof import('./roadmap-progress.cjs')['locateRoadmapProgress'];
   isSentinelPhaseId: typeof import('./phase-id.cjs')['isSentinelPhaseId'];
   parsePhaseFromProse: typeof import('./phase-id.cjs')['parsePhaseFromProse'];
@@ -180,6 +182,8 @@ function owners(): Owners {
     platformWriteSync: shellCommandProjectionMod.platformWriteSync,
     excludeFromGit: gitInfoExcludeMod.excludeFromGit,
     loadConfig: configLoaderMod.loadConfig,
+    isGitIgnored: configLoaderMod.isGitIgnored,
+    execGit: shellCommandProjectionMod.execGit,
     locateRoadmapProgress: roadmapProgressMod.locateRoadmapProgress,
     isSentinelPhaseId: phaseIdMod.isSentinelPhaseId,
     parsePhaseFromProse: phaseIdMod.parsePhaseFromProse,
@@ -412,6 +416,10 @@ export function buildStateContract(cwd: string, deps?: StateContractDeps): State
  * {recursive:true})`, so without it the publisher would conjure a
  * `.planning/` tree inside a non-GSD directory.
  *
+ * Side effect (#5505): after a successful write it may append `/<prefix>state.json` to the
+ * enclosing repo's `.git/info/exclude` (best-effort, see `excludeFromGit`), gated on the commit
+ * policy and on that repo owning the project.
+ *
  * `withPlanningLock` is deliberately NOT taken here — see the module-doc
  * "REQUIRE-CYCLE HAZARD" section's sibling note: it is not re-entrant and
  * several phase commands already hold it when they call this publisher, so
@@ -447,12 +455,21 @@ export function publishStateContract(cwd: string, deps?: StateContractDeps): { p
     }
 
     try {
-      // commit_docs false (explicit, or .planning already ignored) means the user keeps
-      // planning out of git: leave the enclosing repo's exclude alone. loadConfig's own
-      // resolution, with `persist: false, quiet: true` so it neither migrates config
-      // files nor warns on stderr.
-      if (owners().loadConfig(cwd, { persist: false, quiet: true })['commit_docs']) {
-        owners().excludeFromGit(path.dirname(statePath), 'state.json');
+      // Same tiers as cmdCommit's resolveCommitDocsPolicy (commit_docs, then an ignored .planning/), read with
+      // `persist: false, quiet: true`; and only a repo that owns the project gets an entry.
+      const stateDir = path.dirname(statePath);
+      if (owners().loadConfig(cwd, { persist: false, quiet: true })['commit_docs'] && !owners().isGitIgnored(cwd, '.planning')) {
+        const root = path.resolve(cwd);
+        let owned = false;
+        for (let d = path.resolve(stateDir); !owned; d = path.dirname(d)) {
+          owned = fs.existsSync(path.join(d, '.git'));
+          if (d === root || d === path.dirname(d)) break;
+        }
+        if (!owned) {
+          const r = owners().execGit(['ls-files', '-z', '--', '.', ':(exclude).planning'], { cwd, timeout: 5_000 });
+          owned = (r.error as NodeJS.ErrnoException | undefined)?.code === 'ENOBUFS' || (r.exitCode === 0 && r.stdout.length > 0);
+        }
+        if (owned) owners().excludeFromGit(stateDir, 'state.json');
       }
     } catch {
       // REQ-SC-04: ignoring is optional; never perturb the publish result.

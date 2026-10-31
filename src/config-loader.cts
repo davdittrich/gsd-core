@@ -249,6 +249,7 @@ function isGitIgnored(cwd: string, targetPath: string, env?: Record<string, stri
   if (_gitIgnoredCache.has(key)) return _gitIgnoredCache.get(key)!;
   // --no-index checks .gitignore rules regardless of whether the file is tracked.
   const result = execGit(['check-ignore', '-q', '--no-index', '--', normalized], { cwd, env, timeout: CHECK_IGNORE_TIMEOUT_MS });
+  if (result.timedOut) return false; // a bound hit says nothing about the rules: not cached
   const ignored = result.exitCode === 0;
   _gitIgnoredCache.set(key, ignored);
   return ignored;
