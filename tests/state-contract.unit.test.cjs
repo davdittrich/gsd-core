@@ -1402,7 +1402,7 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
 
   // Grammar: the prefix alphabet (every gitignore-significant character) crossed with every spelling of a
   // user's negation. The entry is written iff no spelling names the file, and git agrees with the outcome.
-  test('prefixEscapeAndNegationProperty', (t) => {
+  test('prefixEscapeAndNegationProperty', () => {
     const esc = (x) => x.replace(/[\\*?[]/g, '\\$&');
     const chars = fc.constantFrom(...(process.platform === 'win32' ? [] : ['\\', '*', '?']), '[', ']', '#', '!', ' ', 'a', 'b');
     // 0, 1, 6 and 7 characters: the project at the repo root, and the bounds of the name length
