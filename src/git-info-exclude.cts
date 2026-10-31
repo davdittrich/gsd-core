@@ -42,7 +42,7 @@ export function excludeFromGit(dir: string, filename: string): void {
     // linked worktrees share this file: two racing publishes may both append the entry, and git reads a duplicated line as one
     const existing = fs.existsSync(exclude) ? fs.readFileSync(exclude, 'utf8') : '';
     const present = splitLines(existing);
-    // a negation of this file in any spelling git reads as naming it is the user's choice to track it (last match wins)
+    // the user chose to track the file if a line is the entry, `!entry`, `!<rel>` or `!<filename>` (last match wins); other glob negations are not read
     const rel = entry.slice(1);
     if ([entry, `!${entry}`, `!${rel}`, `!${escapeGitignore(filename)}`].some((l) => present.includes(l))) return;
     fs.mkdirSync(path.dirname(exclude), { recursive: true });

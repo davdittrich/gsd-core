@@ -1311,6 +1311,8 @@ describe('#3587 per-phase commit_docs override', () => {
             const config = loadConfig(cwd, { persist: false });
             const expected = resolveCommitDocsPolicy(config, null, () => isGitIgnored(cwd, '.planning')).resolved;
             assert.deepStrictEqual(loadConfig(cwd, { persist: false, quiet: true }).commit_docs, config.commit_docs);
+            const thunk = () => isGitIgnored(cwd, '.planning');
+            assert.deepStrictEqual(resolveCommitDocsPolicy(config, null, thunk), require('../gsd-core/bin/lib/config-loader.cjs').resolveCommitDocsTiers(undefined, config.commit_docs, thunk));
             assert.strictEqual(publishStateContract(cwd).published, true);
             const exclude = splitLines(fs.readFileSync(path.join(cwd, '.git', 'info', 'exclude'), 'utf8'));
             assert.strictEqual(exclude.includes('/.planning/state.json'), Boolean(expected));

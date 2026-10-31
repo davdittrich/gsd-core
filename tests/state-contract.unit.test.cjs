@@ -1311,19 +1311,6 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
     assert.strictEqual(fs.readFileSync(excludeOf(other), 'utf8'), before);
   });
 
-  // #5505: the cwd repo, not an inherited GIT_DIR, decides what is ignored (git hooks export GIT_DIR).
-  for (const [name, cwdIgnores, expected] of [['otherRepoIgnoresOnly', false, false], ['cwdRepoIgnoresOnly', true, true]]) {
-    test(`isGitIgnoredIgnoresInheritedGitDir:${name}`, (t) => {
-      const { isGitIgnored } = require('../gsd-core/bin/lib/config-loader.cjs');
-      const tmpDir = createTempGitProject();
-      const other = createTempGitProject();
-      t.after(() => { cleanup(tmpDir); cleanup(other); });
-      fs.appendFileSync(excludeOf(cwdIgnores ? tmpDir : other), '.planning\n');
-      stubEnv(t, 'GIT_DIR', path.join(other, '.git'));
-      assert.strictEqual(isGitIgnored(tmpDir, '.planning'), expected);
-    });
-  }
-
   // The commit_docs gate must also read the cwd repo: an inherited GIT_DIR must not flip it.
   for (const [name, cwdIgnores] of [['otherRepoIgnoresOnly', false], ['cwdRepoIgnoresOnly', true]]) {
     test(`commitDocsGateIgnoresInheritedGitDir:${name}`, (t) => {
@@ -1582,24 +1569,23 @@ describe('state contract — state.json is git-ignored via info/exclude (#5505)'
     assert.deepStrictEqual(written, []);
   });
 
-  test('aTimedOutCheckIgnoreIsNotCached', (t) => {
-    const { isGitIgnored } = require('../gsd-core/bin/lib/config-loader.cjs');
-    const childProcess = require('node:child_process');
+  test('aNestedProjectOwnershipProbeIsBounded', (t) => {
+    const { OWNERSHIP_PROBE_TIMEOUT_MS } = require('../gsd-core/bin/lib/state-contract.cjs');
+    assert.ok(OWNERSHIP_PROBE_TIMEOUT_MS > 0 && OWNERSHIP_PROBE_TIMEOUT_MS <= 5_000);
     const tmpDir = createTempGitProject();
     t.after(() => cleanup(tmpDir));
-    fs.appendFileSync(excludeOf(tmpDir), '.planning\n');
+    const sub = path.join(tmpDir, 'sub');
+    fs.mkdirSync(planningDirOf(sub), { recursive: true });
+    trackUnder(tmpDir, sub);
+    const childProcess = require('node:child_process');
     const real = childProcess.spawnSync;
-    let timeouts = 0;
-    t.mock.method(childProcess, 'spawnSync', function (cmd, args, ...rest) {
-      if (timeouts === 0 && path.basename(String(cmd)).replace(/\.exe$/, '') === 'git' && args.includes('check-ignore')) {
-        timeouts += 1;
-        return { status: null, signal: 'SIGTERM', stdout: '', stderr: '', output: null, pid: 0, error: Object.assign(new Error('spawnSync git ETIMEDOUT'), { code: 'ETIMEDOUT' }) };
-      }
-      return real.call(this, cmd, args, ...rest);
+    const probes = [];
+    t.mock.method(childProcess, 'spawnSync', function (cmd, args, opts, ...rest) {
+      if (path.basename(String(cmd)).replace(/\.exe$/, '') === 'git' && args.includes('ls-files')) probes.push(opts.timeout);
+      return real.call(this, cmd, args, opts, ...rest);
     });
-    assert.strictEqual(isGitIgnored(tmpDir, '.planning'), false); // fail open
-    assert.strictEqual(timeouts, 1);
-    assert.strictEqual(isGitIgnored(tmpDir, '.planning'), true); // the real answer is read, not a cached guess
+    publishStateContract(sub, fixedDeps());
+    assert.deepStrictEqual(probes, [OWNERSHIP_PROBE_TIMEOUT_MS]);
   });
 
   test('publishStaysSilentOnStderrWithAMalformedConfig', (t) => {

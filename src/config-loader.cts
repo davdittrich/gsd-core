@@ -255,6 +255,18 @@ function isGitIgnored(cwd: string, targetPath: string, env?: Record<string, stri
   return ignored;
 }
 
+/** The commit_docs tiers for one decision: phase override, then commit_docs, then an ignored `.planning/`, then the default (#3587, #5505). */
+function resolveCommitDocsTiers(
+  phaseOverride: boolean | undefined,
+  commitDocs: unknown,
+  isPlanningGitIgnored: () => boolean,
+): { resolved: boolean; source: 'phase' | 'config' | 'gitignore' | 'default' } {
+  if (phaseOverride !== undefined) return { resolved: phaseOverride, source: 'phase' };
+  if (!commitDocs) return { resolved: false, source: 'config' };
+  if (isPlanningGitIgnored()) return { resolved: false, source: 'gitignore' };
+  return { resolved: true, source: 'default' };
+}
+
 // ─── Model alias resolution ───────────────────────────────────────────────────
 
 // Catalog-derived (model-catalog.cts) so this vocabulary can never drift from
@@ -1228,6 +1240,7 @@ export = {
   CONFIG_REASON,
   _warnedUnusableConfig,
   isGitIgnored,
+  resolveCommitDocsTiers,
   CONFIG_DEFAULTS,
   _getConfigDefault,
   _getNestedConfigDefault,

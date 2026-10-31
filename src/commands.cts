@@ -1598,7 +1598,8 @@ function resolvePhaseCommitDocsOverride(config: Record<string, unknown>, phaseNu
 }
 
 /**
- * #3587: the four-tier `commit_docs` precedence chain for a single commit —
+ * #3587: the four-tier `commit_docs` precedence chain for a single commit — the tiers live in
+ * `resolveCommitDocsTiers` (src/config-loader.cts); this is `cmdCommit`'s caller of it —
  * `phase_commit_docs.<phase-id>` (tier 1, resolved HERE because this call site
  * is the one place that knows the phase — see 40-design.md "Rejected" §1: NOT
  * inside `loadConfig`, which has no phase context and is called by nearly every
@@ -1621,11 +1622,7 @@ function resolveCommitDocsPolicy(
   phaseNum: string | null,
   isPlanningGitIgnored: () => boolean,
 ): CommitDocsResolution {
-  const phaseOverride = resolvePhaseCommitDocsOverride(config, phaseNum);
-  if (phaseOverride !== undefined) return { resolved: phaseOverride, source: 'phase' };
-  if (!config['commit_docs']) return { resolved: false, source: 'config' };
-  if (isPlanningGitIgnored()) return { resolved: false, source: 'gitignore' };
-  return { resolved: true, source: 'default' };
+  return configLoaderMod.resolveCommitDocsTiers(resolvePhaseCommitDocsOverride(config, phaseNum), config['commit_docs'], isPlanningGitIgnored);
 }
 
 // Reason string per commit_docs-resolution source, for the tier-1/tier-2 skip
@@ -4115,8 +4112,8 @@ function cmdStats(cwd: string, format: string | undefined, raw: boolean): void {
  *
  * The phase is derived from the STAGED `.planning/` paths via the single-
  * owner `detectPhaseNumberFromFiles` (the same helper `cmdCommit` uses), and
- * the policy itself is resolved via the single-owner `resolveCommitDocsPolicy`
- * (also shared with `cmdCommit`) — this function never re-derives phase
+ * the policy itself is resolved via `resolveCommitDocsPolicy`, `cmdCommit`'s caller of the
+ * single-owner `resolveCommitDocsTiers` (src/config-loader.cts) — this function never re-derives phase
  * detection or precedence, so it cannot diverge from `cmdCommit`'s decision
  * for the same staged tree (#3588 Part 1: this guard was previously
  * phase-blind, reading only project-level `commit_docs` and directly

@@ -139,6 +139,7 @@ interface Owners {
   excludeFromGit: typeof import('./git-info-exclude.cjs')['excludeFromGit'];
   loadConfig: typeof import('./config-loader.cjs')['loadConfig'];
   isGitIgnored: typeof import('./config-loader.cjs')['isGitIgnored'];
+  resolveCommitDocsTiers: typeof import('./config-loader.cjs')['resolveCommitDocsTiers'];
   execGit: typeof import('./shell-command-projection.cjs')['execGit'];
   locateRoadmapProgress: typeof import('./roadmap-progress.cjs')['locateRoadmapProgress'];
   isSentinelPhaseId: typeof import('./phase-id.cjs')['isSentinelPhaseId'];
@@ -183,6 +184,7 @@ function owners(): Owners {
     excludeFromGit: gitInfoExcludeMod.excludeFromGit,
     loadConfig: configLoaderMod.loadConfig,
     isGitIgnored: configLoaderMod.isGitIgnored,
+    resolveCommitDocsTiers: configLoaderMod.resolveCommitDocsTiers,
     execGit: shellCommandProjectionMod.execGit,
     locateRoadmapProgress: roadmapProgressMod.locateRoadmapProgress,
     isSentinelPhaseId: phaseIdMod.isSentinelPhaseId,
@@ -406,6 +408,27 @@ export function buildStateContract(cwd: string, deps?: StateContractDeps): State
   };
 }
 
+// Bound for the ownership probe's one `git ls-files` (same 5 s class as the other hot-path git calls).
+export const OWNERSHIP_PROBE_TIMEOUT_MS = 5_000;
+
+/** True when the repo that git-ignores via info/exclude owns the project: a `.git` entry between `stateDir` and the project root, else a tracked file outside `.planning/`. */
+function repoOwnsProject(cwd: string, stateDir: string): boolean {
+  const root = path.resolve(cwd);
+  for (let d = path.resolve(stateDir); ; d = path.dirname(d)) {
+    if (fs.existsSync(path.join(d, '.git'))) return true;
+    if (d === root || d === path.dirname(d)) break;
+  }
+  const r = owners().execGit(['ls-files', '-z', '--', '.', ':(exclude).planning'], { cwd, timeout: OWNERSHIP_PROBE_TIMEOUT_MS });
+  return (r.error as NodeJS.ErrnoException | undefined)?.code === 'ENOBUFS' || (r.exitCode === 0 && r.stdout.length > 0);
+}
+
+/** Append the derived-file exclude entry when the commit policy keeps planning in git and the repo owns the project (the publisher passes no phase override: it has no phase context, D13). */
+function excludeWhenGitOwns(cwd: string, stateDir: string): void {
+  const commitDocs = owners().loadConfig(cwd, { persist: false, quiet: true })['commit_docs'];
+  if (!owners().resolveCommitDocsTiers(undefined, commitDocs, () => owners().isGitIgnored(cwd, '.planning')).resolved) return;
+  if (repoOwnsProject(cwd, stateDir)) owners().excludeFromGit(stateDir, 'state.json');
+}
+
 /**
  * Publish the state-contract snapshot to `<planning>/state.json`. NEVER
  * throws — for any input, ever (acceptance criterion 3: the parent boundary
@@ -455,22 +478,7 @@ export function publishStateContract(cwd: string, deps?: StateContractDeps): { p
     }
 
     try {
-      // Same tiers as cmdCommit's resolveCommitDocsPolicy (commit_docs, then an ignored .planning/), read with
-      // `persist: false, quiet: true`; and only a repo that owns the project gets an entry.
-      const stateDir = path.dirname(statePath);
-      if (owners().loadConfig(cwd, { persist: false, quiet: true })['commit_docs'] && !owners().isGitIgnored(cwd, '.planning')) {
-        const root = path.resolve(cwd);
-        let owned = false;
-        for (let d = path.resolve(stateDir); !owned; d = path.dirname(d)) {
-          owned = fs.existsSync(path.join(d, '.git'));
-          if (d === root || d === path.dirname(d)) break;
-        }
-        if (!owned) {
-          const r = owners().execGit(['ls-files', '-z', '--', '.', ':(exclude).planning'], { cwd, timeout: 5_000 });
-          owned = (r.error as NodeJS.ErrnoException | undefined)?.code === 'ENOBUFS' || (r.exitCode === 0 && r.stdout.length > 0);
-        }
-        if (owned) owners().excludeFromGit(stateDir, 'state.json');
-      }
+      excludeWhenGitOwns(cwd, path.dirname(statePath));
     } catch {
       // REQ-SC-04: ignoring is optional; never perturb the publish result.
     }
