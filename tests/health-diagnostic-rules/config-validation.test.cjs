@@ -885,6 +885,7 @@ describe('W031 — derived state.json still tracked by git', () => {
     assert.equal(diagnostics[0].code, 'W031');
     assert.equal(diagnostics[0].severity, SEVERITY.WARNING);
     assert.equal(diagnostics[0].remedy.action, REMEDY_ACTION.ADVISE);
+    assert.ok(diagnostics[0].remedy.args.command.startsWith('From the project directory (the one holding `.planning/`), run `git'), diagnostics[0].remedy.args.command);
     assert.ok(
       diagnostics[0].remedy.args.command.includes(
         '`git --literal-pathspecs rm --cached --ignore-unmatch -- .planning/state.json .planning/workstreams/ws1/state.json`',
@@ -1029,7 +1030,7 @@ describe('W031 — derived state.json still tracked by git', () => {
     const { spawnSync } = require('node:child_process');
     const bash = resolveInterpreter('bash');
     if (bash === null || spawnSync(bash, ['-c', 'true'], { timeout: GIT_TIMEOUT_MS }).status !== 0) { t.skip('bash unavailable'); return; }
-    const alphabet = ['a', 'Z', '0', ' ', "'", '\\', '"', '$', '\n', '\t', '\x1b', '\x7f', '\u0085', '\u009f', 'é', '-', '/'];
+    const alphabet = ['a', 'Z', '0', ' ', "'", '\\', '"', '$', '\n', '\t', '\x1b', '\x7f', '\u0080', '\u0085', '\u009f', '\x01', 'é', '-', '/'];
     fc.assert(
       fc.property(fc.array(fc.constantFrom(...alphabet), { minLength: 1, maxLength: 8 }), (chars) => {
         const name = chars.join('');

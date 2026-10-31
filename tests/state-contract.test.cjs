@@ -501,6 +501,21 @@ describe('state.json never dirties the tree (#5505)', () => {
     assert.strictEqual(w031(fresh.tmpDir), undefined, 'an untracked, excluded copy raises no W031');
   });
 
+  test('Case B: W031 for a project nested in its repo says to run from the project directory', (t) => {
+    const tmpDir = createTempGitProject();
+    t.after(() => cleanup(tmpDir));
+    const sub = path.join(tmpDir, 'sub');
+    fs.mkdirSync(path.join(sub, '.planning'), { recursive: true });
+    fs.writeFileSync(path.join(sub, '.planning', 'STATE.md'), STATE_MD);
+    fs.writeFileSync(path.join(sub, '.planning', 'state.json'), '{}\n');
+    git(tmpDir, 'add', '-A');
+    git(tmpDir, 'commit', '-q', '-m', 'seed');
+    const warning = JSON.parse(runGsdTools(['validate', 'health'], sub).output).warnings.find((w) => w.code === 'W031');
+    assert.ok(warning, 'validate health must report W031');
+    assert.ok(warning.fix.includes('From the project directory'), warning.fix);
+    assert.ok(warning.fix.includes('-- .planning/state.json`'), warning.fix);
+  });
+
   test('commit --files on an untracked, ignored state.json skips it and still commits the rest', (t) => {
     const { tmpDir, rel } = boundary(t);
     fs.appendFileSync(path.join(tmpDir, rel, 'STATE.md'), '\nedited\n');

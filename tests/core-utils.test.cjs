@@ -1658,6 +1658,15 @@ describe('state.json publish paths (#5505)', () => {
     assert.strictEqual(coreUtils.isStateJsonPublishPath(cwd, '.planning/other/state.json'), true);
   });
 
+  test('the matcher accepts each of the four publish scopes', (t) => {
+    const cwd = fresh(t);
+    mkdirs(cwd, '.planning/a');
+    fs.writeFileSync(path.join(cwd, '.planning', 'a', 'STATE.md'), '');
+    for (const rel of ['.planning/state.json', '.planning/a/state.json', '.planning/workstreams/w/state.json', '.planning/a/workstreams/w/state.json']) {
+      assert.strictEqual(coreUtils.isStateJsonPublishPath(cwd, rel), true, rel);
+    }
+  });
+
   test('the matcher is anchored at both ends and the dot and stars are literal', (t) => {
     const cwd = fresh(t);
     mkdirs(cwd, '.planning/a/b');

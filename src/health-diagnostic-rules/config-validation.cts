@@ -328,8 +328,9 @@ function checkW031(snapshot: PlanningSnapshot): Diagnostic[] {
   const paths = field.value;
   // ANSI-C quoting: `\\` and `'` backslashed, C1 characters as their UTF-8 bytes (what git tracks),
   // every other character through sanitizeLabel so C0/DEL keep their `\n`, `\t`, `\x1b` forms.
-  const ansiC = (p: string): string =>
-    `$'${[...p].map((ch) => ch === '\\' || ch === "'" ? `\\${ch}` : /[\u0080-\u009f]/.test(ch) ? [...Buffer.from(ch)].map((b) => `\\x${b.toString(16)}`).join('') : sanitizeLabel(ch)).join('')}'`;
+  const c1Bytes = (ch: string): string => [...Buffer.from(ch)].map((b) => `\\x${b.toString(16)}`).join('');
+  const ansiCChar = (ch: string): string => (ch === '\\' || ch === "'" ? `\\${ch}` : /[\u0080-\u009f]/.test(ch) ? c1Bytes(ch) : sanitizeLabel(ch));
+  const ansiC = (p: string): string => `$'${[...p].map(ansiCChar).join('')}'`;
   // Tracked names are repository content and health output is read by agents: escape control
   // characters in the message, and quote the pasted command (POSIX single quotes; `$'..'` for a
   // name with control characters) so it pastes as-is.
@@ -345,7 +346,7 @@ function checkW031(snapshot: PlanningSnapshot): Diagnostic[] {
       severity: SEVERITY.WARNING,
       message: `Tracked by git: ${paths.map(sanitizeLabel).join(', ')}. state.json is a derived cache rewritten at every boundary command, so a tracked copy stays modified and /gsd-ship refuses the dirty tree`,
       remedy: adviseRemedy(
-        `Run \`git --literal-pathspecs rm --cached --ignore-unmatch -- ${args}\` once and commit the removal; the file stays on disk, and with commit_docs on GSD's .git/info/exclude entry keeps it ignored from then on`,
+        `From the project directory (the one holding \`.planning/\`), run \`git --literal-pathspecs rm --cached --ignore-unmatch -- ${args}\` once and commit the removal; the file stays on disk, and with commit_docs on GSD's .git/info/exclude entry keeps it ignored from then on`,
       ),
     },
   ];

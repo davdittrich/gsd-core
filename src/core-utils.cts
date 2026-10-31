@@ -596,7 +596,7 @@ const STATE_JSON_SCOPES = [false, true].flatMap((project) =>
     return {
       project,
       pathspec: `:(glob)${glob}`,
-      matcher: new RegExp(`^${glob.replace(/\./g, '\\.').replace(/\*/g, '[^/]+')}$`),
+      matcher: new RegExp(`^${escapeRegex(glob).replace(/\\\*/g, '[^/]+')}$`),
     };
   }));
 const STATE_JSON_PATHSPECS = STATE_JSON_SCOPES.map((scope) => scope.pathspec);
