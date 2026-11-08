@@ -1034,21 +1034,23 @@ function resolveGit(
 
   const cloneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-cap-git-'));
   try {
-    // Clone (copy only — no hooks execute on clone, no npm install).
-    const cloneResult = execGit(['clone', '--depth', '1', '--', parsed.target, cloneDir], { timeout: 60_000 });
-    if (cloneResult.exitCode !== 0) {
-      throw new Error(`git clone failed (exit ${cloneResult.exitCode}): ${cloneResult.stderr}`);
-    }
-
-    // Optional ref checkout. The ref is a commit-ish (tag/branch/sha), NOT a path,
-    // so it goes BEFORE the `--` pathspec terminator (a leading-dash ref is rejected
-    // at parse time, so it cannot be misread as an option here).
-    if (parsed.ref) {
-      const checkoutResult = execGit(['-C', cloneDir, 'checkout', parsed.ref, '--'], { timeout: 60_000 });
-      if (checkoutResult.exitCode !== 0) {
-        throw new Error(
-          `git checkout "${parsed.ref}" failed (exit ${checkoutResult.exitCode}): ${checkoutResult.stderr}`
-        );
+    // Copy only — no npm install; template hooks are disabled for checkout. #5297: a shallow clone holds
+    // only the default-branch tip, so a pinned ref is fetched by name instead (tag, branch or sha;
+    // `tag:`/`sha:` prefixes stripped). Ref and URL sit after `--`; `:`/`+` would be read as refspec syntax.
+    const kind = classifyGitRef(parsed);
+    const ref = kind.value;
+    if (/[:+]/.test(ref)) throw new Error(`Unsafe git ref (refspec syntax not allowed): "${ref}"`);
+    const steps: Array<[string, string[]]> = ref
+      ? [
+          ['init', ['-C', cloneDir, 'init', '-q']],
+          ['fetch', ['-C', cloneDir, 'fetch', '-q', '--depth', '1', '--', parsed.target, kind.kind === 'tag' ? `refs/tags/${ref}` : ref]],
+          ['checkout', ['-C', cloneDir, '-c', 'core.hooksPath=/dev/null', 'checkout', '-q', 'FETCH_HEAD', '--']],
+        ]
+      : [['clone', ['clone', '--depth', '1', '--', parsed.target, cloneDir]]];
+    for (const [name, args] of steps) {
+      const r = execGit(args, { timeout: 60_000 });
+      if (r.exitCode !== 0) {
+        throw new Error(`git ${name}${ref ? ` "${ref}"` : ''} failed (exit ${r.exitCode}): ${r.stderr}`);
       }
     }
 
