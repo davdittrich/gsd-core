@@ -523,25 +523,31 @@ function resolveTierInternal(cwd: string, agentType: string): string {
   return resolveTierFromConfig(loadConfig(cwd), agentType);
 }
 
+/**
+ * The per-agent `model_overrides` entry resolveModelInternal would return for `agentType`, or null
+ * when it has none that applies (absent, empty/falsy, or an unmappable Claude ID). #6213: a caller
+ * that needs to know whether an override really governs the agent uses this one predicate.
+ */
+function resolveModelOverride(config: Record<string, unknown>, agentType: string): string | null {
+  const modelOverrides = config['model_overrides'] as Record<string, string> | null | undefined;
+  // Own-property guard (see resolveTierFromConfig): without it, an agentType of "toString" against
+  // `model_overrides: {}` returned the inherited Function.prototype.toString as the resolved "model".
+  const override = (modelOverrides && Object.hasOwn(modelOverrides, agentType))
+    ? modelOverrides[agentType]
+    : undefined;
+  if (!override) return null;
+  return mapClaudeOverrideForRuntime(override, resolveActiveRuntime(config), agentType);
+}
+
 function resolveModelInternal(cwd: string, agentType: string): string {
   const config = loadConfig(cwd);
 
   // 1. Per-agent override (#2041: map Claude full IDs → Agent-tool aliases on
   // the claude runtime, mirroring the model_policy path #1144; non-Claude
-  // runtimes and non-Claude values pass through verbatim).
-  const modelOverrides = config['model_overrides'] as Record<string, string> | null | undefined;
-  // Own-property guard (see resolveTierFromConfig above): without it, an
-  // agentType of "toString" against `model_overrides: {}` returned the
-  // inherited Function.prototype.toString as the resolved "model" — verified
-  // reachable purely via the CLI, no override value needed.
-  const override = (modelOverrides && Object.hasOwn(modelOverrides, agentType))
-    ? modelOverrides[agentType]
-    : undefined;
-  if (override) {
-    const mapped = mapClaudeOverrideForRuntime(override, resolveActiveRuntime(config), agentType);
-    if (mapped !== null) return mapped;
-    // Unmappable Claude ID — fall through to tier resolution (matches model_policy).
-  }
+  // runtimes and non-Claude values pass through verbatim). A truthy override
+  // that is unmappable falls through to tier resolution (matches model_policy).
+  const appliedOverride = resolveModelOverride(config, agentType);
+  if (appliedOverride !== null) return appliedOverride;
 
   // 2. Compute the tier (#2229: shared with resolveTierFromConfig so the tier a
   // workflow reads and the tier a model is resolved from can never diverge).
@@ -837,8 +843,8 @@ function dynamicRoutingModel(
  * #3703 — the ONE omit decision. resolveModelInternal (step 4) and
  * resolveModelForTier both read it, and so does resolveProviderEscalation, so a
  * first spawn, an escalated spawn and the provider ladder agree on whether the
- * omit gate applies. They share only this decision: their precedence outside
- * the gate still differs (#6214). Honors "omit" when the PROJECT set it
+ * omit gate applies. An attempt that does not escalate the tier goes through
+ * resolveModelInternal outright (#6214). Honors "omit" when the PROJECT set it
  * (#2517 finding #4) or when the active runtime lacks native model aliases; a
  * native-alias runtime ignores an "omit" that came only from the shared
  * ~/.gsd/defaults.json (#2297).
@@ -870,6 +876,21 @@ function omitTierAlias(config: Record<string, unknown>, agentType: string, attem
 function resolveModelForTier(cwd: string, agentType: string, attempt?: number): string {
   const config = loadConfig(cwd);
   const attemptN = Number.isInteger(attempt) && (attempt as number) > 0 ? (attempt as number) : 0;
+
+  // #6214: an attempt that does not move the dynamic_routing tier off the first
+  // spawn's tier IS the first spawn: attempt 0, a max_escalations cap of 0,
+  // escalate_on_failure:false, a saturated heavy tier, or routing off. It
+  // resolves through resolveModelInternal, so resolve-execution --attempt N, the
+  // provider ladder's `from` and the passive adapter report the model that
+  // resolve-model and init report. There model_overrides, model_policy, the
+  // runtime tier map, the omit gate and a model_profile_overrides.claude pin
+  // all outrank tier_models. Only a genuine escalation reaches the steps below.
+  const routedTier = dynamicRoutingTier(config, agentType, attemptN);
+  const firstSpawnTier = dynamicRoutingTier(config, agentType, 0);
+  if (routedTier === null || routedTier === firstSpawnTier) {
+    return resolveModelInternal(cwd, agentType);
+  }
+
   const activeRuntime = resolveActiveRuntime(config);
 
   const modelOverrides = config['model_overrides'] as Record<string, string> | null | undefined;
@@ -896,20 +917,16 @@ function resolveModelForTier(cwd: string, agentType: string, attempt?: number): 
   // A native-alias runtime escalates by tier ALIAS; any other runtime whose
   // gate produced "" stays "" (an explicit non-Claude opt-in that resolved its
   // own tier map at step 3 keeps today's dynamic_routing escalation).
-  // Outside this gate the two entry points still rank dynamic_routing differently (#6214).
   if (omitAppliesFor(cwd, config, activeRuntime)) {
     if (hasNativeModelAliases(activeRuntime)) {
-      if (dynamicRoutingTier(config, agentType, attemptN) !== null) {
-        return omitTierAlias(config, agentType, attemptN);
-      }
+      return omitTierAlias(config, agentType, attemptN);
     } else if (resolveModelInternal(cwd, agentType) === '') {
       return '';
     }
   }
 
-  const alias = dynamicRoutingModel(config, agentType, attemptN);
-  if (alias !== null) return alias;
-  return resolveModelInternal(cwd, agentType);
+  // routedTier is non-null past the #6214 guard, so tier_models names it.
+  return ((config['dynamic_routing'] as Record<string, unknown>)['tier_models'] as Record<string, string>)[routedTier];
 }
 
 /**
@@ -1201,8 +1218,10 @@ export = {
   CLAUDE_AGENT_ALIASES,
   resolveModelPolicy,
   resolveModelInternal,
+  resolveModelOverride,
   resolveTierInternal,
   resolveTierFromConfig,
+  computeProfileTier,
   _resetModelPolicyWarningCacheForTests,
   _resetModelOverrideWarningCacheForTests,
   _setInstallRuntimeMarkerForTests,
